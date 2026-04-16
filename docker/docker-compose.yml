@@ -48,7 +48,19 @@ x-sbtc-signer: &sbtc-signer
     context: ../
     dockerfile: docker/sbtc/Dockerfile
     target: signer
-  entrypoint: "/bin/bash -c '/usr/local/bin/signer -c /signer-config.toml --migrate-db --output-format json'"
+  logging:
+    driver: fluentd
+    options:
+      fluentd-address: "127.0.0.1:24224"
+      fluentd-async: "true"
+      tag: "{{.Name}}"
+  entrypoint:
+    - "/usr/local/bin/signer"
+    - "--config"
+    - "/signer-config.toml"
+    - "--migrate-db"
+    - "--output-format"
+    - "json"
   environment: &sbtc-signer-environment
     RUST_LOG: info,signer=debug
     SIGNER_SIGNER__P2P__LISTEN_ON: tcp://0.0.0.0:4122
@@ -694,12 +706,8 @@ services:
     restart: always
     ports:
       - "127.0.0.1:9598:9598"
+      - "127.0.0.1:24224:24224"
     volumes:
       - ./observability/vector.toml:/etc/vector/vector.toml:ro
-      # This is needed for vector to read logs from other containers
-      - /var/run/docker.sock:/var/run/docker.sock
-    # This is needed for localhost networking
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     profiles:
       - observability

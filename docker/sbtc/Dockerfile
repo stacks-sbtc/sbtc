@@ -1,66 +1,46 @@
-FROM rust:1.94.0-slim-bookworm AS builder
+FROM rust:1.94.1-slim-trixie AS builder
 
 # Install dependencies.
-RUN apt-get update
-RUN apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang \
     libclang-dev \
-    git \
-    pkg-config \
-    libssl-dev \
     make \
-    protobuf-compiler \
     npm \
-    default-jre
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN npm install -g pnpm@9
-
-# Download the sbtc code base so that the initial build is done with
-# an appropriate version of the code and the result can be cached.
-WORKDIR /code
-RUN git clone https://github.com/stacks-sbtc/sbtc.git
-WORKDIR /code/sbtc
-
-ARG GIT_BRANCH=main
-RUN git checkout $GIT_BRANCH
-
-# Run an install that we'll cache the result of and then build the code
-# only install pnpm dependencies because we don't need the python venvs.
-RUN make install-pnpm && make build
 
 # Build the codebase from the local sources.
 # -------------------------------------------
-# We first remove the existing sources so that the there is no conflict
-# when building from the sources copied over.
-RUN rm -rf sbtc signer emily emily_sidecar emily_cron blocklist-client blocklist-openapi-gen .generated-sources protobufs
+WORKDIR /code/sbtc
 COPY . /code/sbtc/
-RUN make install-pnpm && make build
+
+# Build signer and blocklist client.
+# -------------------------------------
+RUN cargo build --locked --bin signer --bin blocklist-client
 
 # Build Emily Server.
 # --------------------
 ARG EMILY_SERVER_BUILD_ARGS=""
-RUN cargo build --bin emily-server $EMILY_SERVER_BUILD_ARGS
+RUN cargo build --locked --bin emily-server $EMILY_SERVER_BUILD_ARGS
 
 # Build Emily AWS setup.
 # -----------------------
 ARG AWS_STAGE=local
 ARG TABLES_ONLY=true
-RUN make emily-cdk-synth
+RUN make install-pnpm && make emily-cdk-synth
 
 # Create Docker image to run the signer.
 # ---------------------------------------
-FROM debian:bookworm-slim AS signer
+FROM debian:trixie-slim AS signer
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /code/sbtc/target/debug/signer /usr/local/bin/signer
-RUN apt-get update \
-    && apt-get install -y ca-certificates --no-install-recommends \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-ENTRYPOINT ["/usr/local/bin/signer --config /signer-config.toml --migrate-db"]
+ENTRYPOINT ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
 
 # Create Docker image for the blocklist client.
 # ----------------------------------------------
-FROM debian:bookworm-slim AS blocklist-client
+FROM debian:trixie-slim AS blocklist-client
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /code/sbtc/target/debug/blocklist-client /usr/local/bin/blocklist-client
-RUN apt-get update \
-    && apt-get install -y ca-certificates --no-install-recommends \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
 ENTRYPOINT ["/usr/local/bin/blocklist-client"]
 
 # Create Docker image to setup the AWS resources for Emily.
@@ -81,7 +61,7 @@ ENTRYPOINT ["python3", "/code/initialize.py"]
 
 # Create Docker image to run the emily server.
 # ---------------------------------------------
-FROM debian:bookworm-slim AS emily-server
+FROM debian:trixie-slim AS emily-server
 WORKDIR /code
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /code/sbtc/target/debug/emily-server /usr/local/bin/emily-server
