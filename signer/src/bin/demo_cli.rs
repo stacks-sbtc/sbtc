@@ -55,6 +55,8 @@ const DEMO_BITCOIN_ADDR: &str = "bcrt1qezfmjvnaeu66wm52h7885mccjfh9lmh2v4kf8n";
 const DEMO_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 
 // We can't use the config since we need access to the main node, not the follower.
+// That's because for some operations (funding, deposit creation) we sign transactions
+// with the node wallet that's created by the devenv miner script on the main node.
 const BITCOIN_RCP_URL: &str = "http://127.0.0.1:18442/wallet/depositor";
 
 #[derive(Debug, thiserror::Error)]
