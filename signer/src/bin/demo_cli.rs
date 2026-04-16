@@ -192,8 +192,9 @@ struct ReclaimArgs {
     #[clap(long, default_value = "0")]
     vout: u64,
     /// The key to use to sign for the reclaim, if a signature is required.
-    #[clap(long = "private-key")]
-    private_key: Option<String>,
+    /// If empty, no signature is used when attempting to spend the deposit.
+    #[clap(long = "private-key", default_value = DEMO_PRIVATE_KEY)]
+    private_key: String,
     /// The BTC recipient.
     #[clap(long, default_value = DEMO_BITCOIN_ADDR)]
     recipient: String,
@@ -419,8 +420,8 @@ async fn exec_reclaim(ctx: &Context, args: ReclaimArgs) -> Result<(), Error> {
 
     let mut witness_data = Vec::new();
 
-    if let Some(private_key) = args.private_key.as_deref() {
-        let private_key = PrivateKey::from_str(private_key)?;
+    if !args.private_key.is_empty() {
+        let private_key = PrivateKey::from_str(&args.private_key)?;
         let keypair = secp256k1::Keypair::from_secret_key(SECP256K1, &private_key.into());
 
         let prevout = TxOut {
