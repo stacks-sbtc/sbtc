@@ -297,10 +297,10 @@ where
                     | SignerEvent::P2P(P2PEvent::MessageReceived(msg)) => {
                         match self.handle_signer_message(&msg).await {
                             Ok(()) => {}
-                            // These errors can happen when libp2p broadcasts a message that has
-                            // already been processed, leading to a harmless rejection of the
-                            // message. It's nice to know when it happens, but it isn't a problem
-                            // that requires action, like some of our other errors.
+                            // These errors can occur when we receive a duplicate message that has
+                            // already been processed, resulting in a harmless rejection. It's nice
+                            // to know when it happens, but it isn't a problem that requires action,
+                            // unlike some of our other errors.
                             Err(
                                 error @ (Error::InvalidPresignRequest(_)
                                 | Error::StacksRequestAlreadySigned(..)
