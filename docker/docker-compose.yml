@@ -51,7 +51,7 @@ x-sbtc-signer: &sbtc-signer
   logging:
     driver: fluentd
     options:
-      fluentd-address: "localhost:24224"
+      fluentd-address: "127.0.0.1:24224"
       fluentd-async: "true"
       tag: "{{.Name}}"
   entrypoint:
@@ -682,8 +682,5 @@ services:
       - "127.0.0.1:24224:24224"
     volumes:
       - ./observability/vector.toml:/etc/vector/vector.toml:ro
-    # This is needed for localhost networking
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     profiles:
       - observability
