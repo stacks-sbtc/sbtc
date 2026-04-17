@@ -57,7 +57,7 @@ const DEMO_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 // We can't use the config since we need access to the main node, not the follower.
 // That's because for some operations (funding, deposit creation) we sign transactions
 // with the node wallet that's created by the devenv miner script on the main node.
-const BITCOIN_RCP_URL: &str = "http://127.0.0.1:18442/wallet/depositor";
+const BITCOIN_RPC_URL: &str = "http://127.0.0.1:18442/wallet/depositor";
 
 #[derive(Debug, thiserror::Error)]
 #[allow(clippy::enum_variant_names)]
@@ -341,7 +341,7 @@ fn get_emily_config(settings: &Settings) -> EmilyConfig {
 
 fn get_bitcoin_client() -> BitcoinClient {
     BitcoinClient::new(
-        BITCOIN_RCP_URL,
+        BITCOIN_RPC_URL,
         bitcoincore_rpc::Auth::UserPass("devnet".into(), "devnet".into()),
     )
     .expect("Failed to create Bitcoin RPC client")
