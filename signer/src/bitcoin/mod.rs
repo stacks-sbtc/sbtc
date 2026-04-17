@@ -80,9 +80,12 @@ pub trait BitcoinInteract: Sync + Send {
         block_hash: &BlockHash,
     ) -> impl Future<Output = Result<Option<BitcoinTxInfo>, Error>> + Send;
 
-    /// Estimate fee rate
-    // This should be implemented with the help of the `fees::EstimateFees` trait
-    fn estimate_fee_rate(&self) -> impl std::future::Future<Output = Result<f64, Error>> + Send;
+    /// Estimate the fee rate (in sats/vbyte) targeting confirmation within
+    /// `num_blocks` blocks.
+    fn estimate_fee_rate(
+        &self,
+        num_blocks: u16,
+    ) -> impl std::future::Future<Output = Result<f64, Error>> + Send;
 
     /// Broadcast transaction
     fn broadcast_transaction(

@@ -10,10 +10,9 @@ on:
         type: choice
         options:
           - environment/sbtc-devnet
-          - environment/sbtc-testnet
-          - environment/sbtc-mainnet
           - environment/sbtc-staging
           - environment/sbtc-private-mainnet
+          - environment/sbtc-mainnet
   pull_request:
     branches:
       - main
@@ -46,7 +45,7 @@ jobs:
       - name: Resolve Environment
         id: set_env
         run: |
-          ALLOWED_ENVS=("environment/sbtc-devnet" "environment/sbtc-testnet" "environment/sbtc-mainnet" "environment/sbtc-staging" "environment/sbtc-private-mainnet")
+          ALLOWED_ENVS=("environment/sbtc-devnet" "environment/sbtc-mainnet" "environment/sbtc-staging" "environment/sbtc-private-mainnet")
           SHOULD_RUN=true
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then

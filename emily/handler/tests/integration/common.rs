@@ -34,7 +34,7 @@ pub async fn new_test_setup() -> (Configuration, EmilyTables) {
         ..Default::default()
     };
 
-    let mut headers = reqwest_012::header::HeaderMap::new();
+    let mut headers = reqwest::header::HeaderMap::new();
     for (shortname, table_name) in [
         ("deposit", &tables.deposit),
         ("withdrawal", &tables.withdrawal),
@@ -43,12 +43,12 @@ pub async fn new_test_setup() -> (Configuration, EmilyTables) {
         ("throttle", &tables.throttle),
     ] {
         headers.insert(
-            reqwest_012::header::HeaderName::from_str(&format!("x-context-{shortname}")).unwrap(),
-            reqwest_012::header::HeaderValue::from_str(table_name).unwrap(),
+            reqwest::header::HeaderName::from_str(&format!("x-context-{shortname}")).unwrap(),
+            reqwest::header::HeaderValue::from_str(table_name).unwrap(),
         );
     }
 
-    configuration.client = reqwest_012::ClientBuilder::new()
+    configuration.client = reqwest::ClientBuilder::new()
         .default_headers(headers)
         .build()
         .unwrap();

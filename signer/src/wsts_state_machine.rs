@@ -28,7 +28,6 @@ use sha2::Digest as _;
 use sha2::Sha256;
 use wsts::common::PolyCommitment;
 use wsts::net::Message;
-use wsts::net::Packet;
 use wsts::net::SignatureType;
 use wsts::state_machine::OperationResult;
 use wsts::state_machine::StateMachine as _;
@@ -105,23 +104,6 @@ pub fn construct_signing_round_id(message: &[u8], bitcoin_chain_tip: &BitcoinBlo
         .expect("BUG: failed to take first 8 bytes of digest");
 
     u64::from_le_bytes(u64_bytes)
-}
-
-/// A trait for converting a message into another type.
-pub trait FromMessage {
-    /// Convert the given message into the implementing type.
-    fn from_message(message: &Message) -> Self
-    where
-        Self: Sized;
-}
-
-impl FromMessage for Packet {
-    fn from_message(message: &Message) -> Self {
-        Packet {
-            msg: message.clone(),
-            sig: Vec::new(),
-        }
-    }
 }
 
 /// Wrapper for a WSTS FIRE coordinator state machine.
@@ -217,16 +199,7 @@ where
     fn process_message(
         &mut self,
         message: &Message,
-    ) -> Result<(Option<Packet>, Option<OperationResult>), Error> {
-        let packet = Packet::from_message(message);
-        self.process_packet(&packet)
-    }
-
-    /// Process the given packet.
-    fn process_packet(
-        &mut self,
-        packet: &Packet,
-    ) -> Result<(Option<Packet>, Option<OperationResult>), Error>;
+    ) -> Result<(Option<Message>, Option<OperationResult>), Error>;
 
     /// Start a signing round with the given message and signature type.
     fn start_signing_round(
@@ -234,7 +207,7 @@ where
         message: &[u8],
         bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
-    ) -> Result<Packet, Error>;
+    ) -> Result<Message, Error>;
 }
 
 impl WstsCoordinator for FireCoordinator {
@@ -268,11 +241,6 @@ impl WstsCoordinator for FireCoordinator {
             threshold: threshold as u32,
             dkg_threshold: num_signers,
             message_private_key: message_private_key.into(),
-            dkg_public_timeout: None,
-            dkg_private_timeout: None,
-            dkg_end_timeout: None,
-            nonce_timeout: None,
-            sign_timeout: None,
             signer_key_ids,
             signer_public_keys,
         };
@@ -332,12 +300,12 @@ impl WstsCoordinator for FireCoordinator {
         Ok(coordinator)
     }
 
-    fn process_packet(
+    fn process_message(
         &mut self,
-        packet: &Packet,
-    ) -> Result<(Option<Packet>, Option<OperationResult>), Error> {
+        message: &Message,
+    ) -> Result<(Option<Message>, Option<OperationResult>), Error> {
         self.0
-            .process_message(packet)
+            .process_message(message)
             .map_err(Error::wsts_coordinator)
     }
 
@@ -346,7 +314,7 @@ impl WstsCoordinator for FireCoordinator {
         message: &[u8],
         bitcoin_chain_tip: &BitcoinBlockHash,
         signature_type: SignatureType,
-    ) -> Result<Packet, Error> {
+    ) -> Result<Message, Error> {
         // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198
         // is merged and we updated the WSTS dependency with those changes.
         self.0.current_sign_id = construct_signing_round_id(message, bitcoin_chain_tip);
@@ -387,11 +355,6 @@ impl WstsCoordinator for FrostCoordinator {
             threshold: threshold as u32,
             dkg_threshold: num_signers,
             message_private_key: message_private_key.into(),
-            dkg_public_timeout: None,
-            dkg_private_timeout: None,
-            dkg_end_timeout: None,
-            nonce_timeout: None,
-            sign_timeout: None,
             signer_key_ids,
             signer_public_keys,
         };
@@ -453,12 +416,12 @@ impl WstsCoordinator for FrostCoordinator {
         Ok(coordinator)
     }
 
-    fn process_packet(
+    fn process_message(
         &mut self,
-        packet: &Packet,
-    ) -> Result<(Option<Packet>, Option<OperationResult>), Error> {
+        message: &Message,
+    ) -> Result<(Option<Message>, Option<OperationResult>), Error> {
         self.0
-            .process_message(packet)
+            .process_message(message)
             .map_err(Error::wsts_coordinator)
     }
 
@@ -467,7 +430,7 @@ impl WstsCoordinator for FrostCoordinator {
         message: &[u8],
         _: &BitcoinBlockHash,
         signature_type: SignatureType,
-    ) -> Result<Packet, Error> {
+    ) -> Result<Message, Error> {
         // The current sign ID is private in the FROST coordinator so we
         // cannot set it.
         // TODO: Revisit when https://github.com/stacks-sbtc/wsts/pull/198

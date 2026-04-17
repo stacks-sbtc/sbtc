@@ -83,9 +83,8 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
             .await
     }
 
-    async fn estimate_fee_rate(&self) -> Result<f64, Error> {
-        // TODO(542)
-        self.exec(|client, _| BitcoinInteract::estimate_fee_rate(client))
+    async fn estimate_fee_rate(&self, num_blocks: u16) -> Result<f64, Error> {
+        self.exec(|client, _| BitcoinInteract::estimate_fee_rate(client, num_blocks))
             .await
     }
 

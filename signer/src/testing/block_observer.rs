@@ -283,7 +283,7 @@ impl BitcoinInteract for TestHarness {
             .cloned())
     }
 
-    async fn estimate_fee_rate(&self) -> Result<f64, Error> {
+    async fn estimate_fee_rate(&self, _num_blocks: u16) -> Result<f64, Error> {
         unimplemented!()
     }
 

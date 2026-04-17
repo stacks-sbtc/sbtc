@@ -376,8 +376,8 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
         self.inner.lock().await.get_tx_info(txid, block_hash).await
     }
 
-    async fn estimate_fee_rate(&self) -> Result<f64, Error> {
-        self.inner.lock().await.estimate_fee_rate().await
+    async fn estimate_fee_rate(&self, num_blocks: u16) -> Result<f64, Error> {
+        self.inner.lock().await.estimate_fee_rate(num_blocks).await
     }
 
     async fn broadcast_transaction(&self, tx: &bitcoin::Transaction) -> Result<(), Error> {

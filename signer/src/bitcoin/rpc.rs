@@ -427,8 +427,8 @@ impl BitcoinCoreClient {
     }
 
     /// Fetch and decode raw transaction from bitcoin-core using the
-    /// getrawtransaction RPC with a verbosity of 1 [1]. None is returned if
-    /// the node cannot find the transaction in a bitcoin block or the
+    /// getrawtransaction RPC with a verbosity of 1 [1]. None is returned
+    /// if the node cannot find the transaction in a bitcoin block or the
     /// mempool.
     ///
     /// # Notes
@@ -436,12 +436,12 @@ impl BitcoinCoreClient {
     /// By default, this call only returns a transaction if it is in the
     /// mempool. If -txindex is enabled on bitcoin-core and no blockhash
     /// argument is passed, it will return the transaction if it is in the
-    /// mempool or any block. We do not require -txindex to be enabled (same with
-    /// stacks-core[2]) so this should work with transactions in either
-    /// the mempool and a bitcoin block.
+    /// mempool or any block. We do not require -txindex to be enabled
+    /// (same with stacks-core[2]), so we only claim that this function
+    /// works with transactions in the mempool.
     ///
     /// [1]: <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
-    /// [2]: <https://docs.stacks.co/guides-and-tutorials/run-a-miner/mine-mainnet-stacks-tokens>
+    /// [2]: <https://docs.stacks.co/operate/run-a-node/run-a-pruned-bitcoin-node>
     #[cfg(any(test, feature = "testing"))]
     pub fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         let args = [
@@ -472,19 +472,20 @@ impl BitcoinCoreClient {
     ///
     /// # Notes
     ///
+    /// This function can return an incorrect response if our bitcoin node
+    /// detects a reorg in the middle of this function call and the reorg
+    /// affects the outpoint in question.
+    ///
     /// This function returns Ok(None) if:
     /// * the associated output has been spent.
     /// * the associated output is not confirmed in a block on the
     ///   canonical bitcoin blockchain.
-    /// * the height of the associated block confirming the transaction
-    ///   that created the given output is not found in bitcoin core using
-    ///   the `getblockhash` RPC. This condition should never happen.
     ///
     /// The documentation of the `getblockhash` RPC can be found at:
     /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblockhash/>
     pub fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
-        // This will return Some(_) result if the transaction is confirmed
-        // in a canonical block.
+        // This returns Some(_) if the transaction is confirmed in a canonical
+        // block and unspent.
         let Some(out) = self.get_tx_out(outpoint, false)? else {
             return Ok(None);
         };
@@ -512,7 +513,6 @@ impl BitcoinCoreClient {
                 block_hash,
                 is_coinbase: out.coinbase,
             })),
-            Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
             Err(err) => Err(Error::BitcoinCoreGetBlockHash(err, *confirmation_height)),
         }
     }
@@ -651,17 +651,17 @@ impl BitcoinCoreClient {
     /// Modified from the bitcoin-core docs[1]:
     ///
     /// Bitcoin-core has two different modes for fee rate estimation,
-    /// "conservative" and "economical". We use the "conservative" estimate
-    /// because it is more likely to be sufficient for the desired target,
-    /// but is not as responsive to short term drops in the prevailing fee
-    /// market when compared to the "economical" fee rate. Also, the docs
-    /// mention the response is in BTC/kB, but from the comments in
-    /// bitcoin-core[2] this is really BTC/kvB (kvB is kilo-vbyte).
+    /// "conservative" and "economical". We use "economical" since we are fine
+    /// with a higher risk of confirmation delay in favor of generally lower
+    /// fees.
+    ///
+    /// Also, the docs mention the response is in BTC/kB, but from the comments
+    /// in bitcoin-core[2] this is really BTC/kvB (kvB is kilo-vbyte).
     ///
     /// [^1]: https://developer.bitcoin.org/reference/rpc/estimatesmartfee.html
     /// [^2]: https://github.com/bitcoin/bitcoin/blob/d367a4e36f7357c4ebd018e8e1c9c5071db2e1c2/src/rpc/fees.cpp#L90-L91
     pub fn estimate_fee_rate(&self, num_blocks: u16) -> Result<FeeEstimate, Error> {
-        let estimate_mode = Some(EstimateMode::Conservative);
+        let estimate_mode = Some(EstimateMode::Economical);
         let resp = self
             .inner
             .estimate_smart_fee(num_blocks, estimate_mode)
@@ -775,11 +775,8 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_tx_info(txid, block_hash)
     }
 
-    async fn estimate_fee_rate(&self) -> Result<f64, Error> {
-        // TODO(542): This function is supposed to incorporate other fee
-        // estimation methods, in particular the ones in the
-        // src/bitcoin/fees.rs module.
-        self.estimate_fee_rate(1)
+    async fn estimate_fee_rate(&self, num_blocks: u16) -> Result<f64, Error> {
+        self.estimate_fee_rate(num_blocks)
             .map(|estimate| estimate.sats_per_vbyte)
     }
 
