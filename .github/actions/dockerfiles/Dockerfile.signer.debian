@@ -19,6 +19,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-x86-64-linux-gnu \
     g++-x86-64-linux-gnu \
     findutils \
+    # TODO: remove this once everybody removed envsubst
+    # gettext provides envsubst
+    gettext \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Add the Rust target for the target architecture.
@@ -53,10 +56,6 @@ RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)"
 FROM debian:trixie-slim AS signer
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /output/signer /usr/local/bin/signer
-
 # TODO: remove this once everybody removed envsubst
-# gettext provides envsubst
-RUN apt-get install -y gettext --no-install-recommends && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
+COPY --from=build /usr/bin/envsubst /usr/bin/envsubst
 ENTRYPOINT ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
