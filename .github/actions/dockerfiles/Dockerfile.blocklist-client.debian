@@ -51,5 +51,4 @@ RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)"
 FROM debian:trixie-slim AS blocklist-client
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /output/blocklist-client /usr/local/bin/blocklist-client
-
 ENTRYPOINT ["/usr/local/bin/blocklist-client"]
