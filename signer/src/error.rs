@@ -49,6 +49,15 @@ pub enum Error {
     #[error("unexpected state machine id in the given context: {0:?}")]
     UnexpectedStateMachineId(crate::wsts_state_machine::StateMachineId),
 
+    /// Unexpected [`wsts::errors::CommonError`] in the given context.
+    #[error("unexpected from WSTS error: {0}")]
+    UnexpectedWstsError(#[from] wsts::errors::CommonError),
+
+    /// The saved signer state did not have correct number of PartyState
+    /// objects, which is always exactly one.
+    #[error("the saved signer state did not have correct number of PartyState objects")]
+    InvalidSignerState,
+
     /// An IO error was returned from the [`bitcoin`] library. This is usually an
     /// error that occurred during encoding/decoding of bitcoin types.
     #[error("an io error was returned from the bitcoin library: {0}")]
