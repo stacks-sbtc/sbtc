@@ -3,6 +3,7 @@
 use std::time::Duration;
 use std::{ops::Deref, sync::Arc};
 
+use bitcoin::OutPoint;
 use bitcoin::{Amount, Txid};
 use bitcoincore_rpc_json::GetTxOutResult;
 use blockstack_lib::{
@@ -15,6 +16,7 @@ use tokio::sync::{Mutex, broadcast};
 use tokio::time::error::Elapsed;
 
 use crate::bitcoin::GetTransactionFeeResult;
+use crate::bitcoin::rpc::OutPointSummary;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
 use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
@@ -359,6 +361,10 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
 
     async fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         self.inner.lock().await.get_tx(txid).await
+    }
+
+    async fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        self.inner.lock().await.get_utxo_info(outpoint).await
     }
 
     async fn get_tx_info(

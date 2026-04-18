@@ -139,6 +139,10 @@ start_height = $STACKS_32_HEIGHT
 epoch_name = "3.3"
 start_height = $STACKS_33_HEIGHT
 
+[[burnchain.epochs]]
+epoch_name = "3.4"
+start_height = $STACKS_34_HEIGHT
+
 [[ustx_balance]]
 address = "ST24VB7FBXCBV6P0SRDSPSW0Y2J9XHDXNHW9Q8S7H" # sBTC signer/Stacker 1
 amount = 80000000000000000
