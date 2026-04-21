@@ -175,7 +175,7 @@ impl BitcoinPreSignRequest {
             });
         }
 
-        let current_fee_rate = bitcoin_client.estimate_fee_rate().await?;
+        let current_fee_rate = bitcoin_client.estimate_fee_rate(1).await?;
 
         if self.fee_rate > current_fee_rate + 3.0 {
             return Err(Error::PreSignInvalidFeeRate(self.fee_rate));

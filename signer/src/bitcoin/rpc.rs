@@ -890,11 +890,7 @@ where
     // descendants then this will just result in an empty list.
     let descendant_fees = try_join_all(descendant_txids.iter().map(|txid| {
         let bitcoin_client = bitcoin_client.clone();
-        async move {
-            bitcoin_client
-                .get_transaction_fee(txid)
-                .await
-        }
+        async move { bitcoin_client.get_transaction_fee(txid).await }
     }))
     .await?;
 
