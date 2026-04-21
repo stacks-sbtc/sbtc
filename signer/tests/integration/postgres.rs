@@ -32,6 +32,7 @@ use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::KeyRotationEvent;
 use signer::storage::model::SweptWithdrawalRequest;
 use signer::storage::model::WithdrawalRequest;
+use signer::storage::postgres::PGSQL_MIGRATIONS;
 use signer::testing::IterTestExt as _;
 use signer::testing::storage::DbReadTestExt as _;
 use strum::IntoEnumIterator as _;
@@ -4850,6 +4851,189 @@ async fn get_deposit_request_returns_returns_inserted_deposit_request() {
     signer::testing::storage::drop_db(db).await;
 }
 
+/// This test checks that the max_fee column is migrated correctly in the
+/// 0021__alter_max_fee_column.sql migration. This is done by:
+/// 1. creating a table that is just like the old deposit_requests table,
+/// 2. inserting deposit requests into both the old table and the new table,
+/// 3. running the migration against the old version of the table.
+/// 4. fetching the deposit requests from both versions of the table and checking that they match.
+#[tokio::test]
+async fn deposit_requests_max_fee_migration() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    // Let's create some deposits requests and write them to the usual
+    // table in the database.
+    let deposit_request1: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+    let deposit_request2: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+
+    // Let's create a new deposit_requests2 table that is just like
+    // deposit_requests table before the max_fee migration.
+    sqlx::raw_sql(
+        r#"
+        create table sbtc_signer.deposit_requests2
+        (
+            txid                   bytea                                              not null,
+            output_index           integer                                            not null,
+            spend_script           bytea                                              not null,
+            recipient              text                                               not null,
+            amount                 bigint                                             not null,
+            lock_time              bigint                                             not null,
+            signers_public_key     bytea                                              not null,
+            sender_script_pub_keys bytea[]                                            not null,
+            created_at             timestamp with time zone default CURRENT_TIMESTAMP not null,
+            reclaim_script_hash    bytea                                              not null,
+            max_fee                bigint                                             not null,
+            primary key (txid, output_index)
+        );
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    async fn get_deposit_request2(
+        db: &PgStore,
+        txid: &model::BitcoinTxId,
+        output_index: u32,
+    ) -> Result<Option<model::DepositRequest>, Error> {
+        sqlx::query_as::<_, model::DepositRequest>(
+            r#"
+            SELECT txid
+                 , output_index
+                 , spend_script
+                 , reclaim_script_hash
+                 , recipient
+                 , amount
+                 , max_fee
+                 , lock_time
+                 , signers_public_key
+                 , sender_script_pub_keys
+            FROM sbtc_signer.deposit_requests2
+            WHERE txid = $1
+              AND output_index = $2
+            "#,
+        )
+        .persistent(false)
+        .bind(txid)
+        .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
+        .fetch_optional(db.pool())
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
+    // Let's insert these deposit requests into both versions of the
+    // deposit requests table.
+    for deposit in [&deposit_request1, &deposit_request2] {
+        db.write_deposit_request(deposit).await.unwrap();
+        sqlx::query(
+            "INSERT INTO sbtc_signer.deposit_requests2
+              ( txid
+              , output_index
+              , spend_script
+              , reclaim_script_hash
+              , recipient
+              , amount
+              , max_fee
+              , lock_time
+              , signers_public_key
+              , sender_script_pub_keys
+              )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT DO NOTHING",
+        )
+        .bind(deposit.txid)
+        .bind(i32::try_from(deposit.output_index).unwrap())
+        .bind(&deposit.spend_script)
+        .bind(&deposit.reclaim_script_hash)
+        .bind(&deposit.recipient)
+        .bind(i64::try_from(deposit.amount).unwrap())
+        .bind(i64::try_from(deposit.max_fee).unwrap())
+        .bind(i64::from(deposit.lock_time))
+        .bind(deposit.signers_public_key)
+        .bind(&deposit.sender_script_pub_keys)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        // Trying to get the deposit requests from the new table should
+        // fail until we run the migration.
+        let result = get_deposit_request2(&db, &deposit.txid, deposit.output_index).await;
+        assert!(result.is_err());
+    }
+
+    // Now we run the migration against the new table
+    let migration_file = PGSQL_MIGRATIONS
+        .files()
+        .find(|file| {
+            file.path()
+                .file_name()
+                .map(|f| f.to_string_lossy())
+                .unwrap()
+                == "0021__alter_max_fee_column.sql"
+        })
+        .unwrap();
+
+    let new_migration_file = migration_file
+        .contents_utf8()
+        .unwrap()
+        .replace("deposit_requests", "deposit_requests2");
+
+    sqlx::raw_sql(&new_migration_file)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+    // Okay, and let's check that everything matches what they are supposed
+    // to match.
+    for deposit in [deposit_request1, deposit_request2] {
+        // Fetch deposit requests from the database
+        let fetched_deposit_v1 = db
+            .get_deposit_request(&deposit.txid, deposit.output_index)
+            .await
+            .unwrap()
+            .unwrap();
+        let fetched_deposit_v2 = get_deposit_request2(&db, &deposit.txid, deposit.output_index)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fetched_deposit_v1, deposit);
+        assert_eq!(fetched_deposit_v2, deposit);
+    }
+
+    signer::testing::storage::drop_db(db).await;
+}
+
+/// Check that the max_fee column in deposit_requests stores bytes in
+/// big-endian order.
+#[tokio::test]
+async fn deposit_requests_max_fee_stored_as_big_endian() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    // Use a value whose big-endian and little-endian representations differ.
+    let max_fee: u64 = 0x0123_4567_89ab_cdef;
+    assert_ne!(max_fee.to_be_bytes(), max_fee.to_le_bytes());
+
+    let mut deposit_request: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+    deposit_request.max_fee = max_fee;
+
+    db.write_deposit_request(&deposit_request).await.unwrap();
+
+    let stored_max_fee = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT max_fee FROM sbtc_signer.deposit_requests WHERE txid = $1 AND output_index = $2",
+    )
+    .bind(deposit_request.txid)
+    .bind(i32::try_from(deposit_request.output_index).unwrap())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(stored_max_fee.as_slice(), max_fee.to_be_bytes());
+
+    signer::testing::storage::drop_db(db).await;
+}
+
 /// This struct is for testing different conditions when attempting to
 /// retrieve the signers' UTXO.
 struct ReorgDescription<const N: usize> {
@@ -7863,5 +8047,471 @@ mod sqlx_transactions {
         assert!(db.get_stacks_block(&stx_a.block_hash).await?.is_none());
 
         Ok(())
+    }
+}
+
+mod canonical_bitcoin_blockchain {
+    use super::*;
+    use signer::testing::blocks::BitcoinChain;
+
+    /// Set the is_canonical column to NULL for all bitcoin blocks.
+    async fn clear_is_canonical_bitcoin_blocks(db: &PgStore) {
+        sqlx::query("UPDATE sbtc_signer.bitcoin_blocks SET is_canonical = NULL")
+            .execute(db.pool())
+            .await
+            .unwrap();
+    }
+
+    /// In this test, we check that the
+    /// DbWrite::set_canonical_bitcoin_blockchain() function sets
+    /// is_canonical = TRUE in the bitcoin_blocks table for all blocks in
+    /// the chain along the chain tip. We also check that if forked blocks
+    /// are added to the database along with canonical blocks, that the
+    /// forked blocks are marked as non-canonical, assuming that neither
+    /// the canonical or non-canonical blocks have been marked at all.
+    #[tokio::test]
+    async fn test_set_canonical_bitcoin_blockchain() {
+        let db = testing::storage::new_test_database().await;
+
+        // Create a chain of 5 bitcoin blocks
+        let canonical_chain = BitcoinChain::new_with_length(5);
+
+        // Insert all blocks from the canonical chain into the database
+        for block in &canonical_chain {
+            db.write_bitcoin_block(block).await.unwrap();
+        }
+
+        // Get the chain tip from the canonical chain
+        let chain_tip = canonical_chain.chain_tip().block_hash;
+
+        // Initially, all blocks should have is_canonical = NULL
+        // Verify that no blocks have is_canonical IS NOT NULL
+        let has_non_null_canonical: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 
+                FROM sbtc_signer.bitcoin_blocks 
+                WHERE is_canonical IS NOT NULL
+            )",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert!(!has_non_null_canonical);
+
+        // Call set_canonical_bitcoin_blockchain with the chain tip
+        db.set_canonical_bitcoin_blockchain(&chain_tip)
+            .await
+            .unwrap();
+
+        // Verify that all blocks in the canonical chain are marked as canonical
+        for block in &canonical_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Create a fork: blocks at the same height as some canonical blocks but with different hashes
+        // This fork starts at height 2 (the third block)
+        let fork_chain = canonical_chain.fork_at_height(2u64, 2);
+
+        for block in &fork_chain {
+            db.write_bitcoin_block(block).await.unwrap();
+        }
+
+        let fork_block_1 = fork_chain.nth_block(2u64.into());
+        let fork_block_2 = fork_chain.nth_block(3u64.into());
+
+        // Verify that forked blocks are not marked as canonical
+        let fork_1_is_canonical = db
+            .is_block_canonical(&fork_block_1.block_hash)
+            .await
+            .unwrap();
+        assert_eq!(fork_1_is_canonical, None);
+
+        let fork_2_is_canonical = db
+            .is_block_canonical(&fork_block_2.block_hash)
+            .await
+            .unwrap();
+        assert_eq!(fork_2_is_canonical, None);
+
+        // Let's set the canonical chain again and verify that the new
+        // blocks are still not marked as canonical. Note that the
+        // guarantees of the set_canonical_bitcoin_blockchain function is
+        // that non-canonical blocks are not marked as canonical, not that
+        // they are definitively marked as non-canonical.
+        db.set_canonical_bitcoin_blockchain(&chain_tip)
+            .await
+            .unwrap();
+        let fork_1_is_canonical = db
+            .is_block_canonical(&fork_block_1.block_hash)
+            .await
+            .unwrap();
+        assert_ne!(fork_1_is_canonical, Some(true));
+
+        let fork_2_is_canonical = db
+            .is_block_canonical(&fork_block_2.block_hash)
+            .await
+            .unwrap();
+        assert_ne!(fork_2_is_canonical, Some(true));
+
+        // In order to make sure that non-canonical blocks get marked as
+        // such, we need to clear the is_canonical column from some of the
+        // blocks in the table.
+        clear_is_canonical_bitcoin_blocks(&db).await;
+        db.set_canonical_bitcoin_blockchain(&chain_tip)
+            .await
+            .unwrap();
+
+        // Verify that fork blocks are marked as non-canonical
+        let fork_1_is_canonical = db
+            .is_block_canonical(&fork_block_1.block_hash)
+            .await
+            .unwrap();
+        assert_eq!(fork_1_is_canonical, Some(false));
+
+        let fork_2_is_canonical = db
+            .is_block_canonical(&fork_block_2.block_hash)
+            .await
+            .unwrap();
+        assert_eq!(fork_2_is_canonical, Some(false));
+
+        // Verify that all blocks at the same height as fork blocks but in the canonical chain
+        // are marked as canonical
+        let canonical_block_at_fork_height = canonical_chain.nth_block(fork_block_1.block_height);
+        let canonical_at_fork_height_is_canonical = db
+            .is_block_canonical(&canonical_block_at_fork_height.block_hash)
+            .await
+            .unwrap();
+        assert_eq!(canonical_at_fork_height_is_canonical, Some(true));
+
+        testing::storage::drop_db(db).await;
+    }
+
+    /// Like the test_set_canonical_bitcoin_blockchain test above, this
+    /// test checks that the DbWrite::set_canonical_bitcoin_blockchain()
+    /// function sets is_canonical = TRUE in the bitcoin_blocks table for
+    /// all blocks in the chain along the chain tip. It also check that if
+    /// forked blocks are added to the database along with canonical
+    /// blocks, that the forked blocks are marked as non-canonical after a
+    /// call to DbWrite::set_canonical_bitcoin_blockchain.
+    ///
+    /// The difference with this test is that it uses the TestData struct
+    /// to generate many random blockchains and insert them all into the
+    /// database.
+    #[tokio::test]
+    async fn test_set_canonical_bitcoin_blockchain_v2() {
+        let db = testing::storage::new_test_database().await;
+
+        let mut rng = get_rng();
+        let signer_keys = testing::wsts::generate_signer_set_public_keys(&mut rng, 7);
+
+        // Create many random blockchains and insert them all into the database
+        let params = testing::storage::model::Params {
+            num_bitcoin_blocks: 128,
+            num_stacks_blocks_per_bitcoin_block: 0,
+            num_deposit_requests_per_block: 0,
+            num_withdraw_requests_per_block: 0,
+            num_signers_per_request: 0,
+            consecutive_blocks: false,
+        };
+        let blockchains = TestData::generate(&mut rng, &signer_keys, &params);
+
+        // Insert all blocks into the database
+        for block in blockchains.bitcoin_blocks.iter() {
+            db.write_bitcoin_block(block).await.unwrap();
+        }
+
+        // Get the chain tip of the canonical chain
+        let chain_tip = db
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Initially, all blocks should have is_canonical = NULL
+        // Verify that no blocks have is_canonical IS NOT NULL
+        let has_non_null_canonical: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 
+                FROM sbtc_signer.bitcoin_blocks 
+                WHERE is_canonical IS NOT NULL
+            )",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+
+        assert!(!has_non_null_canonical);
+
+        // Call set_canonical_bitcoin_blockchain with the chain tip
+        db.set_canonical_bitcoin_blockchain(&chain_tip.block_hash)
+            .await
+            .unwrap();
+
+        // To make sure that not everything is marked as canonical or
+        // non-canonical, we have flags that tracks if at least one block
+        // is canonical and at least one block is non-canonical.
+        let mut some_canonical_block_exists = false;
+        let mut some_non_canonical_block_exists = false;
+
+        // Verify that only blocks in the canonical chain are marked as canonical
+        for block in blockchains.bitcoin_blocks.iter() {
+            // This function checks whether the given block is on the
+            // canonical chain by recursing backwards from the chain tip to
+            // the given block.
+            let on_canonical_chain = db
+                .in_canonical_bitcoin_blockchain(&chain_tip, &block.into())
+                .await
+                .unwrap();
+            // This function checks the is_canonical column for the given
+            // block hash.
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+
+            // For this test, every block should have their is_canonical
+            // column set to either TRUE or FALSE, no NULL values. And in
+            // general, the value set should match the value returned by
+            // the in_canonical_bitcoin_blockchain function.
+            assert_eq!(Some(on_canonical_chain), is_canonical);
+
+            if on_canonical_chain {
+                some_canonical_block_exists = true;
+            } else {
+                some_non_canonical_block_exists = true;
+            }
+        }
+        assert!(some_canonical_block_exists);
+        assert!(some_non_canonical_block_exists);
+        testing::storage::drop_db(db).await;
+    }
+
+    /// Similar to the above test, we have two chains each with differing
+    /// lengths, both in the database. The "main" when
+    /// DbWrite::set_canonical_bitcoin_blockchain() is called is the longer
+    /// chain with the main chain tip as input, all of those blocks are
+    /// marked as canonical and all other blocks are marked as
+    /// non-canonical. If we chose the fork chain tip, the blocks that are
+    /// part of the fork are then marked as canonical while the main
+    /// chain's blocks are then marked as non-canonical.
+    #[tokio::test]
+    async fn test_set_canonical_bitcoin_blockchain_with_fork_known_immediately() {
+        let db = testing::storage::new_test_database().await;
+
+        // Create two blockchains, one of length 10 and another of length
+        // 20, where one forks the other at height 3 (the block with height
+        // 3 differs from one to the other but their earlier blocks are the
+        // same)
+        let main_chain = BitcoinChain::new_with_length(10);
+        let fork_chain = main_chain.fork_at_height(3u64, 17);
+        // These are the ranges for the block heights that didn't change,
+        // so blocks from both chains should always be canonical.
+        let stable_block_heights = ..BitcoinBlockHeight::from(3u64);
+        // These are the ranges for the block heights that changed, so
+        // blocks from one chain will always be non-canonical.
+        let forked_block_heights = BitcoinBlockHeight::from(3u64)..;
+
+        // Write both chains to the database
+        for block in (&main_chain).into_iter().chain(&fork_chain) {
+            db.write_bitcoin_block(block).await.unwrap();
+        }
+
+        // Set the main chain as canonical
+        let main_chain_tip = main_chain.chain_tip().block_hash;
+        db.set_canonical_bitcoin_blockchain(&main_chain_tip)
+            .await
+            .unwrap();
+
+        // Verify that all blocks in the main chain are marked as canonical
+        for block in &main_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that fork chain blocks with height 0 to 2 are canonical,
+        // since they are also part of the main chain
+        for (_, block) in fork_chain.range(stable_block_heights) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+        for (_, block) in fork_chain.range(forked_block_heights.clone()) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(false));
+        }
+
+        // Set the fork chain as canonical from its chain tip
+        let fork_chain_tip = fork_chain.chain_tip().block_hash;
+        db.set_canonical_bitcoin_blockchain(&fork_chain_tip)
+            .await
+            .unwrap();
+
+        // Check that all fork chain blocks are canonical
+        for block in &fork_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that original main chain blocks with height 0 to 2 are canonical
+        for (_, block) in main_chain.range(stable_block_heights) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that original main chain blocks with height 3 to 9 are
+        // non-canonical
+        for (_, block) in main_chain.range(forked_block_heights.clone()) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(false));
+        }
+
+        // Okay, now let's make the main chain canonical again, just to
+        // make sure that things switch back as expected.
+        db.set_canonical_bitcoin_blockchain(&main_chain_tip)
+            .await
+            .unwrap();
+
+        // Verify that all blocks in the main chain are marked as canonical
+        // again.
+        for block in &main_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that fork chain blocks with height 0 to 2 are canonical,
+        // since they are also part of the main chain
+        for (_, block) in fork_chain.range(stable_block_heights) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+        for (_, block) in fork_chain.range(forked_block_heights.clone()) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(false));
+        }
+
+        // Now to make sure that things aren't messed up because the ranges
+        // are empty iterators.
+        assert_eq!(fork_chain.range(stable_block_heights).count(), 3);
+        assert_eq!(fork_chain.range(forked_block_heights.clone()).count(), 17);
+
+        assert_eq!(main_chain.range(stable_block_heights).count(), 3);
+        assert_eq!(main_chain.range(forked_block_heights).count(), 7);
+
+        testing::storage::drop_db(db).await;
+    }
+
+    /// In this test, we check that it is not important whether the forked
+    /// blocks are already stored in the database or not when
+    /// DbWrite::set_canonical_bitcoin_blockchain() is called for the first
+    /// time, it still correctly mark the blocks as canonical or
+    /// non-canonical if they are part of the chain identified by the given
+    /// chain tip.
+    #[tokio::test]
+    async fn test_set_canonical_bitcoin_blockchain_with_fork_known_later() {
+        let db = testing::storage::new_test_database().await;
+
+        // Create two blockchains, one of length 10 and another of length
+        // 17, where one forks the other at height 2 (the block with height
+        // 2 differs from one to the other but their earlier blocks are the
+        // same)
+        let main_chain = BitcoinChain::new_with_length(10);
+        let fork_chain = main_chain.fork_at_height(2u64, 15);
+        // These are the ranges for the block heights that didn't change,
+        // so blocks from both chains should always be canonical.
+        let stable_block_heights = ..BitcoinBlockHeight::from(2u64);
+        // These are the ranges for the block heights that changed, so
+        // blocks from one chain will always be non-canonical.
+        let forked_block_heights = BitcoinBlockHeight::from(2u64)..;
+
+        // Write main chains to the database
+        for block in &main_chain {
+            db.write_bitcoin_block(block).await.unwrap();
+        }
+
+        // Set the main chain as canonical
+        let main_chain_tip = main_chain.chain_tip().block_hash;
+        db.set_canonical_bitcoin_blockchain(&main_chain_tip)
+            .await
+            .unwrap();
+
+        // Verify that all blocks in the main chain are marked as canonical
+        for block in &main_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Write fork chains to the database
+        for block in &fork_chain {
+            db.write_bitcoin_block(block).await.unwrap();
+        }
+
+        // These were already written to the database, they are part of the main chain.
+        for (_, block) in fork_chain.range(stable_block_heights) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // These are new blocks, not yet seen before.
+        for (_, block) in fork_chain.range(forked_block_heights.clone()) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, None);
+        }
+
+        // Set the fork chain as canonical from its chain tip
+        let fork_chain_tip = fork_chain.chain_tip().block_hash;
+        db.set_canonical_bitcoin_blockchain(&fork_chain_tip)
+            .await
+            .unwrap();
+
+        // Check that all fork chain blocks are canonical
+        for block in &fork_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that original main chain blocks with height 0 to 1 are canonical
+        for (_, block) in main_chain.range(stable_block_heights) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that original main chain blocks with height 2 to 9 are
+        // non-canonical
+        for (_, block) in main_chain.range(forked_block_heights.clone()) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(false));
+        }
+
+        // Okay, now let's make the main chain canonical again, just to
+        // make sure that things switch back as expected.
+        db.set_canonical_bitcoin_blockchain(&main_chain_tip)
+            .await
+            .unwrap();
+
+        // Verify that all blocks in the main chain are marked as canonical
+        // again.
+        for block in &main_chain {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+
+        // Check that fork chain blocks with height 0 to 1 are canonical,
+        // since they are also part of the main chain
+        for (_, block) in fork_chain.range(stable_block_heights) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(true));
+        }
+        for (_, block) in fork_chain.range(forked_block_heights.clone()) {
+            let is_canonical = db.is_block_canonical(&block.block_hash).await.unwrap();
+            assert_eq!(is_canonical, Some(false));
+        }
+
+        // Now to make sure that things aren't messed up because the ranges
+        // are empty iterators.
+        assert_eq!(fork_chain.range(stable_block_heights).count(), 2);
+        assert_eq!(fork_chain.range(forked_block_heights.clone()).count(), 15);
+
+        assert_eq!(main_chain.range(stable_block_heights).count(), 2);
+        assert_eq!(main_chain.range(forked_block_heights).count(), 8);
+
+        testing::storage::drop_db(db).await;
     }
 }

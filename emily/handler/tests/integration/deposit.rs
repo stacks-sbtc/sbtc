@@ -458,28 +458,18 @@ async fn get_deposits_large_max_fee() {
     // Arrange.
     // --------
     let max_fees: [u64; 3] = [1000, i64::MAX as u64 + 1, i64::MAX as u64];
-    // Setup test deposit transaction.
-    let deposit_txn_data =
-        max_fees.map(|max_fee| testing::deposits::tx_setup(16, max_fee, &[300_000]));
-
-    let create_requests = deposit_txn_data
-        .iter()
-        .map(|deposit_tx| CreateDepositRequestBody {
-            bitcoin_tx_output_index: 0,
-            bitcoin_txid: deposit_tx.tx.compute_txid().to_string(),
-            deposit_script: deposit_tx
-                .deposits
-                .first()
-                .unwrap()
-                .deposit_script()
-                .to_hex_string(),
-            reclaim_script: deposit_tx
-                .reclaims
-                .first()
-                .unwrap()
-                .reclaim_script()
-                .to_hex_string(),
-            transaction_hex: serialize_hex(&deposit_tx.tx),
+    // Setup test deposit transactions and the Emily request.
+    let create_requests = max_fees
+        .into_iter()
+        .map(|max_fee| {
+            let deposit_tx = DepositTxnData::new(16, max_fee, &[300_000]);
+            CreateDepositRequestBody {
+                bitcoin_tx_output_index: 0,
+                bitcoin_txid: deposit_tx.bitcoin_txid.clone(),
+                deposit_script: deposit_tx.deposit_scripts[0].clone(),
+                reclaim_script: deposit_tx.reclaim_scripts[0].clone(),
+                transaction_hex: deposit_tx.transaction_hex.clone(),
+            }
         })
         .collect();
 

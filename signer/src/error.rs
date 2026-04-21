@@ -154,6 +154,20 @@ pub enum Error {
     #[error("bitcoin-core getblockheader RPC error for hash {1}: {0}")]
     BitcoinCoreGetBlockHeader(#[source] bitcoincore_rpc::Error, bitcoin::BlockHash),
 
+    /// Attempt to fetch a bitcoin block hash for a given height resulted in
+    /// an unexpected error.
+    #[error("bitcoin-core getblockhash RPC error for height {1}: {0}")]
+    BitcoinCoreGetBlockHash(#[source] bitcoincore_rpc::Error, u64),
+
+    /// The given chain tip block hash could not be found in bitcoin-core.
+    ///
+    /// This is returned when trying to fetch the header of the given block
+    /// hash. However, this error scenario should never happen, since the
+    /// block hash included here is what bitcoin-core has told us is the
+    /// chain tip, so it should have the header for that block.
+    #[error("could not find header for bitcoin-core's chain tip block hash: {0}, outpoint: {1}")]
+    BitcoinCoreUnknownChainTip(bitcoin::BlockHash, bitcoin::OutPoint),
+
     /// Bitcoin block header is unknown to bitcoin-core. This is only
     /// triggered if bitcoin-core does not know about the block hash.
     #[error("Unknown block hash response from bitcoin-core getblockheader RPC call: {0}")]
@@ -165,7 +179,7 @@ pub enum Error {
 
     /// Error when creating an RPC client to bitcoin-core
     #[error("could not create RPC client to {1}: {0}")]
-    BitcoinCoreRpcClient(#[source] bitcoincore_rpc::Error, String),
+    BitcoinCoreRpcClient(#[source] jsonrpc::http::simple_http::Error, String),
 
     /// The bitcoin transaction was not found in the mempool or on the
     /// bitcoin blockchain. This is thrown when we expect the transaction
@@ -227,13 +241,6 @@ pub enum Error {
     #[error("observed a tenure identified by a StacksBlockId with with no blocks")]
     EmptyStacksTenure,
 
-    /// This happens when StacksClient::get_tenure_headers_raw returns an
-    /// array of blocks which starts with a block with id {0}, while we
-    /// expect it to return an array of blocks starting with a block with
-    /// id {1}
-    #[error("get_tenure_headers_raw returned unexpected response: {0}. Expected: {1}")]
-    GetTenureRawMismatch(StacksBlockHash, StacksBlockHash),
-
     /// Received an error in call to estimatesmartfee RPC call
     #[error("failed to get fee estimate from bitcoin-core for target {1}. {0}")]
     EstimateSmartFee(#[source] bitcoincore_rpc::Error, u16),
@@ -270,11 +277,6 @@ pub enum Error {
     /// Invalid amount
     #[error("the change amounts for the transaction is negative: {0}")]
     InvalidAmount(i64),
-
-    /// We cannot store max fees that exceed i64::MAX, so we reject such
-    /// deposit requests.
-    #[error("the max fee for deposit {0} is greater than i64::MAX: {1}")]
-    InvalidMaxFee(bitcoin::OutPoint, u64),
 
     /// Old fee estimate
     #[error("got an old fee estimate")]
@@ -687,6 +689,11 @@ pub enum Error {
     #[error("the given block hash could not be found in the database: {0}")]
     UnknownBitcoinBlock(bitcoin::BlockHash),
 
+    /// The given block hash could not be found in the database before
+    /// doing a DbRead::set_canonical_bitcoin_blockchain call.
+    #[error("the given chain tip block hash could not be found in the database: {0}")]
+    UnknownBitcoinChainTip(BitcoinBlockHash),
+
     /// No stacks chain tip found.
     #[error("no stacks chain tip")]
     NoStacksChainTip,
@@ -718,7 +725,7 @@ pub enum Error {
 
     /// Could not create reqwest client
     #[error("we received an error when creating the Emily's reqwest client: {0}")]
-    EmilyReqwestClientCreation(#[source] reqwest_012::Error),
+    EmilyReqwestClientCreation(#[source] reqwest::Error),
 
     /// This happens during the validation of a stacks transaction when the
     /// current signer is not a member of the signer set indicated by the

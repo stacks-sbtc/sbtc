@@ -24,7 +24,6 @@ use emily_client::models::UpdateWithdrawalsRequestBody;
 use emily_client::models::UpdateWithdrawalsResponse;
 use emily_client::models::WithdrawalUpdate;
 use emily_client::models::{DepositStatus, WithdrawalStatus};
-use reqwest_012;
 use sbtc::deposits::CreateDepositRequest;
 use url::Url;
 
@@ -176,7 +175,7 @@ impl EmilyClient {
         config.base_path = url.to_string().trim_end_matches("/").to_string();
         config.api_key = api_key;
 
-        let client = reqwest_012::Client::builder()
+        let client = reqwest::Client::builder()
             .timeout(timeout)
             .build()
             .map_err(Error::EmilyReqwestClientCreation)?;
@@ -368,10 +367,10 @@ impl EmilyInteract for EmilyClient {
                 request_id: withdrawal.request_id,
                 fulfillment: None,
                 status: WithdrawalStatus::Accepted,
-                expected_fulfillment_info: Box::new(ExpectedFulfillmentInfo {
+                expected_fulfillment_info: Some(Some(Box::new(ExpectedFulfillmentInfo {
                     bitcoin_block_height: None,
                     bitcoin_txid: Some(Some(bitcoin_txid.clone())),
-                }),
+                }))),
                 status_message: "".to_string(),
             })
             .collect();

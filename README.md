@@ -38,6 +38,12 @@ The following are the developer tools that you should install on your local mach
 - **[protoc](https://github.com/protocolbuffers/protobuf)** - [Installation Guide](https://grpc.io/docs/protoc-installation/) - Compiles protobuf files.
 - **[uv](https://docs.astral.sh/uv/)** - [Installation Guide](https://docs.astral.sh/uv/getting-started/installation/) - Manages python packages.
 
+Additional optional tools for sBTC developers include
+- **[Cargo Nextest](https://nexte.st/)** - [Installation Guide](https://nexte.st/docs/installation/pre-built-binaries/) - This is used for running unit and integration tests.
+- **[Cargo Vet](https://github.com/mozilla/cargo-vet)** - [Installation Guide](https://mozilla.github.io/cargo-vet/install.html) - Vetting Rust dependencies. See [our workflow](https://github.com/stacks-sbtc/sbtc/blob/d4da441406239e7f70fe3f60c8fe46c6164868ff/.github/workflows/on-push.yaml#L35) for the version that we use in CI.
+- **[Cargo Machete](https://github.com/bnjbvr/cargo-machete)** - [Installation Guide](https://github.com/bnjbvr/cargo-machete?tab=readme-ov-file#installation) - For detecting unused dependencies. See [our workflow](https://github.com/stacks-sbtc/sbtc/blob/d4da441406239e7f70fe3f60c8fe46c6164868ff/.github/workflows/on-push.yaml#L83) for the version that we use in CI.
+
+
 #### Developer shell through `nix`
 
 If you have `nix` and `flakes` installed (e.g. through the [DeterminateSystems
@@ -66,7 +72,7 @@ Below is the output on a machine that is able to build and run all the sources a
 
 ```text
 --- sBTC tool versions ---
-cargo 1.91.0 (ea2d97820 2025-10-10)
+cargo 1.94.1 (29ea6fb6a 2026-03-24)
 cargo-lambda 1.6.2 (2025-01-17Z)
 pnpm 9.1.0
 GNU Make 3.81

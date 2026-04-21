@@ -32,7 +32,7 @@ env:
   BUF_VERSION: 1.42.0
   PYTHON_VERSION: 3.13
   NEXTEST_VERSION: 0.9.88
-  CARGO_VET_VERSION: 0.10.0
+  CARGO_VET_VERSION: 0.10.2
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_STRIP: "debuginfo"
 
@@ -281,7 +281,11 @@ jobs:
 
       - name: Start Integration Test Environment
         id: start_test_environment
-        run: make integration-env-up-ci
+        run: |
+          # Ensure test images are available
+          docker compose --file docker/tests/docker-compose.bitcoin.yml pull
+          docker compose --file docker/tests/docker-compose.stacks.yml pull
+          make integration-env-up-ci
 
       - name: Wait for Test Artifacts
         id: wait_test_artifacts

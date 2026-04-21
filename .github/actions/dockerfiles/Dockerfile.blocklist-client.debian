@@ -1,74 +1,54 @@
-FROM --platform=$BUILDPLATFORM rust:1.91.0-slim-bookworm AS build
+FROM --platform=$BUILDPLATFORM rust:1.94.1-slim-trixie AS build
 
 # Docker automatically populates these arguments:
 ARG TARGETARCH
-ARG CARGO_BUILD_ARGS="--release --locked"
 
-# 1. Setup Debian for Multi-Architecture
-# We enable arm64 so we can install ARM system libraries (OpenSSL, glibc)
-RUN dpkg --add-architecture arm64 && \
-    dpkg --add-architecture amd64 && \
-    apt-get update
-
-# 2. Install Host Dependencies (Tools needed to RUN the build on AMD64)
-RUN apt-get install -y --no-install-recommends \
-    git \
-    pkg-config \
-    make \
-    protobuf-compiler \
-    npm \
-    default-jre \
-    g++ \
-    libssl-dev \
+# Install build dependencies.
+# clang/libclang-dev: needed by bindgen (used by p256k1).
+# Cross-compilers for both target architectures.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
     libclang-dev \
-    findutils
-    
-# 3. Install Cross-Compilation Toolchains & Target Dependencies
-RUN apt-get install -y --no-install-recommends \
+    git \
+    pkg-config \
+    g++ \
     gcc-aarch64-linux-gnu \
     g++-aarch64-linux-gnu \
-    libc6-dev-arm64-cross \
-    libssl-dev:arm64 \
+    gcc-x86-64-linux-gnu \
+    g++-x86-64-linux-gnu \
+    findutils \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Add the Rust target for the target architecture.
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        rustup target add aarch64-unknown-linux-gnu; \
+    else \
+        rustup target add x86_64-unknown-linux-gnu; \
+    fi
 
 WORKDIR /code/sbtc
 COPY . .
 
-
-RUN \
-    export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
+# Build the blocklist-client binary, cross-compiling for the target architecture.
+RUN export LIBCLANG_PATH="$(find /usr/lib/llvm-* -name lib -type d | head -n 1)" && \
     if [ "$TARGETARCH" = "arm64" ]; then \
-        echo "Building for ARM64..."; \
-        export PKG_CONFIG_ALLOW_CROSS=1 && \
-        rustup target add aarch64-unknown-linux-gnu; \
+        export TARGET="aarch64-unknown-linux-gnu" && \
+        export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc && \
+        export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ && \
+        export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar && \
         export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
-        export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
-        export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++; \
-        export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig"; \
-        cargo build --target aarch64-unknown-linux-gnu --bin blocklist-client ${CARGO_BUILD_ARGS}; \
-        mkdir -p /output && cp target/aarch64-unknown-linux-gnu/release/blocklist-client /output/blocklist-client; \
     else \
-        echo "Building for AMD64..."; \
-        cargo build --bin blocklist-client ${CARGO_BUILD_ARGS}; \
-        mkdir -p /output && cp target/release/blocklist-client /output/blocklist-client; \
-    fi
+        export TARGET="x86_64-unknown-linux-gnu" && \
+        export CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc && \
+        export CXX_x86_64_unknown_linux_gnu=x86_64-linux-gnu-g++ && \
+        export AR_x86_64_unknown_linux_gnu=x86_64-linux-gnu-ar && \
+        export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc; \
+    fi && \
+    cargo build --target "$TARGET" --bin blocklist-client --release --locked && \
+    mkdir -p /output && \
+    cp "target/$TARGET/release/blocklist-client" /output/blocklist-client
 
-FROM debian:bookworm-slim AS blocklist-client
+FROM debian:trixie-slim AS blocklist-client
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /output/blocklist-client /usr/local/bin/blocklist-client
-
-RUN apt-get update && \
-    apt-get install -y curl && \
-    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list && \
-    echo "Package: gh\nPin: origin cli.github.com\nPin-Priority: 1001" > /etc/apt/preferences.d/gh-cli && \
-    apt-get update && \
-    apt-get install -y gh
-
-# ca-certificates is required to establish TLS connections.
-# gettext provides envsubst
-RUN apt-get install -y ca-certificates gettext --no-install-recommends && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-CMD ["/usr/local/bin/blocklist-client"]
+ENTRYPOINT ["/usr/local/bin/blocklist-client"]

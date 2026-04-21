@@ -7,6 +7,8 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::collections::HashSet;
 
 use bitcoin::OutPoint;
 use clarity::codec::StacksMessageCodec as _;
@@ -16,7 +18,6 @@ use p256k1::scalar::Scalar;
 use polynomial::Polynomial;
 use secp256k1::ecdsa::RecoverableSignature;
 use stacks_common::types::chainstate::StacksAddress;
-use wsts::common::Nonce;
 use wsts::common::PolyCommitment;
 use wsts::common::PublicNonce;
 use wsts::common::SignatureShare;
@@ -727,32 +728,32 @@ impl TryFrom<proto::BadPrivateShare> for BadPrivateShare {
     }
 }
 
-impl From<hashbrown::HashMap<u32, BadPrivateShare>> for proto::BadPrivateShares {
-    fn from(value: hashbrown::HashMap<u32, BadPrivateShare>) -> Self {
+impl From<HashMap<u32, BadPrivateShare>> for proto::BadPrivateShares {
+    fn from(value: HashMap<u32, BadPrivateShare>) -> Self {
         proto::BadPrivateShares {
             shares: value.into_iter().map(|(k, v)| (k, v.into())).collect(),
         }
     }
 }
 
-impl TryFrom<proto::BadPrivateShares> for hashbrown::HashMap<u32, BadPrivateShare> {
+impl TryFrom<proto::BadPrivateShares> for HashMap<u32, BadPrivateShare> {
     type Error = Error;
     fn try_from(value: proto::BadPrivateShares) -> Result<Self, Self::Error> {
         value
             .shares
             .into_iter()
             .map(|(k, v)| Ok((k, v.try_into()?)))
-            .collect::<Result<hashbrown::HashMap<_, _>, Error>>()
+            .collect::<Result<HashMap<_, _>, Error>>()
     }
 }
 
-fn hashset_to_zst(set: hashbrown::HashSet<u32>) -> BTreeMap<u32, proto::SetValueZst> {
+fn hashset_to_zst(set: HashSet<u32>) -> BTreeMap<u32, proto::SetValueZst> {
     set.into_iter()
         .map(|v| (v, proto::SetValueZst {}))
         .collect()
 }
 
-fn zst_to_hashset(set: BTreeMap<u32, proto::SetValueZst>) -> hashbrown::HashSet<u32> {
+fn zst_to_hashset(set: BTreeMap<u32, proto::SetValueZst>) -> HashSet<u32> {
     set.into_keys().collect()
 }
 
@@ -1446,32 +1447,13 @@ impl TryFrom<proto::PrivateKeyShare> for (u32, Scalar) {
     }
 }
 
-impl From<Nonce> for proto::PrivateNonce {
-    fn from(value: Nonce) -> Self {
-        proto::PrivateNonce {
-            nonce_d: Some(value.d.into()),
-            nonce_e: Some(value.e.into()),
-        }
-    }
-}
-
-impl TryFrom<proto::PrivateNonce> for Nonce {
-    type Error = Error;
-    fn try_from(value: proto::PrivateNonce) -> Result<Self, Self::Error> {
-        Ok(Nonce {
-            d: value.nonce_d.required()?.try_into()?,
-            e: value.nonce_e.required()?.try_into()?,
-        })
-    }
-}
-
 impl From<(u32, PartyState)> for proto::PartyState {
     fn from((key_id, value): (u32, PartyState)) -> Self {
         proto::PartyState {
             key_id,
             polynomial: value.polynomial.map(|v| v.into()),
             private_keys: value.private_keys.into_iter().map(|v| v.into()).collect(),
-            nonce: Some(value.nonce.into()),
+            nonce: None,
         }
     }
 }
@@ -1488,7 +1470,6 @@ impl TryFrom<proto::PartyState> for (u32, PartyState) {
                     .into_iter()
                     .map(|v| v.try_into())
                     .collect::<Result<Vec<_>, Error>>()?,
-                nonce: value.nonce.required()?.try_into()?,
             },
         ))
     }
@@ -1674,6 +1655,7 @@ impl codec::ProtoSerializable for BTreeMap<u32, DkgPublicShares> {
 #[cfg(test)]
 mod tests {
     use crate::testing::dummy::Unit;
+    use std::collections::HashMap;
 
     use super::*;
 
@@ -1768,7 +1750,7 @@ mod tests {
     #[test_case(PhantomData::<(DkgEndBegin, proto::DkgEndBegin)>; "DkgEndBegin")]
     #[test_case(PhantomData::<(TupleProof, proto::TupleProof)>; "TupleProof")]
     #[test_case(PhantomData::<(BadPrivateShare, proto::BadPrivateShare)>; "BadPrivateShare")]
-    #[test_case(PhantomData::<(hashbrown::HashMap<u32, BadPrivateShare>, proto::BadPrivateShares)>; "BadPrivateShares")]
+    #[test_case(PhantomData::<(HashMap<u32, BadPrivateShare>, proto::BadPrivateShares)>; "BadPrivateShares")]
     #[test_case(PhantomData::<(DkgStatus, proto::DkgStatus)>; "DkgStatus")]
     #[test_case(PhantomData::<(DkgEnd, proto::DkgEnd)>; "DkgEnd")]
     #[test_case(PhantomData::<(SignatureType, proto::SignatureType)>; "SignatureType")]
@@ -1778,7 +1760,6 @@ mod tests {
     #[test_case(PhantomData::<(SignatureShareRequest, proto::SignatureShareRequest)>; "SignatureShareRequest")]
     #[test_case(PhantomData::<(SignatureShare, proto::SignatureShare)>; "SignatureShare")]
     #[test_case(PhantomData::<(SignatureShareResponse, proto::SignatureShareResponse)>; "SignatureShareResponse")]
-    #[test_case(PhantomData::<(Nonce, proto::PrivateNonce)>; "PrivateNonce")]
     #[test_case(PhantomData::<(wsts::schnorr::ID, proto::ProofIdentifier)>; "ProofIdentifier")]
     #[test_case(PhantomData::<(PolyCommitment, proto::PolyCommitment)>; "PolyCommitment")]
     #[test_case(PhantomData::<((u32, PolyCommitment), proto::PartyCommitment)>; "PartyCommitment")]

@@ -139,6 +139,7 @@ pub enum CodecError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::collections::HashMap;
     use std::marker::PhantomData;
 
     use fake::Dummy;
@@ -153,7 +154,6 @@ mod tests {
     use polynomial::Polynomial;
     use secp256k1::ecdsa::RecoverableSignature;
     use stacks_common::types::chainstate::StacksAddress;
-    use wsts::common::Nonce;
     use wsts::common::PolyCommitment;
     use wsts::common::PublicNonce;
     use wsts::common::SignatureShare;
@@ -294,7 +294,7 @@ mod tests {
     #[test_case(PhantomData::<(DkgEndBegin, proto::DkgEndBegin)>; "DkgEndBegin")]
     #[test_case(PhantomData::<(TupleProof, proto::TupleProof)>; "TupleProof")]
     #[test_case(PhantomData::<(BadPrivateShare, proto::BadPrivateShare)>; "BadPrivateShare")]
-    #[test_case(PhantomData::<(hashbrown::HashMap<u32, BadPrivateShare>, proto::BadPrivateShares)>; "BadPrivateShares")]
+    #[test_case(PhantomData::<(HashMap<u32, BadPrivateShare>, proto::BadPrivateShares)>; "BadPrivateShares")]
     #[test_case(PhantomData::<(DkgStatus, proto::DkgStatus)>; "DkgStatus")]
     #[test_case(PhantomData::<(DkgEnd, proto::DkgEnd)>; "DkgEnd")]
     #[test_case(PhantomData::<(SignatureType, proto::SignatureType)>; "SignatureType")]
@@ -304,7 +304,6 @@ mod tests {
     #[test_case(PhantomData::<(SignatureShareRequest, proto::SignatureShareRequest)>; "SignatureShareRequest")]
     #[test_case(PhantomData::<(SignatureShare, proto::SignatureShare)>; "SignatureShare")]
     #[test_case(PhantomData::<(SignatureShareResponse, proto::SignatureShareResponse)>; "SignatureShareResponse")]
-    #[test_case(PhantomData::<(Nonce, proto::PrivateNonce)>; "PrivateNonce")]
     #[test_case(PhantomData::<(wsts::schnorr::ID, proto::ProofIdentifier)>; "ProofIdentifier")]
     #[test_case(PhantomData::<(PolyCommitment, proto::PolyCommitment)>; "PolyCommitment")]
     #[test_case(PhantomData::<((u32, PolyCommitment), proto::PartyCommitment)>; "PartyCommitment")]

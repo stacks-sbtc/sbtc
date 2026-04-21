@@ -4,7 +4,9 @@ use std::str::FromStr as _;
 
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::hex::DisplayHex as _;
-use bitcoin::{Address, XOnlyPublicKey};
+use bitcoin::sighash::{Prevouts, SighashCache};
+use bitcoin::taproot::LeafVersion;
+use bitcoin::{Address, TapLeafHash, TapSighashType, Witness, XOnlyPublicKey};
 use bitcoin::{
     Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, absolute, transaction::Version,
 };
@@ -34,6 +36,7 @@ use emily_client::{
     models::CreateDepositRequestBody,
 };
 use sbtc::deposits::{DepositScriptInputs, ReclaimScriptInputs};
+use secp256k1::SECP256K1;
 use signer::config::Settings;
 use signer::context::Context as SignerCtx;
 use signer::keys::{PrivateKey, PublicKey, SignerScriptPubKey as _};
@@ -45,10 +48,16 @@ use stacks_common::address::{
 };
 
 // Demo defaults
+// Public key: 026c44dfe47941b0271c642c549d9a763afce7c6b0495c72f1a32c2f09898ea3df
 const DEMO_PRIVATE_KEY: &str = "2be0a71cb3a27d7f71a790ebe96cd106dd6d9c811b402178d1666ec3034dd64c";
 const DEMO_STACKS_ADDR: &str = "ST3497E9JFQ7KB9VEHAZRWYKF3296WQZEXBPXG193";
 const DEMO_BITCOIN_ADDR: &str = "bcrt1qezfmjvnaeu66wm52h7885mccjfh9lmh2v4kf8n";
 const DEMO_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
+
+// We can't use the config since we need access to the main node, not the follower.
+// That's because for some operations (funding, deposit creation) we sign transactions
+// with the node wallet that's created by the devenv miner script on the main node.
+const BITCOIN_RPC_URL: &str = "http://127.0.0.1:18442/wallet/depositor";
 
 #[derive(Debug, thiserror::Error)]
 #[allow(clippy::enum_variant_names)]
@@ -108,6 +117,7 @@ enum CliCommand {
     FundBtc(FundBtcArgs),
     FundStx(FundStxArgs),
     GenerateBlock(GenerateBlockArgs),
+    Reclaim(ReclaimArgs),
 }
 
 #[derive(Debug, Args)]
@@ -171,8 +181,25 @@ struct WithdrawArgs {
 #[derive(Debug, Args)]
 struct DonationArgs {
     /// Amount to donate
-    #[clap(long)]
+    #[clap(long, default_value = "10000")]
     amount: u64,
+}
+
+#[derive(Debug, Args)]
+struct ReclaimArgs {
+    /// The transaction ID of the deposit to reclaim.
+    #[clap(long)]
+    txid: String,
+    /// The vout of the deposit to reclaim.
+    #[clap(long, default_value = "0")]
+    vout: u64,
+    /// The key to use to sign for the reclaim, if a signature is required.
+    /// If empty, no signature is used when attempting to spend the deposit.
+    #[clap(long = "private-key", default_value = DEMO_PRIVATE_KEY)]
+    private_key: String,
+    /// The BTC recipient.
+    #[clap(long, default_value = DEMO_BITCOIN_ADDR)]
+    recipient: String,
 }
 
 struct Context {
@@ -236,7 +263,7 @@ impl Context {
             Settings::new(Some("signer/src/config/default.toml")).map_err(Error::ConfigError)?;
 
         let emily_config = get_emily_config(&settings);
-        let bitcoin_client = get_bitcoin_client(&settings);
+        let bitcoin_client = get_bitcoin_client();
         let stacks_client = get_stacks_client(&settings);
         let deployer = PrincipalData::parse_standard_principal(&args.deployer)
             .map(StacksAddress::from)
@@ -276,6 +303,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         CliCommand::FundBtc(args) => exec_fund_btc(&ctx, args).await?,
         CliCommand::FundStx(args) => exec_fund_stx(&ctx, args).await?,
         CliCommand::GenerateBlock(args) => exec_generate_block(&ctx, args).await?,
+        CliCommand::Reclaim(args) => exec_reclaim(&ctx, args).await?,
     }
     Ok(())
 }
@@ -311,18 +339,9 @@ fn get_emily_config(settings: &Settings) -> EmilyConfig {
     }
 }
 
-fn get_bitcoin_client(settings: &Settings) -> BitcoinClient {
-    let bitcoin_url = format!(
-        "{}wallet/depositor",
-        settings
-            .bitcoin
-            .rpc_endpoints
-            .first()
-            .expect("No Bitcoin RPC endpoints configured")
-    );
-
+fn get_bitcoin_client() -> BitcoinClient {
     BitcoinClient::new(
-        &bitcoin_url,
+        BITCOIN_RPC_URL,
         bitcoincore_rpc::Auth::UserPass("devnet".into(), "devnet".into()),
     )
     .expect("Failed to create Bitcoin RPC client")
@@ -366,6 +385,77 @@ async fn exec_deposit(ctx: &Context, args: DepositArgs) -> Result<(), Error> {
     .map_err(Box::new)?;
 
     println!("Deposit request created: {emily_deposit:?}");
+
+    Ok(())
+}
+
+async fn exec_reclaim(ctx: &Context, args: ReclaimArgs) -> Result<(), Error> {
+    let deposit = deposit_api::get_deposit(&ctx.emily_config, &args.txid, &args.vout.to_string())
+        .await
+        .expect("Deposit not found");
+
+    let recipient_addr = Address::from_str(&args.recipient)?.require_network(ctx.network)?;
+
+    let deposit_script = ScriptBuf::from_hex(&deposit.deposit_script)
+        .map_err(signer::error::Error::DecodeHexScript)?;
+    let reclaim_script = ScriptBuf::from_hex(&deposit.reclaim_script)
+        .map_err(signer::error::Error::DecodeHexScript)?;
+    let reclaim_inputs = ReclaimScriptInputs::parse(&reclaim_script)?;
+
+    let mut reclaim_tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint {
+                txid: bitcoin::Txid::from_str(&deposit.bitcoin_txid).unwrap(),
+                vout: deposit.bitcoin_tx_output_index,
+            },
+            script_sig: Default::default(),
+            sequence: Sequence::from_consensus(reclaim_inputs.lock_time()),
+            witness: Default::default(),
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(deposit.amount - 153),
+            script_pubkey: recipient_addr.script_pubkey(),
+        }],
+        version: Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+    };
+
+    let mut witness_data = Vec::new();
+
+    if !args.private_key.is_empty() {
+        let private_key = PrivateKey::from_str(&args.private_key)?;
+        let keypair = secp256k1::Keypair::from_secret_key(SECP256K1, &private_key.into());
+
+        let prevout = TxOut {
+            value: Amount::from_sat(deposit.amount),
+            script_pubkey: sbtc::deposits::to_script_pubkey(
+                deposit_script.clone(),
+                reclaim_script.clone(),
+            ),
+        };
+
+        // Sign logic from reclaiming_rejected_deposits test
+        let prevouts = Prevouts::All(std::slice::from_ref(&prevout));
+
+        let leaf_hash = TapLeafHash::from_script(&reclaim_script, LeafVersion::TapScript);
+        let reclaim_sighash = SighashCache::new(&reclaim_tx)
+            .taproot_script_spend_signature_hash(0, &prevouts, leaf_hash, TapSighashType::Default)
+            .map_err(signer::error::Error::Taproot)?;
+        let msg = secp256k1::Message::from(reclaim_sighash);
+
+        let signature = SECP256K1.sign_schnorr(&msg, &keypair);
+        witness_data.push(signature.serialize().to_vec());
+    }
+
+    let control_block = sbtc::deposits::to_taproot(deposit_script, reclaim_script.clone())
+        .control_block(&(reclaim_script.clone(), LeafVersion::TapScript))
+        .expect("reclaim script must be present in the deposit taproot tree");
+    witness_data.push(reclaim_script.to_bytes());
+    witness_data.push(control_block.serialize());
+    reclaim_tx.input[0].witness = Witness::from_slice(&witness_data);
+
+    let tx_id = ctx.bitcoin_client.send_raw_transaction(&reclaim_tx)?;
+    println!("Transaction sent: {tx_id}");
 
     Ok(())
 }
@@ -541,7 +631,16 @@ async fn create_bitcoin_deposit_transaction(
         )),
     };
 
-    let reclaim_script = ReclaimScriptInputs::try_new(args.lock_time, ScriptBuf::new())?;
+    let public_key: secp256k1::PublicKey =
+        PublicKey::from_private_key(&PrivateKey::from_str(DEMO_PRIVATE_KEY)?).into();
+    let x_only_key = public_key.x_only_public_key().0;
+    let reclaim_script = ScriptBuf::builder()
+        .push_opcode(bitcoin::opcodes::all::OP_DROP)
+        .push_slice(x_only_key.serialize())
+        .push_opcode(bitcoin::opcodes::all::OP_CHECKSIG)
+        .into_script();
+
+    let reclaim_script = ReclaimScriptInputs::try_new(args.lock_time, reclaim_script)?;
 
     let unsigned_tx = get_transaction(
         &ctx.bitcoin_client,

@@ -5,6 +5,7 @@ use std::ops::Deref as _;
 
 use bitcoin::Amount;
 use bitcoin::BlockHash;
+use bitcoin::OutPoint;
 use bitcoin::Txid;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc_json::GetTxOutResult;
@@ -18,17 +19,18 @@ use blockstack_lib::types::chainstate::StacksBlockId;
 use clarity::types::chainstate::BurnchainHeaderHash;
 use clarity::types::chainstate::SortitionId;
 use emily_client::models::DepositStatus;
+use fake::Fake as _;
 use rand::seq::IteratorRandom as _;
 use sbtc::deposits::CreateDepositRequest;
 
 use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::GetTransactionFeeResult;
-use crate::bitcoin::TransactionLookupHint;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::GetTxResponse;
+use crate::bitcoin::rpc::OutPointSummary;
 use crate::bitcoin::utxo;
 use crate::context::SbtcLimits;
 use crate::emily_client::EmilyInteract;
@@ -46,10 +48,10 @@ use crate::stacks::api::SubmitTxResponse;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model;
-use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
 use crate::storage::model::StacksBlockHash;
+use crate::testing::block_observer::model::BitcoinBlockHash;
 use crate::testing::dummy;
 use crate::testing::stacks::DUMMY_SORTITION_INFO;
 use crate::util::ApiFallbackClient;
@@ -132,6 +134,7 @@ impl TestHarness {
         // mainnet doesn't have this issue because the block height was not
         // originally included anywhere until much later.
         let height = Some(BitcoinBlockHeight::from(17u64));
+
         let mut bitcoin_blocks: Vec<_> = std::iter::successors(height, |&height| Some(height + 1))
             .map(|height| BitcoinBlockInfo::random_with_height(height, rng))
             .take(num_bitcoin_blocks)
@@ -140,6 +143,13 @@ impl TestHarness {
         for idx in 1..bitcoin_blocks.len() {
             bitcoin_blocks[idx].previous_block_hash = bitcoin_blocks[idx - 1].block_hash;
         }
+        let bh2ch: HashMap<BlockHash, ConsensusHash> = bitcoin_blocks
+            .iter()
+            .map(|block| {
+                let ch_bytes = fake::Faker.fake_with_rng(rng);
+                (block.block_hash, ConsensusHash::new(ch_bytes))
+            })
+            .collect();
 
         let first_header = NakamotoBlockHeader::empty();
         let stacks_blocks: Vec<(StacksBlockId, NakamotoBlock, BlockHash)> = bitcoin_blocks
@@ -156,6 +166,7 @@ impl TestHarness {
                         .scan(initial_state, |last_stx_block_header, mut stx_block| {
                             stx_block.header.parent_block_id = last_stx_block_header.block_id();
                             stx_block.header.chain_length = last_stx_block_header.chain_length + 1;
+                            stx_block.header.consensus_hash = bh2ch[&btc_block.block_hash].into();
                             *last_stx_block_header = stx_block.header.clone();
                             Some((stx_block.block_id(), stx_block, btc_block.block_hash))
                         })
@@ -218,6 +229,21 @@ impl TryFrom<TestHarness> for ApiFallbackClient<TestHarness> {
 }
 
 impl BitcoinInteract for TestHarness {
+    async fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        let Some((tx_response, _)) = self.deposits.get(&outpoint.txid).cloned() else {
+            return Ok(None);
+        };
+
+        let Some(block_hash) = tx_response.block_hash else {
+            return Ok(None);
+        };
+
+        Ok(Some(OutPointSummary {
+            block_hash,
+            is_coinbase: tx_response.tx.is_coinbase(),
+        }))
+    }
+
     async fn get_tx(&self, txid: &bitcoin::Txid) -> Result<Option<GetTxResponse>, Error> {
         Ok(self.deposits.get(txid).cloned().map(|(resp, _)| resp))
     }
@@ -257,7 +283,7 @@ impl BitcoinInteract for TestHarness {
             .cloned())
     }
 
-    async fn estimate_fee_rate(&self) -> Result<f64, Error> {
+    async fn estimate_fee_rate(&self, _num_blocks: u16) -> Result<f64, Error> {
         unimplemented!()
     }
 
@@ -287,7 +313,6 @@ impl BitcoinInteract for TestHarness {
     async fn get_transaction_fee(
         &self,
         _txid: &bitcoin::Txid,
-        _lookup_hint: Option<TransactionLookupHint>,
     ) -> Result<GetTransactionFeeResult, Error> {
         unimplemented!()
     }
@@ -357,38 +382,54 @@ impl StacksInteract for TestHarness {
             .cloned()
             .ok_or(Error::MissingBlock)
     }
-    async fn check_pre_nakamoto_block(&self, _: &StacksBlockHash) -> Result<(), Error> {
-        unimplemented!()
-    }
+
     async fn get_tenure_headers(
         &self,
-        block_id: &StacksBlockHash,
+        consensus_hash: &ConsensusHash,
     ) -> Result<TenureBlockHeaders, Error> {
-        let (stx_block_id, stx_block, btc_block_id) = self
-            .stacks_blocks
-            .iter()
-            .find(|(id, _, _)| id == &block_id.into())
-            .ok_or(Error::MissingBlock)?;
-
         let headers: Vec<StacksBlockHeader> = self
             .stacks_blocks
             .iter()
-            .skip_while(|(_, _, block_id)| block_id != btc_block_id)
-            .take_while(|(block_id, _, _)| block_id != stx_block_id)
-            .map(|(_, block, _)| block)
-            .chain(std::iter::once(stx_block))
-            .map(|block| block.header.clone().into())
+            .filter(|(_, nakamoto_block, _)| {
+                &ConsensusHash::from(nakamoto_block.header.consensus_hash.clone()) == consensus_hash
+            })
+            .map(|(_, nakamoto_block, _)| nakamoto_block.header.clone().into())
             .collect();
+
+        let (_, _, btc_block_id) = self
+            .stacks_blocks
+            .iter()
+            .find(|(_, nakamoto_block, _)| {
+                &ConsensusHash::from(nakamoto_block.header.consensus_hash.clone()) == consensus_hash
+            })
+            .ok_or(Error::MissingBlock)?;
 
         let mut sortition_info = DUMMY_SORTITION_INFO.clone();
         sortition_info.burn_block_hash = BitcoinBlockHash::from(*btc_block_id).into();
+        sortition_info.burn_block_height = *self
+            .bitcoin_blocks
+            .iter()
+            .find(|block| block.block_hash == *btc_block_id)
+            .unwrap()
+            .height;
+        sortition_info.consensus_hash = (*consensus_hash).into();
+        let previous_tenure_last_block_id = headers[0].parent_block_id.into();
+        let previous_ch = &self
+            .stacks_blocks
+            .iter()
+            .find(|(block_id, _, _)| *block_id == previous_tenure_last_block_id)
+            .map(|(_, block, _)| block.header.consensus_hash.clone())
+            .unwrap_or_else(|| ConsensusHash::new([0; 20]).into());
+
+        sortition_info.last_sortition_ch = Some(previous_ch.clone());
         TenureBlockHeaders::try_new(headers, sortition_info)
     }
+
     async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
-        let (_, _, btc_block_id) = self.stacks_blocks.last().unwrap();
+        let (block_id, block, btc_block_id) = self.stacks_blocks.last().unwrap();
 
         Ok(GetTenureInfoResponse {
-            consensus_hash: ConsensusHash::new([0; 20]),
+            consensus_hash: block.header.consensus_hash.clone().into(),
             tenure_start_block_id: self
                 .stacks_blocks
                 .iter()
@@ -397,11 +438,7 @@ impl StacksInteract for TestHarness {
                 .unwrap(),
             parent_consensus_hash: ConsensusHash::new([0; 20]),
             parent_tenure_start_block_id: StacksBlockId::first_mined().into(),
-            tip_block_id: self
-                .stacks_blocks
-                .last()
-                .map(|(block_id, _, _)| block_id.clone().into())
-                .unwrap(),
+            tip_block_id: block_id.clone().into(),
             tip_height: (self.stacks_blocks.len() as u64).into(),
             reward_cycle: 0,
         })
@@ -409,9 +446,15 @@ impl StacksInteract for TestHarness {
 
     async fn get_sortition_info(
         &self,
-        _consensus_hash: &ConsensusHash,
+        consensus_hash: &ConsensusHash,
     ) -> Result<SortitionInfo, Error> {
         let bitcoin_block = self.bitcoin_blocks.last().unwrap();
+        let stacks_parent_ch = self
+            .stacks_blocks
+            .iter()
+            .find(|(_, _, bitcoin_hash)| bitcoin_hash == &bitcoin_block.previous_block_hash)
+            .map(|(_, block, _)| block.header.consensus_hash.clone());
+
         Ok(SortitionInfo {
             burn_block_hash: BurnchainHeaderHash::from_bytes_be(
                 bitcoin_block.block_hash.as_byte_array(),
@@ -421,10 +464,10 @@ impl StacksInteract for TestHarness {
             burn_header_timestamp: 0,
             sortition_id: SortitionId([0; 32]),
             parent_sortition_id: SortitionId([0; 32]),
-            consensus_hash: ConsensusHash::new([0; 20]).into(),
+            consensus_hash: (*consensus_hash).into(),
             was_sortition: true,
             miner_pk_hash160: None,
-            stacks_parent_ch: None,
+            stacks_parent_ch,
             last_sortition_ch: None,
             committed_block_hash: None,
             vrf_seed: None,
@@ -467,6 +510,10 @@ impl StacksInteract for TestHarness {
 
         data.burn_block_height = (self.bitcoin_blocks.len() as u64).into();
         data.stacks_tip_height = (self.stacks_blocks.len() as u64).into();
+
+        if let Some((_, block, _)) = self.stacks_blocks.last() {
+            data.stacks_tip_consensus_hash = block.header.consensus_hash.clone().into();
+        };
 
         Ok(data)
     }

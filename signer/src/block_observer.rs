@@ -81,21 +81,23 @@ impl DepositRequestValidator for CreateDepositRequest {
     where
         C: BitcoinInteract,
     {
-        // Fetch the transaction from either a block or from the mempool
-        let Some(response) = client.get_tx(&self.outpoint.txid).await? else {
+        // Fetch the UTXO info for a confirmed outpoint
+        let Some(response) = client.get_utxo_info(&self.outpoint).await? else {
             return Ok(None);
         };
 
-        // If the transaction has not been confirmed yet, then the block
-        // hash will be None. The transaction has not failed validation,
-        // let's try again when it gets confirmed.
-        let Some(block_hash) = response.block_hash else {
-            return Ok(None);
-        };
-
-        if response.tx.is_coinbase() {
+        if response.is_coinbase {
             return Err(Error::BitcoinTxCoinbase(self.outpoint.txid));
         }
+
+        // This is usually the block hash confirming the transaction
+        // associated with the outpoint. However, it can be incorrect if
+        // our bitcoin node detects a reorg in the middle of the above
+        // function call and the reorg affects the outpoint in question.
+        // The call below to get_tx_info will detect this and we will
+        // either return Ok(None) or an error, which is fine, it will get
+        // sorted out at the arrival of the next bitcoin block.
+        let block_hash = response.block_hash;
 
         // The `get_tx_info` call here should not return None, we know that
         // it has been included in a block.
@@ -107,13 +109,11 @@ impl DepositRequestValidator for CreateDepositRequest {
         // info struct.
         tx_info.validate()?;
 
-        let info = self.validate_tx(&tx_info.tx, is_mainnet)?;
-
-        if info.max_fee > i64::MAX as u64 {
-            return Err(Error::InvalidMaxFee(info.outpoint, info.max_fee));
-        }
-
-        Ok(Some(Deposit { info, tx_info, block_hash }))
+        Ok(Some(Deposit {
+            info: self.validate_tx(&tx_info.tx, is_mainnet)?,
+            tx_info,
+            block_hash,
+        }))
     }
 }
 
@@ -146,8 +146,9 @@ where
     }
 
     /// Run the block observer
-    #[tracing::instrument(skip_all, name = "block-observer")]
+    #[tracing::instrument(skip_all, name = "block-observer", fields(bitcoin_tip_hash = tracing::field::Empty))]
     pub async fn run(self) -> Result<(), Error> {
+        let span = tracing::Span::current();
         let term = self.context.get_termination_handle();
         let mut bitcoin_blocks = self.bitcoin_block_source.get_block_hash_stream();
 
@@ -165,23 +166,25 @@ where
 
             match poll.await {
                 Ok(Some(Ok(block_hash))) => {
-                    tracing::info!(%block_hash, "observed new bitcoin block from stream");
+                    span.record("bitcoin_tip_hash", tracing::field::display(block_hash));
+
+                    tracing::info!("observed new bitcoin block from stream");
                     metrics::counter!(
                         Metrics::BlocksObservedTotal,
                         "blockchain" => BITCOIN_BLOCKCHAIN,
                     )
                     .increment(1);
 
-                    if let Err(error) = self.process_bitcoin_blocks_until(block_hash).await {
-                        tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
+                    if let Err(error) = self.process_bitcoin_chain_tip(block_hash).await {
+                        tracing::error!(%error, "could not process bitcoin blocks");
                     }
 
                     if let Err(error) = self.process_stacks_blocks().await {
-                        tracing::warn!(%error, "could not process stacks blocks");
+                        tracing::error!(%error, "could not process stacks blocks");
                     }
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
-                        tracing::warn!(%error, "could not check pending dkg shares");
+                        tracing::error!(%error, "could not check pending dkg shares");
                         continue;
                     }
 
@@ -189,21 +192,21 @@ where
                     let chain_tip = match self.update_signer_state(block_hash).await {
                         Ok(chain_tip) => chain_tip,
                         Err(error) => {
-                            tracing::warn!(%error, "could not update the signer state");
+                            tracing::error!(%error, "could not update the signer state");
                             continue;
                         }
                     };
 
                     tracing::info!("loading latest deposit requests from Emily");
                     if let Err(error) = self.load_latest_deposit_requests().await {
-                        tracing::warn!(%error, "could not load latest deposit requests from Emily");
+                        tracing::error!(%error, "could not load latest deposit requests from Emily");
                     }
 
                     self.context
                         .signal(SignerEvent::BitcoinBlockObserved(chain_tip).into())?;
                 }
                 Ok(Some(Err(error))) => {
-                    tracing::warn!(%error, "error decoding new bitcoin block hash from stream");
+                    tracing::error!(%error, "error decoding new bitcoin block hash from stream");
                     continue;
                 }
                 _ => continue,
@@ -296,7 +299,8 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 
     /// Find the parent blocks from the given block that are also missing
-    /// from our database.
+    /// from our database. The results are returned from blocks with the
+    /// least height to the greatest height.
     ///
     /// # Notes
     ///
@@ -347,6 +351,35 @@ impl<C: Context, B> BlockObserver<C, B> {
         }
 
         Ok(headers.into())
+    }
+
+    /// Process the bitcoin chain tip by fetching all unknown block headers
+    /// from the given chain tip back until the nakamoto start height. Then
+    /// mark all blocks reachable from the chain tip as canonical in the
+    /// database.
+    ///
+    /// # Notes
+    ///
+    /// This function must only be called with the bitcoin chain tip since
+    /// it updates all blocks that are reachable from the given block hash
+    /// as canonical and may update blocks not reachable as non-canonical.
+    #[tracing::instrument(skip_all)]
+    async fn process_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
+        self.process_bitcoin_blocks_until(chain_tip).await?;
+
+        let db = self.context.get_storage_mut();
+
+        tracing::info!("updating canonical bitcoin blockchain to chain tip");
+        let chain_tip: model::BitcoinBlockHash = chain_tip.into();
+
+        // This is a safeguard to prevent us from updating the is_canonical
+        // column of all blocks in the database if the given chain tip has
+        // not been written to the database.
+        if !db.is_known_bitcoin_block_hash(&chain_tip).await? {
+            tracing::error!("chain tip not found in database, not setting is_canonical column");
+            return Err(Error::UnknownBitcoinChainTip(chain_tip));
+        }
+        db.set_canonical_bitcoin_blockchain(&chain_tip).await
     }
 
     /// Process bitcoin blocks until we get caught up to the given
@@ -426,13 +459,11 @@ impl<C: Context, B> BlockObserver<C, B> {
         let db = self.context.get_storage_mut();
         let tenure_info = stacks_client.get_tenure_info().await?;
 
+        let consensus_hash = tenure_info.consensus_hash;
+
         tracing::debug!("fetching unknown ancestral blocks from stacks-core");
-        crate::stacks::api::update_db_with_unknown_ancestors(
-            &stacks_client,
-            &db,
-            &tenure_info.tip_block_id,
-        )
-        .await?;
+        crate::stacks::api::update_db_with_unknown_ancestors(&stacks_client, &db, consensus_hash)
+            .await?;
 
         tracing::debug!("finished processing stacks block");
         Ok(())
@@ -949,11 +980,11 @@ mod tests {
 
         // This deposit transaction is a fine deposit, it just hasn't been
         // confirmed yet.
-        let max_fee = i64::MAX as u64 + 1;
+        let max_fee = u64::MAX;
         let tx_setup3 = sbtc::testing::deposits::tx_setup(400, max_fee, &[amount]);
         let get_tx_resp3 = GetTxResponse {
             tx: tx_setup3.tx.clone(),
-            block_hash: None,
+            block_hash,
             confirmations: None,
             block_time: None,
         };
@@ -966,6 +997,7 @@ mod tests {
             deposit_script: tx_setup3.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup3.reclaims.first().unwrap().reclaim_script(),
         };
+        let req3 = deposit_request3.clone();
 
         // Let's add the "responses" to the field that feeds the
         // response to the `BitcoinClient::get_tx` call.
@@ -1008,18 +1040,23 @@ mod tests {
         }
 
         block_observer.load_latest_deposit_requests().await.unwrap();
-        // Only the transaction from tx_setup0 was valid. Note that, since
-        // we are not using a real block hash stored in the database. Our
-        // DbRead function won't actually find it. And in prod we won't
-        // actually store the deposit request transaction.
-        let deposit = {
+        // Only the transactions from tx_setup0 and tx_setup3 were valid.
+        // Note that, since we are not using a real block hash stored in
+        // the database. Our DbRead function won't actually find it. And in
+        // prod we won't actually store the deposit request transaction.
+        let (deposit0, deposit3) = {
             let db = storage.lock().await;
-            assert_eq!(db.deposit_requests.len(), 1);
-            db.deposit_requests.values().next().cloned().unwrap()
+            assert_eq!(db.deposit_requests.len(), 2);
+            let mut values = db.deposit_requests.values().cloned().collect::<Vec<_>>();
+            values.sort_by_key(|req| req.max_fee);
+            values.reverse();
+            (values.pop().unwrap(), values.pop().unwrap())
         };
 
-        assert_eq!(deposit.outpoint(), req0.outpoint);
-        assert_eq!(deposit.max_fee, i64::MAX as u64);
+        assert_eq!(deposit0.outpoint(), req0.outpoint);
+        assert_eq!(deposit0.max_fee, i64::MAX as u64);
+        assert_eq!(deposit3.outpoint(), req3.outpoint);
+        assert_eq!(deposit3.max_fee, u64::MAX);
     }
 
     /// Test that `BlockObserver::extract_deposit_requests` after

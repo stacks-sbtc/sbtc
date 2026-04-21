@@ -1,6 +1,7 @@
 //! Contains client wrappers for bitcoin core and electrum.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bitcoin::Amount;
 use bitcoin::BlockHash;
@@ -9,7 +10,6 @@ use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::Txid;
-use bitcoincore_rpc::Auth;
 use bitcoincore_rpc::Error as BtcRpcError;
 use bitcoincore_rpc::RpcApi as _;
 use bitcoincore_rpc::json::EstimateMode;
@@ -20,6 +20,7 @@ use bitcoincore_rpc_json::GetMempoolEntryResult;
 use bitcoincore_rpc_json::GetNetworkInfoResult;
 use bitcoincore_rpc_json::GetTxOutResult;
 use futures::future::try_join_all;
+use jsonrpc::simple_http;
 use serde::Deserialize;
 use url::Url;
 
@@ -30,7 +31,6 @@ use crate::error::Error;
 use crate::storage::model::BitcoinBlockHeight;
 
 use super::GetTransactionFeeResult;
-use super::TransactionLookupHint;
 
 /// A slimmed down type representing a response from bitcoin-core's
 /// getrawtransaction RPC.
@@ -59,6 +59,20 @@ pub struct GetTxResponse {
     pub block_time: Option<u64>,
 }
 
+/// A type containing basic information about an unspent output
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "testing", derive(PartialEq))]
+pub struct OutPointSummary {
+    /// The block hash of the Bitcoin block that confirms a transaction
+    /// that created the associated output.
+    pub block_hash: BlockHash,
+    /// Whether the transaction is a coinbase transaction.
+    ///
+    /// This is true for coinbase transactions, and false for other
+    /// transactions.
+    pub is_coinbase: bool,
+}
+
 /// A struct containing the response from bitcoin-core for requests for
 /// detailed transactions. Specifically, this object can be used for:
 /// 1. The response object for `getrawtransaction` RPC where verbose is set
@@ -72,7 +86,7 @@ pub struct GetTxResponse {
 ///   type, which is what the bitcoincore-rpc crate returns for the
 ///   `getrawtransaction` RPC with verbosity set to 1. That type is missing
 ///   some information that we want.
-/// * All optional fields are omited from bitcoin-core for coinbase
+/// * All optional fields are omitted from bitcoin-core for coinbase
 ///   transactions and whenever the "block undo data" is missing for a
 ///   block. The block undo data is always present for validated blocks,
 ///   and block validation is always done for blocks on the currently
@@ -214,19 +228,6 @@ pub struct OutputScriptPubKey {
     pub script: ScriptBuf,
 }
 
-/// A slimmed down version of the `BitcoinTxInfo` struct which only contains the
-/// `fee`, `vsize`, and `confirmations` fields; used in fee-retrieval contexts.
-#[derive(Debug, Clone, Deserialize)]
-pub struct BitcoinTxFeeInfo {
-    /// The transaction fee paid to the bitcoin miners. If the transaction is
-    /// not confirmed, a number of RPC endpoints will not return this field.
-    #[serde(default, with = "bitcoin::amount::serde::as_btc::opt")]
-    pub fee: Option<Amount>,
-    /// The virtual transaction size (differs from size for witness
-    /// transactions).
-    pub vsize: u64,
-}
-
 /// A detailed version of a bitcoin block. It is a slimmed down version of
 /// the response from a `getblock` RPC call from bitcoin core with a
 /// verbosity of 3.
@@ -334,12 +335,22 @@ pub struct BitcoinCoreClient {
     inner: Arc<bitcoincore_rpc::Client>,
 }
 
+/// A struct containing the data needed to create a [`BitcoinCoreClient`].
+pub struct BitcoinCoreClientParams {
+    /// The URL of a bitcoin-core node.
+    pub url: Url,
+    /// The max wait time for responses from RPC requests to bitcoin-core.
+    pub timeout: Duration,
+}
+
 /// Implement TryFrom for Url to allow for easy conversion from a URL to a
 /// BitcoinCoreClient.
-impl TryFrom<&Url> for BitcoinCoreClient {
+impl TryFrom<&BitcoinCoreClientParams> for BitcoinCoreClient {
     type Error = Error;
 
-    fn try_from(url: &Url) -> Result<Self, Self::Error> {
+    fn try_from(params: &BitcoinCoreClientParams) -> Result<Self, Self::Error> {
+        let timeout = params.timeout;
+        let url = &params.url;
         let username = url.username().to_string();
         let password = url.password().unwrap_or_default().to_string();
         let host = url
@@ -349,7 +360,7 @@ impl TryFrom<&Url> for BitcoinCoreClient {
 
         let endpoint = format!("{}://{host}:{port}", url.scheme());
 
-        Self::new(&endpoint, username, password)
+        Self::new(&endpoint, username, password, timeout)
     }
 }
 
@@ -359,12 +370,20 @@ impl BitcoinCoreClient {
     /// # Notes
     ///
     /// This function does not attempt to establish a connection to bitcoin-core.
-    pub fn new(url: &str, username: String, password: String) -> Result<Self, Error> {
-        let auth = Auth::UserPass(username, password);
-        let client = bitcoincore_rpc::Client::new(url, auth)
-            .map(Arc::new)
-            .map_err(|err| Error::BitcoinCoreRpcClient(err, url.to_string()))?;
+    pub fn new(
+        url: &str,
+        username: String,
+        password: String,
+        timeout: Duration,
+    ) -> Result<Self, Error> {
+        let transport = simple_http::Builder::new()
+            .url(url)
+            .map_err(|error| Error::BitcoinCoreRpcClient(error, url.to_string()))?
+            .auth(username, Some(password))
+            .timeout(timeout)
+            .build();
 
+        let client = Arc::new(bitcoincore_rpc::Client::from_jsonrpc(transport.into()));
         Ok(Self { inner: client })
     }
 
@@ -411,8 +430,8 @@ impl BitcoinCoreClient {
     }
 
     /// Fetch and decode raw transaction from bitcoin-core using the
-    /// getrawtransaction RPC with a verbosity of 1. None is returned if
-    /// the node cannot find the transaction in a bitcoin block or the
+    /// getrawtransaction RPC with a verbosity of 1 [1]. None is returned
+    /// if the node cannot find the transaction in a bitcoin block or the
     /// mempool.
     ///
     /// # Notes
@@ -420,11 +439,13 @@ impl BitcoinCoreClient {
     /// By default, this call only returns a transaction if it is in the
     /// mempool. If -txindex is enabled on bitcoin-core and no blockhash
     /// argument is passed, it will return the transaction if it is in the
-    /// mempool or any block. We require -txindex to be enabled (same with
-    /// stacks-core[^1]) so this should work with transactions in either
-    /// the mempool and a bitcoin block.
+    /// mempool or any block. We do not require -txindex to be enabled
+    /// (same with stacks-core[2]), so we only claim that this function
+    /// works with transactions in the mempool.
     ///
-    /// [^1]: <https://docs.stacks.co/guides-and-tutorials/run-a-miner/mine-mainnet-stacks-tokens>
+    /// [1]: <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
+    /// [2]: <https://docs.stacks.co/operate/run-a-node/run-a-pruned-bitcoin-node>
+    #[cfg(any(test, feature = "testing"))]
     pub fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         let args = [
             serde_json::to_value(txid).map_err(Error::JsonSerialize)?,
@@ -439,6 +460,63 @@ impl BitcoinCoreClient {
             Ok(tx_info) => Ok(Some(tx_info)),
             Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
             Err(err) => Err(Error::BitcoinCoreGetTransaction(err, *txid)),
+        }
+    }
+
+    /// Fetch the summary of a UTXO identified by the given outpoint.
+    ///
+    /// This function ends up making three calls to bitcoin-core:
+    /// 1. We use the `gettxout` RPC to get confirmation height relative to
+    ///    the chain tip.
+    /// 2. We use the `getblockheader` RPC to get the block height of the
+    ///    chain tip returned in (1).
+    /// 3. We use the `getblockhash` RPC to get the block hash of the block
+    ///    confirming the transaction that created the UTXO.
+    ///
+    /// # Notes
+    ///
+    /// This function can return an incorrect response if our bitcoin node
+    /// detects a reorg in the middle of this function call and the reorg
+    /// affects the outpoint in question.
+    ///
+    /// This function returns Ok(None) if:
+    /// * the associated output has been spent.
+    /// * the associated output is not confirmed in a block on the
+    ///   canonical bitcoin blockchain.
+    ///
+    /// The documentation of the `getblockhash` RPC can be found at:
+    /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblockhash/>
+    pub fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        // This returns Some(_) if the transaction is confirmed in a canonical
+        // block and unspent.
+        let Some(out) = self.get_tx_out(outpoint, false)? else {
+            return Ok(None);
+        };
+
+        // This should always succeed, since we are just asking for the
+        // chain tip header.
+        let Some(chain_tip) = self.get_block_header(&out.bestblock)? else {
+            return Err(Error::BitcoinCoreUnknownChainTip(out.bestblock, *outpoint));
+        };
+
+        // Now that we know the height of the chain tip and how many
+        // confirmations the transaction has, we can get the height of the
+        // block confirming the transaction with simple arithmetic. Note
+        // that we need to add 1; the confirmations value is one more than
+        // the "offset" value that we want. For example, a transaction that
+        // is confirmed at the chain tip has 1 confirmation, but the offset
+        // from the chain tip is 0.
+        let confirmation_height = chain_tip
+            .height
+            .saturating_sub(out.confirmations as u64)
+            .saturating_add(1u64);
+
+        match self.inner.get_block_hash(*confirmation_height) {
+            Ok(block_hash) => Ok(Some(OutPointSummary {
+                block_hash,
+                is_coinbase: out.coinbase,
+            })),
+            Err(err) => Err(Error::BitcoinCoreGetBlockHash(err, *confirmation_height)),
         }
     }
 
@@ -457,7 +535,7 @@ impl BitcoinCoreClient {
     ///
     /// - This method requires bitcoin-core v25 or later.
     /// - The implementation is based on the documentation at
-    ///   https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/
+    ///   <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
     pub fn get_tx_info(
         &self,
         txid: &Txid,
@@ -473,34 +551,6 @@ impl BitcoinCoreClient {
         ];
 
         match self.inner.call::<BitcoinTxInfo>("getrawtransaction", &args) {
-            Ok(tx_info) => Ok(Some(tx_info)),
-            // If the `block_hash` is not found then the message is "Block
-            // hash not found", while if the transaction is not found in an
-            // actual block then the message is "No such transaction found
-            // in the provided block. Use `gettransaction` for wallet
-            // transactions." In both cases the code is the same.
-            Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
-            Err(err) => Err(Error::BitcoinCoreGetTransaction(err, *txid)),
-        }
-    }
-
-    /// Fetch and decode raw transaction from bitcoin-core using the
-    /// `getrawtransaction` RPC with a verbosity of 2. This method returns a
-    /// highly slimmed-down version of the response, containing only the
-    /// `fee` and `vsize` fields for fees retrieval.
-    pub fn get_tx_fee_info(&self, txid: &Txid) -> Result<Option<BitcoinTxFeeInfo>, Error> {
-        let args = [
-            serde_json::to_value(txid).map_err(Error::JsonSerialize)?,
-            // This is the verbosity level. The acceptable values are 0, 1,
-            // and 2, and we want the 2 because it will include all the
-            // required fields of the type.
-            serde_json::Value::Number(serde_json::value::Number::from(2u32)),
-        ];
-
-        match self
-            .inner
-            .call::<BitcoinTxFeeInfo>("getrawtransaction", &args)
-        {
             Ok(tx_info) => Ok(Some(tx_info)),
             // If the `block_hash` is not found then the message is "Block
             // hash not found", while if the transaction is not found in an
@@ -604,17 +654,17 @@ impl BitcoinCoreClient {
     /// Modified from the bitcoin-core docs[1]:
     ///
     /// Bitcoin-core has two different modes for fee rate estimation,
-    /// "conservative" and "economical". We use the "conservative" estimate
-    /// because it is more likely to be sufficient for the desired target,
-    /// but is not as responsive to short term drops in the prevailing fee
-    /// market when compared to the "economical" fee rate. Also, the docs
-    /// mention the response is in BTC/kB, but from the comments in
-    /// bitcoin-core[2] this is really BTC/kvB (kvB is kilo-vbyte).
+    /// "conservative" and "economical". We use "economical" since we are fine
+    /// with a higher risk of confirmation delay in favor of generally lower
+    /// fees.
+    ///
+    /// Also, the docs mention the response is in BTC/kB, but from the comments
+    /// in bitcoin-core[2] this is really BTC/kvB (kvB is kilo-vbyte).
     ///
     /// [^1]: https://developer.bitcoin.org/reference/rpc/estimatesmartfee.html
     /// [^2]: https://github.com/bitcoin/bitcoin/blob/d367a4e36f7357c4ebd018e8e1c9c5071db2e1c2/src/rpc/fees.cpp#L90-L91
     pub fn estimate_fee_rate(&self, num_blocks: u16) -> Result<FeeEstimate, Error> {
-        let estimate_mode = Some(EstimateMode::Conservative);
+        let estimate_mode = Some(EstimateMode::Economical);
         let resp = self
             .inner
             .estimate_smart_fee(num_blocks, estimate_mode)
@@ -668,6 +718,10 @@ impl BitcoinCoreClient {
 }
 
 impl BitcoinInteract for BitcoinCoreClient {
+    async fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        self.get_utxo_info(outpoint)
+    }
+
     async fn broadcast_transaction(&self, tx: &Transaction) -> Result<(), Error> {
         self.inner
             .send_raw_transaction(tx)
@@ -686,6 +740,7 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_block_header(block_hash)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         self.get_tx(txid)
     }
@@ -698,11 +753,8 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_tx_info(txid, block_hash)
     }
 
-    async fn estimate_fee_rate(&self) -> Result<f64, Error> {
-        // TODO(542): This function is supposed to incorporate other fee
-        // estimation methods, in particular the ones in the
-        // src/bitcoin/fees.rs module.
-        self.estimate_fee_rate(1)
+    async fn estimate_fee_rate(&self, num_blocks: u16) -> Result<f64, Error> {
+        self.estimate_fee_rate(num_blocks)
             .map(|estimate| estimate.sats_per_vbyte)
     }
 
@@ -725,68 +777,12 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_tx_out(outpoint, include_mempool)
     }
 
-    async fn get_transaction_fee(
-        &self,
-        txid: &bitcoin::Txid,
-        lookup_hint: Option<TransactionLookupHint>,
-    ) -> Result<GetTransactionFeeResult, Error> {
-        let vsize: u64;
-        let fee: u64;
-
-        match lookup_hint {
-            None => {
-                // Since we don't know if the transaction is confirmed or in
-                // the mempool, we first try to get the fee info from the
-                // confirmed transactions. This will also return a value if
-                // the transaction exists in the mempool, but the fee will be
-                // empty.
-                let tx_fee_info = self
-                    .get_tx_fee_info(txid)?
-                    .ok_or(Error::BitcoinTxMissing(*txid, None))?;
-
-                vsize = tx_fee_info.vsize;
-
-                // If the fee is present, then the transaction was confirmed and
-                // we can can simply use that value.
-                if let Some(tx_fee) = tx_fee_info.fee {
-                    fee = tx_fee.to_sat();
-                } else {
-                    // Otherwise, we need to get the mempool entry which does
-                    // include the fee information.
-                    let mempool_entry = self
-                        .get_mempool_entry(txid)?
-                        .ok_or(Error::BitcoinTxMissing(*txid, None))?;
-
-                    fee = mempool_entry.fees.base.to_sat();
-                }
-            }
-            Some(TransactionLookupHint::Confirmed) => {
-                let tx_fee_info = self
-                    .get_tx_fee_info(txid)?
-                    .ok_or(Error::BitcoinTxMissing(*txid, None))?;
-
-                vsize = tx_fee_info.vsize;
-
-                // If the transaction is confirmed, the fee will be present.
-                // But if not, we will return an error since the hint explicitly
-                // indicates that the transaction is confirmed.
-                fee = tx_fee_info
-                    .fee
-                    .ok_or(Error::BitcoinTxMissing(*txid, None))?
-                    .to_sat();
-            }
-            Some(TransactionLookupHint::Mempool) => {
-                // If the hint indicates that the transaction is in the mempool
-                // then we can skip the confirmed transaction lookup and go
-                // straight to the mempool entry.
-                let mempool_entry = self
-                    .get_mempool_entry(txid)?
-                    .ok_or(Error::BitcoinTxMissing(*txid, None))?;
-
-                vsize = mempool_entry.vsize;
-                fee = mempool_entry.fees.base.to_sat();
-            }
-        }
+    async fn get_transaction_fee(&self, txid: &Txid) -> Result<GetTransactionFeeResult, Error> {
+        let mempool_entry = self
+            .get_mempool_entry(txid)?
+            .ok_or(Error::BitcoinTxMissing(*txid, None))?;
+        let vsize = mempool_entry.vsize;
+        let fee = mempool_entry.fees.base.to_sat();
 
         // This should never happen since we're pulling the vsize from an actual
         // bitcoin transaction, but we'll check just in case.
@@ -864,7 +860,7 @@ where
         let bitcoin_client = bitcoin_client.clone();
         async move {
             bitcoin_client
-                .get_transaction_fee(txid, Some(TransactionLookupHint::Mempool))
+                .get_transaction_fee(txid)
                 .await
                 .map(|fee| (txid, fee))
         }
@@ -896,7 +892,7 @@ where
         let bitcoin_client = bitcoin_client.clone();
         async move {
             bitcoin_client
-                .get_transaction_fee(txid, Some(TransactionLookupHint::Mempool))
+                .get_transaction_fee(txid)
                 .await
         }
     }))

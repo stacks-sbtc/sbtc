@@ -27,6 +27,7 @@ use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::containers::TestContainersBuilder;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
+use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
@@ -34,11 +35,13 @@ use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
 use signer::block_observer::get_signer_set_info;
 use signer::context::SbtcLimits;
+use signer::emily_client::EmilyInteract;
 use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
 use signer::stacks::api::SignerSetInfo;
 use signer::stacks::api::StacksEpochStatus;
+use signer::stacks::api::StacksInteract;
 use signer::stacks::api::TenureBlockHeaders;
 use signer::storage::DbWrite as _;
 use signer::storage::model;
@@ -53,6 +56,7 @@ use signer::storage::model::TxPrevout;
 use signer::storage::model::TxPrevoutType;
 use signer::storage::postgres::PgStore;
 use signer::testing::btc::get_canonical_chain_tip;
+use signer::testing::stacks::DUMMY_SORTITION_INFO;
 use signer::testing::stacks::DUMMY_TENURE_INFO;
 
 use signer::block_observer::BlockObserver;
@@ -71,19 +75,45 @@ use signer::transaction_signer::assert_allow_dkg_begin;
 use url::Url;
 
 use crate::containers::BitcoinContainerExt as _;
-use crate::setup::TestSweepSetup;
+use crate::setup::SweepAmounts;
+use crate::setup::TestSignerSet;
+use crate::setup::TestSweepSetup2;
 use crate::setup::clean_emily_setup;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
 use crate::setup::new_emily_setup;
 use crate::transaction_coordinator::mock_reqwests_status_code_error;
 use crate::utxo_construction::make_deposit_request;
 
+/// Wait for the arrival of the BitcoinBlockObserved signal for the given
+/// block hash, returning when the signal is received and panicking if not
+/// received within 5 seconds.
+async fn wait_for_block_observed<S, B, E>(
+    ctx: &TestContext<PgStore, B, S, E>,
+    block_hash: BitcoinBlockHash,
+) where
+    B: BitcoinInteract + Clone + Send + Sync + 'static,
+    S: StacksInteract + Clone + Send + Sync + 'static,
+    E: EmilyInteract + Clone + Send + Sync + 'static,
+{
+    let wait_duration = Duration::from_secs(5);
+
+    let match_fn = |signal: &SignerSignal| {
+        matches!(
+            signal,
+            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                if block_ref.block_hash == block_hash
+        )
+    };
+
+    ctx.wait_for_signal(wait_duration, match_fn).await.unwrap();
+}
+
 /// The [`BlockObserver::load_latest_deposit_requests`] function is
 /// supposed to fetch all deposit requests from Emily and persist the ones
-/// that pass validation, regardless of when they were confirmed.
+/// that pass validation.
 #[test_case::test_case(1; "one block ago")]
 #[test_case::test_case(5; "five blocks ago")]
-#[test_log::test(tokio::test)]
+#[tokio::test]
 async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u64) {
     // We start with the typical setup with a fresh database and context
     // with a real bitcoin core client and a real connection to our
@@ -104,18 +134,27 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         .build();
     ctx.state().update_current_limits(SbtcLimits::unlimited());
 
-    // We're going to create two confirmed deposits. This also generates
-    // sweep transactions, but this information is not in our database, so
-    // it doesn't matter for this test.
-    let setup0 = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 100_000, &mut rng);
-    let setup1 = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 200_000, &mut rng);
+    // We're going to create two confirmed deposits. These deposit outputs
+    // have not been spent, so the block observer should pick them up and
+    // store them in the database.
+    let signers = TestSignerSet::new(&mut rng);
+    let amounts = [
+        SweepAmounts {
+            amount: 100_000,
+            max_fee: 100_000,
+            is_deposit: true,
+        },
+        SweepAmounts {
+            amount: 200_000,
+            max_fee: 200_000,
+            is_deposit: true,
+        },
+    ];
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &amounts);
 
     // Let's prep Emily with information about these deposits.
     ctx.with_emily_client(|client| {
-        let emily_client_response = vec![
-            setup0.emily_deposit_request(),
-            setup1.emily_deposit_request(),
-        ];
+        let emily_client_response = setup.emily_deposit_requests();
         client
             .expect_get_deposits()
             .times(1..)
@@ -219,16 +258,10 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     // We need to wait for the bitcoin-core to send us all the
     // notifications so that we are up to date with the expected chain tip.
     // For that we just wait until we know that we're up-to-date
-    ctx.wait_for_signal(Duration::from_secs(10), |signal| {
-        matches!(signal, SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip)
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip).await;
 
     // Okay now lets check if we have these deposit requests in our
     // database. It should also have bitcoin blockchain data
-
     assert!(
         db2.get_bitcoin_canonical_chain_tip()
             .await
@@ -241,8 +274,8 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
     let req_outpoints: HashSet<OutPoint> =
         deposit_requests.iter().map(|req| req.outpoint()).collect();
 
-    assert!(req_outpoints.contains(&setup0.deposit_info.outpoint));
-    assert!(req_outpoints.contains(&setup1.deposit_info.outpoint));
+    assert!(req_outpoints.contains(&setup.deposits[0].0.outpoint));
+    assert!(req_outpoints.contains(&setup.deposits[1].0.outpoint));
 
     testing::storage::drop_db(db).await;
 }
@@ -496,15 +529,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
 
     // Let's wait for the block observer to signal that it has finished
     // processing everything.
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip
-        )
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip).await;
 
     // Okay now we check whether the we have a donation. The details should
     // match what we expect. All other input and output types should not be
@@ -546,15 +571,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
     faucet.send_to(50_000_000, &depositor.address);
 
     let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip
-        )
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip).await;
 
     // Now lets make a deposit transaction and submit it. First we get some
     // sats.
@@ -620,15 +637,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip
-        )
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip).await;
 
     // Okay now we should see the signers output with the expected values.
     let TxOutput { txid, output_index, amount, .. } =
@@ -986,7 +995,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
         bitcoin_block_source,
     };
 
-    let mut signal_receiver = ctx.get_signal_receiver();
+    let _signal = ctx.get_signal_receiver();
 
     tokio::spawn(async move {
         flag.store(true, Ordering::Relaxed);
@@ -1002,18 +1011,7 @@ async fn block_observer_handles_update_limits(deployed: bool, sbtc_limits: SbtcL
     // BitcoinBlockObserved signal.
     let expected_tip = faucet.generate_block().into();
 
-    let waiting_fut = async {
-        let signal = signal_receiver.recv();
-        match signal.await {
-            Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
-                if block_ref.block_hash == expected_tip => {}
-            _ => panic!("Not the right signal"),
-        }
-    };
-
-    tokio::time::timeout(Duration::from_secs(3), waiting_fut)
-        .await
-        .unwrap();
+    wait_for_block_observed(&ctx, expected_tip).await;
 
     // If we pass the above without panicking it should be fine, this is just a
     // sanity check.
@@ -1316,15 +1314,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // BitcoinBlockObserved signal.
     let chain_tip = faucet.generate_block().into();
 
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip
-        )
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip).await;
 
     // If we pass the above without panicking it should be fine, this is just a
     // sanity check.
@@ -1356,15 +1346,7 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     // BitcoinBlockObserved signal.
     let chain_tip = faucet.generate_block().into();
 
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip
-        )
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip).await;
 
     let db_chain_tip = db
         .get_bitcoin_canonical_chain_tip()
@@ -1502,15 +1484,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // BitcoinBlockObserved signal.
     let chain_tip = faucet.generate_block().into();
 
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip
-        )
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip).await;
 
     // If we pass the above without panicking it should be fine, this is just a
     // sanity check.
@@ -1556,15 +1530,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     for _ in 0..verification_window {
         let chain_tip = faucet.generate_block().into();
 
-        ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-            matches!(
-                signal,
-                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                    if block_ref.block_hash == chain_tip
-            )
-        })
-        .await
-        .unwrap();
+        wait_for_block_observed(&ctx, chain_tip).await;
 
         // Check that the chain tip has been updated (sanity check)
         let db_chain_tip = db
@@ -1590,15 +1556,7 @@ async fn block_observer_updates_dkg_shares_after_observing_bitcoin_block() {
     // With this block we exit the verification window
     let chain_tip = faucet.generate_block().into();
 
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-        matches!(
-            signal,
-            SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip
-        )
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip).await;
 
     // Check that the chain tip has been updated (sanity check)
     let db_chain_tip = db
@@ -1651,8 +1609,7 @@ async fn block_observer_ignores_coinbase() {
         .with_mocked_stacks_client()
         .build();
 
-    let mut signal_receiver = ctx.get_signal_receiver();
-
+    let _signal = ctx.get_signal_receiver();
     // The block observer reaches out to the stacks node to get the most
     // up-to-date information. We don't have stacks-core running so we mock
     // these calls.
@@ -1739,12 +1696,7 @@ async fn block_observer_ignores_coinbase() {
 
     // Let's wait for the block observer to signal that it has finished
     // processing everything.
-    let signal = signal_receiver.recv();
-    match signal.await {
-        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
-            if *block_ref.block_hash == chain_tip => {}
-        _ => panic!("Not the right signal"),
-    }
+    wait_for_block_observed(&ctx, chain_tip.into()).await;
 
     // Okay now we check we ignored the coinbase donation but processed the
     // block as expected and have the second donation.
@@ -1773,12 +1725,7 @@ async fn block_observer_ignores_coinbase() {
     let chain_tip = get_canonical_chain_tip(rpc).hash;
     // `make_coinbase_deposit_request` will generate a block, ensure we process
     // it just fine.
-    let signal = signal_receiver.recv();
-    match signal.await {
-        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
-            if *block_ref.block_hash == chain_tip => {}
-        _ => panic!("Not the right signal"),
-    }
+    wait_for_block_observed(&ctx, chain_tip.into()).await;
 
     // ** Step 5 **
     //
@@ -1801,12 +1748,7 @@ async fn block_observer_ignores_coinbase() {
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
-    let signal = signal_receiver.recv();
-    match signal.await {
-        Ok(SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)))
-            if block_ref.block_hash == chain_tip => {}
-        _ => panic!("Not the right signal"),
-    }
+    wait_for_block_observed(&ctx, chain_tip).await;
 
     // We should have two donations if we processed both blocks correctly
     let donations = fetch_output(&db, TxOutputType::Donation).await;
@@ -1901,23 +1843,18 @@ fn make_coinbase_deposit_request(
     (deposit_tx, req, info)
 }
 
-/// This test checks that the block observer ignores deposits with a max
-/// fee that is too high.
+/// This test checks that the block observer writes deposits with a a high
+/// max–fee to the database.
 #[test_log::test(tokio::test)]
-async fn block_observer_ignores_deposits_with_invalid_max_fee() {
+async fn block_observer_handles_deposits_with_high_max_fee() {
     let mut rng = get_rng();
 
     let stack = TestContainersBuilder::start_bitcoin().await;
     let bitcoin = stack.bitcoin().await;
-    let rpc = bitcoin.rpc();
     let faucet = &bitcoin.get_faucet();
 
-    let (emily_client, emily_tables) = new_emily_setup().await;
-
     // Generate a block to ensure we start with an empty mempool
-    faucet.generate_block();
-
-    let chain_tip_info = get_canonical_chain_tip(rpc);
+    let chain_tip = faucet.generate_block().into();
 
     // 1. Create a database, an associated context for the block observer.
 
@@ -1925,7 +1862,7 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
     let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_bitcoin_client(bitcoin.get_client())
-        .with_emily_client(emily_client.clone())
+        .with_mocked_emily_client()
         .with_mocked_stacks_client()
         .build();
 
@@ -1937,7 +1874,6 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
             .expect_get_tenure_info()
             .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
 
-        let chain_tip = BitcoinBlockHash::from(chain_tip_info.hash);
         client.expect_get_tenure_headers().returning(move |_| {
             let mut tenure = TenureBlockHeaders::nearly_empty().unwrap();
             tenure.anchor_block_hash = chain_tip;
@@ -1961,36 +1897,6 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
     .await;
 
     // ** Step 2 **
-    //
-    // Start the BlockObserver
-    //
-    // We only proceed with the test after the process has started, and
-    // we use this counter to notify us when that happens.
-    let start_flag = Arc::new(AtomicBool::new(false));
-    let flag = start_flag.clone();
-
-    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
-    let block_observer = BlockObserver {
-        context: ctx.clone(),
-        bitcoin_block_source,
-    };
-
-    tokio::spawn(async move {
-        flag.store(true, Ordering::Relaxed);
-        block_observer.run().await
-    });
-
-    while !start_flag.load(Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    let deposits = db
-        .get_deposit_requests(&chain_tip_info.hash.into(), 100)
-        .await
-        .unwrap();
-    assert!(deposits.is_empty());
-
-    // ** Step 3 **
     //
     // Create two deposit requests, one with a max fee at the cutoff and
     // one above it.
@@ -2016,7 +1922,7 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
     let amount_2 = 654_321;
     faucet.send_to(amount_2, &depositor_2.address);
 
-    let max_fee_2 = i64::MAX as u64 + 1;
+    let max_fee_2 = u64::MAX;
     let deposit_triplet_2 = generate_deposit_request(
         faucet,
         amount_2,
@@ -2025,17 +1931,52 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
         &mut rng,
     );
 
-    for (tx, deposit_request, deposit_info) in [&deposit_triplet_1, &deposit_triplet_2] {
-        let body = CreateDepositRequestBody {
-            bitcoin_tx_output_index: deposit_request.outpoint.vout,
-            bitcoin_txid: deposit_request.outpoint.txid.to_string(),
-            deposit_script: deposit_request.deposit_script.to_hex_string(),
-            reclaim_script: deposit_info.reclaim_script.to_hex_string(),
-            transaction_hex: serialize_hex(tx),
-        };
-        deposit_api::create_deposit(emily_client.config(), body)
-            .await
-            .unwrap();
+    let deposit_requests = [&deposit_triplet_1, &deposit_triplet_2]
+        .iter()
+        .map(|(_, request, info)| sbtc::deposits::CreateDepositRequest {
+            outpoint: request.outpoint,
+            reclaim_script: info.reclaim_script.clone(),
+            deposit_script: info.deposit_script.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    ctx.with_emily_client(move |client| {
+        client
+            .expect_get_deposits()
+            .returning(move || Box::pin(std::future::ready(Ok(deposit_requests.clone()))));
+
+        client
+            .expect_get_limits()
+            .once()
+            .returning(move || Box::pin(std::future::ready(Ok(SbtcLimits::unlimited()))));
+    })
+    .await;
+
+    let deposits = db.get_deposit_requests(&chain_tip, 100).await.unwrap();
+    assert!(deposits.is_empty());
+
+    // ** Step 3 **
+    //
+    // Start the BlockObserver
+    //
+    // We only proceed with the test after the process has started, and
+    // we use this counter to notify us when that happens.
+    let start_flag = Arc::new(AtomicBool::new(false));
+    let flag = start_flag.clone();
+
+    let bitcoin_block_source = bitcoin.start_chain_tip_poller().await;
+    let block_observer = BlockObserver {
+        context: ctx.clone(),
+        bitcoin_block_source,
+    };
+
+    tokio::spawn(async move {
+        flag.store(true, Ordering::Relaxed);
+        block_observer.run().await
+    });
+
+    while !start_flag.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     // ** Step 4 **
@@ -2045,21 +1986,23 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
 
     // Okay now there is a deposit, and it has been confirmed. We should
     // pick it up automatically.
-    ctx.wait_for_signal(Duration::from_secs(3), |signal| {
-        matches!(signal, SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
-                if block_ref.block_hash == chain_tip)
-    })
-    .await
-    .unwrap();
+    wait_for_block_observed(&ctx, chain_tip).await;
 
-    // We should have two donations if we processed both blocks correctly
-    let deposits = db.get_deposit_requests(&chain_tip, 100).await.unwrap();
-    assert_eq!(deposits.len(), 1);
+    // We should have two deposits if we wrote both deposits to the
+    // database
+    let mut deposits = db.get_deposit_requests(&chain_tip, 100).await.unwrap();
+    assert_eq!(deposits.len(), 2);
+
+    deposits.sort_by_key(|deposit| deposit.max_fee);
 
     let deposit = &deposits[0];
     assert_eq!(deposit.amount, amount_1);
     assert_eq!(deposit.max_fee, max_fee_1);
     assert_eq!(deposit.signers_public_key, signers_public_key.into());
+
+    let deposit = &deposits[1];
+    assert_eq!(deposit.amount, amount_2);
+    assert_eq!(deposit.max_fee, max_fee_2);
 
     // Since the deposit check is buried in the logs, we also manually check
     // that the deposit request validation in the block observer failed as
@@ -2071,12 +2014,185 @@ async fn block_observer_ignores_deposits_with_invalid_max_fee() {
         deposit_script: deposit_info.deposit_script.clone(),
     };
     let bitcoin_client = ctx.get_bitcoin_client();
-    let validate_result =
-        signer::block_observer::DepositRequestValidator::validate(&request, &bitcoin_client, false);
-    match validate_result.await {
-        Err(Error::InvalidMaxFee(outpoint, max_fee))
-            if outpoint == deposit_request.outpoint && max_fee == max_fee_2 => {}
-        _ => panic!("Expected a err, got something else"),
+    signer::block_observer::DepositRequestValidator::validate(&request, &bitcoin_client, false)
+        .await
+        .unwrap();
+
+    testing::storage::drop_db(db).await;
+}
+
+/// This test checks that the block observer marks the canonical status of
+/// bitcoin blocks in the database whenever a new block is observed.
+#[test_case::test_case(3; "fork generating three blocks")]
+#[test_case::test_case(2; "fork generating two blocks")]
+#[test_case::test_case(1; "fork generating one block")]
+#[tokio::test]
+async fn block_observer_marks_bitcoin_blocks_as_canonical(fork_generating_blocks: u64) {
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+    let (emily_client, emily_tables) = new_emily_setup().await;
+
+    let db = testing::storage::new_test_database().await;
+
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_bitcoin_client(bitcoin.get_client())
+        .with_emily_client(emily_client)
+        .with_mocked_stacks_client()
+        .build();
+
+    // Set up the stacks client
+    let anchor = get_canonical_chain_tip(rpc);
+    ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+
+        let tenure_headers = TenureBlockHeaders::from_anchor(&anchor);
+
+        client
+            .expect_get_tenure_headers()
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
+        });
+        client
+            .expect_get_sortition_info()
+            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
+    })
+    .await;
+
+    // Helper function to get all blocks in the chain from a given block hash
+    async fn get_chain_blocks(
+        db: &PgStore,
+        chain_tip: &BitcoinBlockHash,
+    ) -> Vec<(BitcoinBlockHash, Option<bool>)> {
+        sqlx::query_as::<_, (BitcoinBlockHash, Option<bool>)>(
+            r#"
+            WITH RECURSIVE chain_blocks AS (
+                SELECT
+                    block_hash,
+                    is_canonical,
+                    parent_hash
+                FROM sbtc_signer.bitcoin_blocks
+                WHERE block_hash = $1
+
+                UNION ALL
+
+                SELECT
+                    parent.block_hash,
+                    parent.is_canonical,
+                    parent.parent_hash
+                FROM sbtc_signer.bitcoin_blocks AS parent
+                JOIN chain_blocks AS child
+                  ON parent.block_hash = child.parent_hash
+            )
+            SELECT block_hash, is_canonical
+            FROM chain_blocks
+            "#,
+        )
+        .bind(chain_tip)
+        .fetch_all(db.pool())
+        .await
+        .unwrap()
+    }
+
+    // Start the block observer
+    let start_flag = Arc::new(AtomicBool::new(false));
+    let flag = start_flag.clone();
+
+    let block_observer = BlockObserver {
+        context: ctx.clone(),
+        bitcoin_block_source: bitcoin.start_chain_tip_poller().await,
+    };
+
+    // We need at least one receiver
+    let _signal = ctx.get_signal_receiver();
+
+    tokio::spawn(async move {
+        flag.store(true, Ordering::Relaxed);
+        block_observer.run().await
+    });
+
+    // Wait for the task to start
+    while !start_flag.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Generate a new block and wait for the block observer to process it
+    let chain_tip_before_invalidation: BitcoinBlockHash = faucet.generate_block().into();
+
+    wait_for_block_observed(&ctx, chain_tip_before_invalidation).await;
+
+    // Verify the block is in the database
+    let db_block = db
+        .get_bitcoin_block(&chain_tip_before_invalidation)
+        .await
+        .unwrap();
+    assert!(db_block.is_some());
+
+    // Check that all blocks on the chain have is_canonical = true
+    let chain_blocks = get_chain_blocks(&db, &chain_tip_before_invalidation).await;
+    for (_, is_canonical) in chain_blocks {
+        assert_eq!(is_canonical, Some(true));
+    }
+    let chain_tip_before_invalidation_status = db
+        .is_block_canonical(&chain_tip_before_invalidation)
+        .await
+        .unwrap();
+    assert_eq!(chain_tip_before_invalidation_status, Some(true));
+
+    // Now invalidate the chain tip
+    rpc.invalidate_block(&chain_tip_before_invalidation)
+        .unwrap();
+
+    // Sometimes bitcoin-core will generate an invalid block (maybe the
+    // same block?), after invalidating the chain tip. One way to combat
+    // this is to create a new transaction to ensure that the new block is
+    // distinct from the previous ones.
+    faucet.send_to(1001, &faucet.address);
+    let new_blocks = faucet
+        .generate_blocks(fork_generating_blocks)
+        .into_iter()
+        .map(BitcoinBlockHash::from)
+        .collect::<Vec<_>>();
+    let last_new_block = new_blocks.last().cloned().unwrap();
+
+    wait_for_block_observed(&ctx, last_new_block).await;
+
+    // Verify the new blocks are in the database and are canonical
+    for new_block in new_blocks {
+        let db_new_block = db.get_bitcoin_block(&new_block).await.unwrap();
+        assert!(db_new_block.is_some());
+        assert_eq!(db.is_block_canonical(&new_block).await.unwrap(), Some(true));
+    }
+
+    // Check that the old chain tip has is_canonical = false
+    let invalidated_chain_tip_status = db
+        .is_block_canonical(&chain_tip_before_invalidation)
+        .await
+        .unwrap();
+    assert_eq!(invalidated_chain_tip_status, Some(false));
+
+    // Verify all blocks on the new chain are canonical
+    let new_chain_blocks = get_chain_blocks(&db, &last_new_block).await;
+    for (block_hash, is_canonical) in new_chain_blocks {
+        // The old chain tip should not be in the new chain
+        if block_hash == chain_tip_before_invalidation {
+            panic!("The old chain tip was invalidated, and should not be on the new chain");
+        }
+        assert_eq!(is_canonical, Some(true));
     }
 
     testing::storage::drop_db(db).await;

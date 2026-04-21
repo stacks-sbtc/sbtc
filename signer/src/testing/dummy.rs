@@ -1,6 +1,8 @@
 //! Utilities for generating dummy values on external types
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::Range;
 
 use bitcoin::Amount;
@@ -26,7 +28,6 @@ use secp256k1::ecdsa::RecoverableSignature;
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
-use wsts::common::Nonce;
 use wsts::common::PolyCommitment;
 use wsts::common::PublicNonce;
 use wsts::common::SignatureShare;
@@ -343,7 +344,6 @@ pub fn encrypted_dkg_shares<R: rand::RngCore + rand::CryptoRng>(
     let party_state = wsts::traits::PartyState {
         polynomial: None,
         private_keys: vec![],
-        nonce: wsts::common::Nonce::random(rng),
     };
 
     let signer_state = wsts::traits::SignerState {
@@ -896,7 +896,7 @@ impl Dummy<Unit> for DkgPrivateBegin {
     }
 }
 
-impl Dummy<Unit> for Vec<(u32, hashbrown::HashMap<u32, Vec<u8>>)> {
+impl Dummy<Unit> for Vec<(u32, HashMap<u32, Vec<u8>>)> {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, _: &mut R) -> Self {
         fake::vec![u32; 0..16]
             .into_iter()
@@ -944,7 +944,7 @@ impl Dummy<Unit> for BadPrivateShare {
     }
 }
 
-impl Dummy<Unit> for hashbrown::HashMap<u32, BadPrivateShare> {
+impl Dummy<Unit> for HashMap<u32, BadPrivateShare> {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
         fake::vec![u32; 0..20]
             .into_iter()
@@ -953,7 +953,7 @@ impl Dummy<Unit> for hashbrown::HashMap<u32, BadPrivateShare> {
     }
 }
 
-impl Dummy<Unit> for hashbrown::HashSet<u32> {
+impl Dummy<Unit> for HashSet<u32> {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &Unit, _: &mut R) -> Self {
         fake::vec![u32; 0..20].into_iter().collect()
     }
@@ -1077,15 +1077,6 @@ impl Dummy<Unit> for SignatureShareResponse {
     }
 }
 
-impl Dummy<Unit> for Nonce {
-    fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
-        Nonce {
-            d: config.fake_with_rng(rng),
-            e: config.fake_with_rng(rng),
-        }
-    }
-}
-
 impl Dummy<Unit> for (u32, PartyState) {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
         (
@@ -1096,7 +1087,6 @@ impl Dummy<Unit> for (u32, PartyState) {
                     .into_iter()
                     .map(|_| config.fake_with_rng(rng))
                     .collect(),
-                nonce: config.fake_with_rng(rng),
             },
         )
     }

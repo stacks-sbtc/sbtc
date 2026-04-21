@@ -66,6 +66,12 @@ rpc_endpoints = [
     "http://devnet:devnet@127.0.0.1:18443",
 ]
 
+# The maximum amount of time, in seconds, that the signer will wait for
+# responses for RPC requests to the nodes configured in `bitcoin.rpc_endpoints`.
+# Required: false
+# Environment: SIGNER_BITCOIN__TIMEOUT
+# timeout = 10
+
 # The interval, in seconds, at which the signer will poll the Bitcoin Core RPC
 # for the latest block hash. This is used to determine the current chain tip.
 #
@@ -73,6 +79,17 @@ rpc_endpoints = [
 # Required: false
 # Environment: SIGNER_BITCOIN__CHAIN_TIP_POLLING_INTERVAL
 # chain_tip_polling_interval = 5
+
+# An optional fallback fee rate in sats/vbyte to use when the initial fee rate
+# is too high to construct any transaction package. When set, this value is used
+# directly as the retry fee rate. When unset, the signer estimates a lower fee
+# rate by targeting a longer confirmation window.
+# This is for tests only, it fails validation in mainnet.
+#
+# Default: <none>
+# Required: false
+# Environment: SIGNER_BITCOIN__FALLBACK_FEE
+# fallback_fee = 10
 
 # !! ==============================================================================
 # !! Stacks Node Configuration
