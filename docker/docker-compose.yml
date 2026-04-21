@@ -645,7 +645,7 @@ services:
       ELECTRUM_PORT: "60401"
       ELECTRUM_TLS_ENABLED: "false"
       # Connect to bitcoin rpc
-      CORE_RPC_HOST: "bitcoin-mempool"
+      CORE_RPC_HOST: "bitcoin"
       CORE_RPC_PORT: "18443"
       CORE_RPC_USERNAME: "devnet"
       CORE_RPC_PASSWORD: "devnet"
