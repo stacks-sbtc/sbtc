@@ -19,10 +19,12 @@ message QualifiedRequestId {
   stacks.StacksBlockId block_hash = 3;
 }
 
-// Describes the fees for a transaction.
+// Describes the fees for a transaction package.
 message Fees {
-  // The total fee paid in sats for the transaction.
+  // The total fee paid in sats for the transaction package.
   uint64 total = 1;
   // The fee rate paid in sats per virtual byte.
   double rate = 2;
+  // The size of the transaction package in virtual bytes. 
+  uint64 vsize = 3;
 }

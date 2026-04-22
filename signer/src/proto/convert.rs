@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::num::NonZeroU64;
 
 use bitcoin::OutPoint;
 use clarity::codec::StacksMessageCodec as _;
@@ -1210,6 +1211,7 @@ impl From<Fees> for proto::Fees {
         proto::Fees {
             total: value.total,
             rate: value.rate,
+            vsize: value.vsize.map(NonZeroU64::get).unwrap_or(0),
         }
     }
 }
@@ -1219,6 +1221,7 @@ impl From<proto::Fees> for Fees {
         Fees {
             total: value.total,
             rate: value.rate,
+            vsize: NonZeroU64::new(value.vsize),
         }
     }
 }
