@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::num::NonZeroU64;
 use std::time::Duration;
 
 use blockstack_lib::chainstate::stacks::StacksTransaction;
@@ -2520,7 +2521,11 @@ where
         // need to check for division by zero.
         let rate = total_fees as f64 / total_vsize as f64;
 
-        Ok(Some(Fees { total: total_fees, rate }))
+        Ok(Some(Fees {
+            total: total_fees,
+            rate,
+            vsize: NonZeroU64::new(total_vsize),
+        }))
     }
 
     /// Estimate transaction fees for a Stacks contract call. This function
