@@ -2509,11 +2509,15 @@ where
         // summing the vsize of the transactions for fee-rate calculation later.
         // If there were no descendants then this will just be the fee and size
         // from the best root sweep transaction.
-        let (total_fees, total_vsize) = descendant_fees
-            .into_iter()
-            .fold((fees.fee, fees.vsize), |acc, fees| {
-                (acc.0 + fees.fee, acc.1 + fees.vsize)
-            });
+        let (total_fees, total_vsize) =
+            descendant_fees
+                .into_iter()
+                .fold((fees.fee, fees.vsize), |(fee, vsize), fees| {
+                    (
+                        fee.saturating_add(fees.fee),
+                        vsize.saturating_add(fees.vsize),
+                    )
+                });
 
         // Calculate the fee rate based on the total fees and vsizes of the
         // transactions which we've found. Since this is returning transactions
@@ -2521,11 +2525,7 @@ where
         // need to check for division by zero.
         let rate = total_fees as f64 / total_vsize as f64;
 
-        Ok(Some(Fees {
-            total: total_fees,
-            rate,
-            vsize: NonZeroU64::new(total_vsize),
-        }))
+        Fees::new(total_fees, rate, NonZeroU64::new(total_vsize)).map(Some)
     }
 
     /// Estimate transaction fees for a Stacks contract call. This function
