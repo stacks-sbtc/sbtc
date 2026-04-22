@@ -1,6 +1,7 @@
 //! Utxo management and transaction construction
 
 use std::collections::HashSet;
+use std::num::NonZeroU64;
 use std::sync::LazyLock;
 
 use bitcoin::Amount;
@@ -128,15 +129,23 @@ pub struct Fees {
     pub total: u64,
     /// The fee rate paid in sats per virtual byte.
     pub rate: f64,
-    /// The size of the transaction in virtual bytes.
-    pub vsize: Option<u64>,
+    /// The size of the transaction in virtual bytes. 
+    ///
+    /// This is optional because we need to be backwards compatible until
+    /// we know that all signers are sending this value.
+    pub vsize: Option<NonZeroU64>,
 }
 
 impl Fees {
-    /// Get the fee rate for the fees.
+    /// Compute the fee rate, in sats per vbyte.
+    ///
+    /// This prefers to compute the fee rate when possible, and only falls
+    /// back to the given fee rate when the vsize is not available. This
+    /// way is only temporary until signers have upgraded to always send
+    /// the vsize.
     pub fn rate(&self) -> f64 {
         if let Some(vsize) = self.vsize {
-            self.total as f64 / vsize as f64
+            self.total as f64 / vsize.get() as f64
         } else {
             self.rate
         }
