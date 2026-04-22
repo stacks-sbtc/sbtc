@@ -79,9 +79,10 @@ pub const MAX_BITCOIN_FEE_RATE: f64 = 1000.0;
 /// The minimum fee rate, in sats per vbyte, for a bitcoin transaction.
 /// Transactions with a fee rate that exceeds this value will be rejected.
 ///
-/// This value is the minimum fee rate that you can configure in bitcoin
-/// core for the minrelaytxfee setting, assuming 100 sat/kilo-vbyte is the
-/// minimum allowable value.
+/// This value is the default fee rate in bitcoin core for the
+/// minrelaytxfee setting as of bitcoin-core v30.
+///
+/// <https://bitcoincore.org/en/releases/30.0/>
 pub const MIN_BITCOIN_FEE_RATE: f64 = 0.1;
 
 /// The range of valid fee rates for a bitcoin transaction.
