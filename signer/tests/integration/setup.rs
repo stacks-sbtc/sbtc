@@ -907,10 +907,10 @@ impl TestSweepSetup2 {
         let last_fees = txids
             .iter()
             .filter_map(|txid| self.client.get_mempool_entry(txid).unwrap())
-            .map(|entry| Fees {
-                total: entry.fees.base.to_sat(),
-                rate: entry.fees.base.to_sat() as f64 / entry.vsize as f64,
-                vsize: NonZeroU64::new(entry.vsize),
+            .map(|entry| {
+                let total = entry.fees.base.to_sat();
+                let rate = entry.fees.base.to_sat() as f64 / entry.vsize as f64;
+                Fees::new_unchecked(total, rate, NonZeroU64::new(entry.vsize))
             })
             .max_by_key(|fees| fees.total);
 

@@ -757,11 +757,7 @@ impl fake::Dummy<fake::Faker> for Fees {
         let total: u64 = config.fake_with_rng(rng);
         let vsize: u64 = (1..101000).fake_with_rng(rng);
         let rate: f64 = total as f64 / vsize as f64;
-        Fees {
-            total,
-            rate,
-            vsize: NonZeroU64::new(vsize),
-        }
+        Fees::new_unchecked(total, rate, NonZeroU64::new(vsize))
     }
 }
 

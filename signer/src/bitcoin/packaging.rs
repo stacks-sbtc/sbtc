@@ -1511,11 +1511,11 @@ mod tests {
                 withdrawals: Vec::new(),
             }],
             fee_rate: 25.0,
-            last_fees: Some(Fees {
-                total: u64::MAX,
-                rate: 25.0,
-                vsize: NonZeroU64::new(u64::MAX),
-            }),
+            last_fees: Some(Fees::new_unchecked(
+                u64::MAX,
+                25.0,
+                NonZeroU64::new(u64::MAX),
+            )),
         };
         let large_overhead = measure_overhead(large_presign_request);
 
@@ -1658,11 +1658,11 @@ mod tests {
         // Now we add in the fee rate and some last fees to make the final
         // check more realistic.
         presign.fee_rate = 25.1234567;
-        presign.last_fees = Some(Fees {
-            total: u64::MAX,
-            rate: 25.1234567,
-            vsize: NonZeroU64::new(u64::MAX),
-        });
+        presign.last_fees = Some(Fees::new_unchecked(
+            u64::MAX,
+            25.1234567,
+            NonZeroU64::new(u64::MAX),
+        ));
 
         // Wrap the presign request in a Signed<SignerMessage>, since the
         // signed message is what gets encoded and broadcast.
