@@ -128,11 +128,19 @@ pub struct Fees {
     pub total: u64,
     /// The fee rate paid in sats per virtual byte.
     pub rate: f64,
+    /// The size of the transaction in virtual bytes.
+    pub vsize: Option<u64>,
 }
 
 impl Fees {
-    /// A zero-fee [`Fees`] instance.
-    pub const ZERO: Self = Self { total: 0, rate: 0.0 };
+    /// Get the fee rate for the fees.
+    pub fn rate(&self) -> f64 {
+        if let Some(vsize) = self.vsize {
+            self.total as f64 / vsize as f64
+        } else {
+            self.rate
+        }
+    }
 }
 
 /// A trait for getting the fees for a given instance.
@@ -397,12 +405,13 @@ impl SbtcRequests {
 /// BIP-125: https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#implementation-details
 fn compute_transaction_fee(tx_vsize: f64, fee_rate: f64, last_fees: Option<Fees>) -> u64 {
     match last_fees {
-        Some(Fees { total, rate }) => {
+        Some(fees) => {
             // The requirement for an RBF transaction is that the new fee
             // amount be greater than the old fee amount.
+            let rate = fees.rate();
             let minimum_fee_rate = fee_rate.max(rate + rate * SATS_PER_VBYTE_INCREMENT);
             let fee_increment = tx_vsize * DEFAULT_INCREMENTAL_RELAY_FEE_RATE;
-            (total as f64 + fee_increment)
+            (fees.total as f64 + fee_increment)
                 .max(tx_vsize * minimum_fee_rate)
                 .ceil() as u64
         }
@@ -2626,6 +2635,7 @@ mod tests {
         requests.signer_state.last_fees = Some(Fees {
             total: old_fee_total,
             rate: old_fee_rate,
+            vsize: None,
         });
 
         let transactions = requests.construct_transactions().unwrap();
