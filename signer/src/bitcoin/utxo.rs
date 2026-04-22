@@ -129,7 +129,7 @@ pub struct Fees {
     pub total: u64,
     /// The fee rate paid in sats per virtual byte.
     pub rate: f64,
-    /// The size of the transaction package in virtual bytes. 
+    /// The size of the transaction package in virtual bytes.
     ///
     /// This is optional because we need to be backwards compatible until
     /// we know that all signers are sending this value.
