@@ -1684,7 +1684,6 @@ impl TxDeconstructor for BitcoinTxInfo {
 
 #[cfg(test)]
 mod tests {
-    use core::f64;
     use std::collections::BTreeSet;
     use std::str::FromStr as _;
     use std::sync::atomic::AtomicU64;
