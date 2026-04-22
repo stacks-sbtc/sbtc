@@ -17,15 +17,18 @@ pub struct QualifiedRequestId {
     #[prost(message, optional, tag = "3")]
     pub block_hash: ::core::option::Option<super::super::StacksBlockId>,
 }
-/// Describes the fees for a transaction.
+/// Describes the fees for a transaction package.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct Fees {
-    /// The total fee paid in sats for the transaction.
+    /// The total fee paid in sats for the transaction package.
     #[prost(uint64, tag = "1")]
     pub total: u64,
     /// The fee rate paid in sats per virtual byte.
     #[prost(double, tag = "2")]
     pub rate: f64,
+    /// The size of the transaction package in virtual bytes.
+    #[prost(uint64, tag = "3")]
+    pub vsize: u64,
 }
 /// Represents a decision to accept or reject a deposit request.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

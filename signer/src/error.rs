@@ -278,9 +278,10 @@ pub enum Error {
     #[error("the change amounts for the transaction is negative: {0}")]
     InvalidAmount(i64),
 
-    /// Old fee estimate
-    #[error("got an old fee estimate")]
-    OldFeeEstimate,
+    /// Getting this error means a programming error or an error in
+    /// bitcoin-core.
+    #[error("total fees paid for a transaction package was more than the max amount of sats: {0}")]
+    InvalidTotalFees(u64),
 
     /// No good fee estimate
     #[error("failed to get fee estimates from all fee estimate sources")]

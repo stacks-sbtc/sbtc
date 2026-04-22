@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::num::NonZeroU64;
 
 use bitcoin::OutPoint;
 use clarity::codec::StacksMessageCodec as _;
@@ -1209,17 +1210,17 @@ impl From<Fees> for proto::Fees {
     fn from(value: Fees) -> Self {
         proto::Fees {
             total: value.total,
-            rate: value.rate,
+            rate: value.rate(),
+            vsize: value.vsize.map(NonZeroU64::get).unwrap_or(0),
         }
     }
 }
 
-impl From<proto::Fees> for Fees {
-    fn from(value: proto::Fees) -> Self {
-        Fees {
-            total: value.total,
-            rate: value.rate,
-        }
+impl TryFrom<proto::Fees> for Fees {
+    type Error = Error;
+    fn try_from(value: proto::Fees) -> Result<Self, Self::Error> {
+        let vsize = NonZeroU64::new(value.vsize);
+        Fees::new(value.total, value.rate, vsize)
     }
 }
 
@@ -1247,7 +1248,7 @@ impl TryFrom<proto::BitcoinPreSignRequest> for BitcoinPreSignRequest {
                 .map(|v| v.try_into())
                 .collect::<Result<Vec<_>, _>>()?,
             fee_rate: value.fee_rate,
-            last_fees: value.last_fees.map(|v| v.into()),
+            last_fees: value.last_fees.map(|v| v.try_into()).transpose()?,
         })
     }
 }

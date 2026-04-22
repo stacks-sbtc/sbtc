@@ -514,6 +514,8 @@ impl SignerSwarm {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU64;
+
     use fake::Fake as _;
     use futures::StreamExt as _;
     use libp2p::gossipsub::Message as GossipsubMessage;
@@ -1102,10 +1104,11 @@ mod tests {
         let presign = BitcoinPreSignRequest {
             request_package,
             fee_rate: 25.1234567,
-            last_fees: Some(Fees {
-                total: u64::MAX,
-                rate: 25.1234567,
-            }),
+            last_fees: Some(Fees::new_unchecked(
+                u64::MAX,
+                25.1234567,
+                NonZeroU64::new(u64::MAX),
+            )),
         };
 
         let signed = SignerMessage {

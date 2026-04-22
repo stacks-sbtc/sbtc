@@ -1,6 +1,7 @@
 //! Utxo management and transaction construction
 
 use std::collections::HashSet;
+use std::num::NonZeroU64;
 use std::sync::LazyLock;
 
 use bitcoin::Amount;
@@ -121,18 +122,51 @@ static DUMMY_SIGNATURE: LazyLock<Signature> = LazyLock::new(|| Signature {
     sighash_type: TapSighashType::All,
 });
 
-/// Describes the fees for a transaction.
+/// Describes the fees for a transaction package.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Fees {
-    /// The total fee paid in sats for the transaction.
+    /// The total fee paid in sats for the transaction package.
     pub total: u64,
     /// The fee rate paid in sats per virtual byte.
-    pub rate: f64,
+    rate: f64,
+    /// The size of the transaction package in virtual bytes.
+    ///
+    /// This is optional because we need to be backwards compatible until
+    /// we know that all signers are sending this value.
+    pub vsize: Option<NonZeroU64>,
 }
 
 impl Fees {
-    /// A zero-fee [`Fees`] instance.
-    pub const ZERO: Self = Self { total: 0, rate: 0.0 };
+    /// Create a new [`Fees`] instance.
+    ///
+    /// This function will return an error if the total fees are greater than
+    /// the maximum amount of bitcoin.
+    pub fn new(total: u64, rate: f64, vsize: Option<NonZeroU64>) -> Result<Self, Error> {
+        if total > Amount::MAX_MONEY.to_sat() {
+            return Err(Error::InvalidTotalFees(total));
+        }
+        Ok(Self { total, rate, vsize })
+    }
+
+    /// Create a new [`Fees`] instance.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_unchecked(total: u64, rate: f64, vsize: Option<NonZeroU64>) -> Self {
+        Self { total, rate, vsize }
+    }
+
+    /// Compute the fee rate, in sats per vbyte.
+    ///
+    /// This prefers to compute the fee rate when possible, and only falls
+    /// back to the given fee rate when the vsize is not available. This
+    /// way is only temporary until signers have upgraded to always send
+    /// the vsize.
+    pub fn rate(&self) -> f64 {
+        if let Some(vsize) = self.vsize {
+            self.total as f64 / vsize.get() as f64
+        } else {
+            self.rate
+        }
+    }
 }
 
 /// A trait for getting the fees for a given instance.
@@ -397,12 +431,13 @@ impl SbtcRequests {
 /// BIP-125: https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#implementation-details
 fn compute_transaction_fee(tx_vsize: f64, fee_rate: f64, last_fees: Option<Fees>) -> u64 {
     match last_fees {
-        Some(Fees { total, rate }) => {
+        Some(fees) => {
             // The requirement for an RBF transaction is that the new fee
             // amount be greater than the old fee amount.
+            let rate = fees.rate();
             let minimum_fee_rate = fee_rate.max(rate + rate * SATS_PER_VBYTE_INCREMENT);
             let fee_increment = tx_vsize * DEFAULT_INCREMENTAL_RELAY_FEE_RATE;
-            (total as f64 + fee_increment)
+            (fees.total as f64 + fee_increment)
                 .max(tx_vsize * minimum_fee_rate)
                 .ceil() as u64
         }
@@ -2626,6 +2661,7 @@ mod tests {
         requests.signer_state.last_fees = Some(Fees {
             total: old_fee_total,
             rate: old_fee_rate,
+            vsize: None,
         });
 
         let transactions = requests.construct_transactions().unwrap();
@@ -3232,6 +3268,35 @@ mod tests {
             .sum::<u32>();
 
         assert_eq!(package_vsize, total_vsize);
+    }
+
+    #[test_case(0, true; "total is zero")]
+    #[test_case(100, true; "total is one hundred")]
+    #[test_case(f64::exp2(f64::MANTISSA_DIGITS as f64) as u64, false; "total is max f64 lossless integer")]
+    #[test_case(Amount::MAX_MONEY.to_sat() + 1, false; "total is over max money")]
+    #[test_case(Amount::MAX_MONEY.to_sat(), true; "total is max money")]
+    #[test_case(Amount::MAX_MONEY.to_sat() - 1, true; "total is just below max money")]
+    fn test_fees_creation(total: u64, is_ok: bool) {
+        let fees = Fees::new(total, 1.0, None);
+        assert_eq!(fees.is_ok(), is_ok);
+    }
+
+    #[test]
+    fn test_fees_rate() {
+        // Whenever the vsize is missing, the rate is whatever was set.
+        let fees = Fees::new(100, 1.0, None).unwrap();
+        assert_eq!(fees.rate(), 1.0);
+
+        let fees = Fees::new(100, 2.0, None).unwrap();
+        assert_eq!(fees.rate(), 2.0);
+
+        // Whenever the vsize is set, the rate() is whatever total / vsize
+        // is, and the rate field is ignored.
+        let fees = Fees::new(100, 2.0, NonZeroU64::new(100)).unwrap();
+        assert_eq!(fees.rate(), 1.0);
+
+        let fees = Fees::new(100, 25.0, NonZeroU64::new(200)).unwrap();
+        assert_eq!(fees.rate(), 0.5);
     }
 
     #[test_case(
