@@ -14,6 +14,7 @@ use std::time::Duration;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use futures::Stream;
 use futures::StreamExt as _;
+use futures::future::try_join_all;
 use sha2::Digest as _;
 
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
@@ -21,8 +22,8 @@ use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::bitcoin::BitcoinInteract as _;
-use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo;
+use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::context::Context;
 use crate::context::P2PEvent;
@@ -1950,7 +1951,7 @@ where
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
 
-        let last_fees = assess_mempool_sweep_transaction_fees(&bitcoin_client, &utxo).await?;
+        let last_fees = self.assess_mempool_sweep_transaction_fees(&utxo).await?;
 
         Ok(utxo::SignerBtcState {
             fee_rate,
