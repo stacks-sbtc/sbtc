@@ -1684,6 +1684,7 @@ impl TxDeconstructor for BitcoinTxInfo {
 
 #[cfg(test)]
 mod tests {
+    use core::f64;
     use std::collections::BTreeSet;
     use std::str::FromStr as _;
     use std::sync::atomic::AtomicU64;
@@ -3268,6 +3269,35 @@ mod tests {
             .sum::<u32>();
 
         assert_eq!(package_vsize, total_vsize);
+    }
+
+    #[test_case(0, true; "total is zero")]
+    #[test_case(100, true; "total is one hundred")]
+    #[test_case(f64::exp2(f64::MANTISSA_DIGITS as f64) as u64, false; "total is max f64 lossless integer")]
+    #[test_case(Amount::MAX_MONEY.to_sat() + 1, false; "total is over max money")]
+    #[test_case(Amount::MAX_MONEY.to_sat(), true; "total is max money")]
+    #[test_case(Amount::MAX_MONEY.to_sat() - 1, true; "total is just below max money")]
+    fn test_fees_creation(total: u64, is_ok: bool) {
+        let fees = Fees::new(total, 1.0, None);
+        assert_eq!(fees.is_ok(), is_ok);
+    }
+
+    #[test]
+    fn test_fees_rate() {
+        // Whenever the vsize is missing, the rate is whatever was set.
+        let fees = Fees::new(100, 1.0, None).unwrap();
+        assert_eq!(fees.rate(), 1.0);
+
+        let fees = Fees::new(100, 2.0, None).unwrap();
+        assert_eq!(fees.rate(), 2.0);
+
+        // Whenever the vsize is set, the rate() is whatever total / vsize
+        // is, and the rate field is ignored.
+        let fees = Fees::new(100, 2.0, NonZeroU64::new(100)).unwrap();
+        assert_eq!(fees.rate(), 1.0);
+
+        let fees = Fees::new(100, 25.0, NonZeroU64::new(200)).unwrap();
+        assert_eq!(fees.rate(), 0.5);
     }
 
     #[test_case(
