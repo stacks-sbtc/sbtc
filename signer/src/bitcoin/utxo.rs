@@ -128,7 +128,7 @@ pub struct Fees {
     /// The total fee paid in sats for the transaction package.
     pub total: u64,
     /// The fee rate paid in sats per virtual byte.
-    pub rate: f64,
+    rate: f64,
     /// The size of the transaction package in virtual bytes.
     ///
     /// This is optional because we need to be backwards compatible until
@@ -137,6 +137,23 @@ pub struct Fees {
 }
 
 impl Fees {
+    /// Create a new [`Fees`] instance.
+    ///
+    /// This function will return an error if the total fees are greater than
+    /// the maximum amount of bitcoin.
+    pub fn new(total: u64, rate: f64, vsize: Option<NonZeroU64>) -> Result<Self, Error> {
+        if total > Amount::MAX_MONEY.to_sat() {
+            return Err(Error::InvalidTotalFees(total));
+        }
+        Ok(Self { total, rate, vsize })
+    }
+
+    /// Create a new [`Fees`] instance.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_unchecked(total: u64, rate: f64, vsize: Option<NonZeroU64>) -> Self {
+        Self { total, rate, vsize }
+    }
+
     /// Compute the fee rate, in sats per vbyte.
     ///
     /// This prefers to compute the fee rate when possible, and only falls
