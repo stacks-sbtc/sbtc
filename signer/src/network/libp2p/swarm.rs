@@ -514,6 +514,8 @@ impl SignerSwarm {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU64;
+
     use fake::Fake as _;
     use futures::StreamExt as _;
     use libp2p::gossipsub::Message as GossipsubMessage;
@@ -1105,6 +1107,7 @@ mod tests {
             last_fees: Some(Fees {
                 total: u64::MAX,
                 rate: 25.1234567,
+                vsize: NonZeroU64::new(u64::MAX),
             }),
         };
 

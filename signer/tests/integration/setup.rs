@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use std::num::NonZeroU64;
 use std::ops::Deref as _;
 use std::str::FromStr as _;
 use std::time::Duration;
@@ -909,6 +910,7 @@ impl TestSweepSetup2 {
             .map(|entry| Fees {
                 total: entry.fees.base.to_sat(),
                 rate: entry.fees.base.to_sat() as f64 / entry.vsize as f64,
+                vsize: NonZeroU64::new(entry.vsize),
             })
             .max_by_key(|fees| fees.total);
 

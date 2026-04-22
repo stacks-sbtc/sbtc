@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::num::NonZeroU64;
 use std::ops::Range;
 
 use bitcoin::Amount;
@@ -753,9 +754,13 @@ impl fake::Dummy<fake::Faker> for TxRequestIds {
 
 impl fake::Dummy<fake::Faker> for Fees {
     fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let total: u64 = config.fake_with_rng(rng);
+        let vsize: u64 = (1..101000).fake_with_rng(rng);
+        let rate: f64 = total as f64 / vsize as f64;
         Fees {
-            total: config.fake_with_rng(rng),
-            rate: config.fake_with_rng(rng),
+            total,
+            rate,
+            vsize: NonZeroU64::new(vsize),
         }
     }
 }

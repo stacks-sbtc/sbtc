@@ -1,4 +1,6 @@
 mod serial {
+    use std::num::NonZeroU64;
+
     use bitcoin::AddressType;
     use bitcoin::Amount;
     use bitcoin::OutPoint;
@@ -281,6 +283,7 @@ mod serial {
             Fees {
                 total: last_fee,
                 rate: last_fee as f64 / last_size as f64,
+                vsize: NonZeroU64::new(last_size as u64),
             }
         };
 

@@ -4043,6 +4043,8 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
 }
 
 mod serial {
+    use std::num::NonZeroU64;
+
     use super::*;
 
     use test_log::test;
@@ -4178,6 +4180,7 @@ mod serial {
         let expected_fees = Fees {
             total: 1_000,
             rate: 1_000_f64 / tx1.vsize() as f64,
+            vsize: NonZeroU64::new(tx1.vsize() as u64),
         };
 
         // Assert that everything's as expected.
@@ -4216,6 +4219,7 @@ mod serial {
         let expected_fees = Fees {
             total: 2_000,
             rate: 2_000f64 / tx2.vsize() as f64,
+            vsize: NonZeroU64::new(tx2.vsize() as u64),
         };
 
         // Assert that everything's as expected.
