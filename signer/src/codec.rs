@@ -172,7 +172,6 @@ mod tests {
     use wsts::net::SignatureShareResponse;
     use wsts::net::SignatureType;
 
-    use crate::bitcoin::utxo::Fees;
     use crate::bitcoin::validation::TxRequestIds;
     use crate::ecdsa::Signed;
     use crate::keys::PublicKey;
@@ -240,7 +239,6 @@ mod tests {
     #[test_case(PhantomData::<(Signed<SignerMessage>, proto::Signed)>; "Signed")]
     #[test_case(PhantomData::<(QualifiedRequestId, proto::QualifiedRequestId)>; "QualifiedRequestId")]
     #[test_case(PhantomData::<(TxRequestIds, proto::TxRequestIds)>; "TxRequestIds")]
-    #[test_case(PhantomData::<(Fees, proto::Fees)>; "Fees")]
     #[test_case(PhantomData::<(BitcoinPreSignRequest, proto::BitcoinPreSignRequest)>; "BitcoinPreSignRequest")]
     #[test_case(PhantomData::<(BitcoinPreSignAck, proto::BitcoinPreSignAck)>; "BitcoinPreSignAck")]
     fn sbtc_protobuf_message_codec_tag_order<T, U, E>(_: PhantomData<(T, U)>)

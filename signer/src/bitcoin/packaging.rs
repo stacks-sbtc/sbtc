@@ -1513,8 +1513,7 @@ mod tests {
             fee_rate: 25.0,
             last_fees: Some(Fees::new_unchecked(
                 u64::MAX,
-                25.0,
-                NonZeroU64::new(u64::MAX),
+                NonZeroU64::new(u64::MAX).unwrap(),
             )),
         };
         let large_overhead = measure_overhead(large_presign_request);
@@ -1660,8 +1659,7 @@ mod tests {
         presign.fee_rate = 25.1234567;
         presign.last_fees = Some(Fees::new_unchecked(
             u64::MAX,
-            25.1234567,
-            NonZeroU64::new(u64::MAX),
+            NonZeroU64::new(u64::MAX).unwrap(),
         ));
 
         // Wrap the presign request in a Signed<SignerMessage>, since the

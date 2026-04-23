@@ -756,8 +756,7 @@ impl fake::Dummy<fake::Faker> for Fees {
     fn dummy_with_rng<R: rand::RngCore + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
         let total: u64 = (0..=Amount::MAX_MONEY.to_sat()).fake_with_rng(rng);
         let vsize: u64 = (1..101000).fake_with_rng(rng);
-        let rate: f64 = total as f64 / vsize as f64;
-        Fees::new_unchecked(total, rate, NonZeroU64::new(vsize))
+        Fees::new_unchecked(total, NonZeroU64::new(vsize).unwrap())
     }
 }
 

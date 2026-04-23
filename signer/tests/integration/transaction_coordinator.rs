@@ -4207,8 +4207,8 @@ mod serial {
             .await
             .unwrap();
 
-        let rate = 1_000_f64 / tx1.vsize() as f64;
-        let expected_fees = Fees::new_unchecked(1_000, rate, NonZeroU64::new(tx1.vsize() as u64));
+        let vsize = NonZeroU64::new(tx1.vsize() as u64).unwrap();
+        let expected_fees = Fees::new_unchecked(1_000, vsize);
 
         // Assert that everything's as expected.
         assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid);
@@ -4243,8 +4243,8 @@ mod serial {
             .await
             .unwrap();
 
-        let rate = 2_000_f64 / tx2.vsize() as f64;
-        let expected_fees = Fees::new_unchecked(2_000, rate, NonZeroU64::new(tx2.vsize() as u64));
+        let expected_fees =
+            Fees::new_unchecked(2_000, NonZeroU64::new(tx2.vsize() as u64).unwrap());
 
         // Assert that everything's as expected.
         assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid);

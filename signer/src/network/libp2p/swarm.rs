@@ -1106,8 +1106,7 @@ mod tests {
             fee_rate: 25.1234567,
             last_fees: Some(Fees::new_unchecked(
                 u64::MAX,
-                25.1234567,
-                NonZeroU64::new(u64::MAX),
+                NonZeroU64::new(u64::MAX).unwrap(),
             )),
         };
 
