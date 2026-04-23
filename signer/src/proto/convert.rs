@@ -39,7 +39,6 @@ use wsts::net::SignatureType;
 use wsts::traits::PartyState;
 use wsts::traits::SignerState;
 
-use crate::MAX_BITCOIN_BLOCK_VSIZE;
 use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::validation::TxRequestIds;
 use crate::codec;
@@ -1212,7 +1211,7 @@ impl TryFrom<proto::Fees> for Fees {
     fn try_from(proto::Fees { total, rate }: proto::Fees) -> Result<Self, Self::Error> {
         let vsize = (total as f64 / rate).round();
 
-        if vsize <= 0.0 || vsize > MAX_BITCOIN_BLOCK_VSIZE as f64 || vsize.is_nan() {
+        if vsize <= 0.0 || vsize > crate::MAX_BITCOIN_BLOCK_VSIZE as f64 || vsize.is_nan() {
             return Err(Error::InvalidProtobufLastFee { total, rate });
         }
 
@@ -1240,7 +1239,7 @@ impl From<BitcoinPreSignRequest> for proto::BitcoinPreSignRequest {
             fee_rate: value.fee_rate,
             // We compute the last fees ourselves. In the next release,
             // there will be no need to require the sender include them.
-            last_fees: value.last_fees.map(|v| v.into()),
+            last_fees: value.last_fees,
         }
     }
 }
