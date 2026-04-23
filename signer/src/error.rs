@@ -774,7 +774,8 @@ pub enum Error {
     BitcoinNoRequests,
 
     /// Indicates that the BitcoinPreSignRequest object contains a fee rate
-    /// that is less than or equal to zero.
+    /// that is outside of the allowed range defined as the range between
+    /// `MIN_BITCOIN_FEE_RATE` and `MAX_BITCOIN_FEE_RATE`.
     #[error("the fee rate in the BitcoinPreSignRequest object is out of bounds: {0}")]
     PreSignInvalidFeeRate(f64),
 
