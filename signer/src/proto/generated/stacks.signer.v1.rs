@@ -17,10 +17,10 @@ pub struct QualifiedRequestId {
     #[prost(message, optional, tag = "3")]
     pub block_hash: ::core::option::Option<super::super::StacksBlockId>,
 }
-/// Describes the fees for a transaction package.
+/// Describes the fees for a transaction.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct Fees {
-    /// The total fee paid in sats for the transaction package.
+    /// The total fee paid in sats for the transaction.
     #[prost(uint64, tag = "1")]
     pub total: u64,
     /// The fee rate paid in sats per virtual byte.
