@@ -77,10 +77,13 @@ pub const MAX_REORG_BLOCK_COUNT: u64 = 10;
 pub const MAX_BITCOIN_FEE_RATE: f64 = 1000.0;
 
 /// The minimum fee rate, in sats per vbyte, for a bitcoin transaction.
-/// Transactions with a fee rate that exceeds this value will be rejected.
+/// Transactions with a fee rate below this value will be rejected.
 ///
-/// This value is less than the default fee rate in bitcoin core for the
-/// minrelaytxfee setting as of bitcoin-core v30, which is 0.1.
+/// This value is below the default of bitcoin core's `minrelaytxfee`
+/// setting, which is 1.0 sats/vB in bitcoin-core v25–v29 and was lowered
+/// to 0.1 sats/vB in v30. We set it low to allow the sBTC signer network
+/// to easily accommodate changes in our bitcoin node's mempool policy
+/// without requiring a change to the signer binary.
 ///
 /// <https://bitcoincore.org/en/releases/30.0/>
 pub const MIN_BITCOIN_FEE_RATE: f64 = 0.001;
