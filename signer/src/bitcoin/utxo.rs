@@ -43,7 +43,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::DEPOSIT_DUST_LIMIT;
-use crate::MAX_MEMPOOL_PACKAGE_SIZE;
+use crate::MAX_BITCOIN_BLOCK_VSIZE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::bitcoin::packaging::Weighted;
 use crate::bitcoin::packaging::compute_optimal_packages;
@@ -129,17 +129,16 @@ pub struct Fees {
     /// The total fee paid in sats for the transaction package.
     pub total: u64,
     /// The size of the transaction package in virtual bytes.
-    ///
-    /// This is optional because we need to be backwards compatible until
-    /// we know that all signers are sending this value.
     vsize: NonZeroU64,
 }
 
 impl Fees {
     /// Create a new [`Fees`] instance.
     ///
-    /// This function will return an error if the total fees are greater than
-    /// the maximum amount of bitcoin.
+    /// This function will return an error if the total fees are greater
+    /// than the maximum amount of bitcoin, or if the vsize is greater than
+    /// the maximum bitcoin block vsize. We strongly suspect that something
+    /// has gone wrong if these limits are exceeded. 
     pub fn new(total: u64, vsize: u64) -> Result<Self, Error> {
         if total > Amount::MAX_MONEY.to_sat() {
             return Err(Error::InvalidTotalFees(total));
@@ -149,7 +148,7 @@ impl Fees {
             return Err(Error::InvalidLastFee { total, vsize });
         };
 
-        if vsize.get() > MAX_MEMPOOL_PACKAGE_SIZE {
+        if vsize.get() > MAX_BITCOIN_BLOCK_VSIZE {
             return Err(Error::InvalidLastFee { total, vsize: vsize.get() });
         }
 
@@ -163,11 +162,6 @@ impl Fees {
     }
 
     /// Compute the fee rate, in sats per vbyte.
-    ///
-    /// This prefers to compute the fee rate when possible, and only falls
-    /// back to the given fee rate when the vsize is not available. This
-    /// way is only temporary until signers have upgraded to always send
-    /// the vsize.
     pub fn rate(&self) -> f64 {
         self.total as f64 / self.vsize.get() as f64
     }
@@ -3275,9 +3269,9 @@ mod tests {
     #[test_case(Amount::MAX_MONEY.to_sat() + 1, 1, false; "total is over max money")]
     #[test_case(Amount::MAX_MONEY.to_sat(), 1, true; "total is max money")]
     #[test_case(Amount::MAX_MONEY.to_sat() - 1, 1, true; "total is just below max money")]
-    #[test_case(100, MAX_MEMPOOL_PACKAGE_SIZE, true; "max mempool package size")]
+    #[test_case(100, MAX_BITCOIN_BLOCK_VSIZE, true; "max bitcoin block vsize")]
     #[test_case(100, 0, false; "vsize is zero")]
-    #[test_case(100, MAX_MEMPOOL_PACKAGE_SIZE + 1, false; "vsize is over max mempool package size")]
+    #[test_case(100, MAX_BITCOIN_BLOCK_VSIZE + 1, false; "vsize is over max bitcoin block vsize")]
     fn test_fees_creation(total: u64, vsize: u64, is_ok: bool) {
         let fees = Fees::new(total, vsize);
         assert_eq!(fees.is_ok(), is_ok);
