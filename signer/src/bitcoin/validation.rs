@@ -13,6 +13,7 @@ use crate::BITCOIN_FEE_RATE_RANGE;
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
+use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo::FeeAssessment;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::context::Context;
@@ -292,11 +293,15 @@ impl BitcoinPreSignRequest {
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
 
+        let bitcoin_client = ctx.get_bitcoin_client();
+        let last_fees =
+            assess_mempool_sweep_transaction_fees(&bitcoin_client, &signer_utxo).await?;
+
         let mut signer_state = SignerBtcState {
             fee_rate: self.fee_rate,
             utxo: signer_utxo,
             public_key: bitcoin::XOnlyPublicKey::from(btc_ctx.aggregate_key),
-            last_fees: self.last_fees,
+            last_fees,
             magic_bytes: [b'T', b'3'], //TODO(#472): Use the correct magic bytes.
         };
         let mut outputs = Vec::new();

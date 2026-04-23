@@ -25,6 +25,4 @@ message Fees {
   uint64 total = 1;
   // The fee rate paid in sats per virtual byte.
   double rate = 2;
-  // The size of the transaction package in virtual bytes.
-  uint64 vsize = 3;
 }

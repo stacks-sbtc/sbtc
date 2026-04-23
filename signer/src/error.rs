@@ -283,6 +283,16 @@ pub enum Error {
     #[error("total fees paid for a transaction package was more than the max amount of sats: {0}")]
     InvalidTotalFees(u64),
 
+    /// Getting this error means a programming error or an error in
+    /// bitcoin-core.
+    #[error("the Fees object was invalid: total: {total}, vsize: {vsize:?}")]
+    InvalidLastFee {
+        /// The total fees passed into Fees::new.
+        total: u64,
+        /// The vsize passed into Fees::new.
+        vsize: u64,
+    },
+
     /// No good fee estimate
     #[error("failed to get fee estimates from all fee estimate sources")]
     NoGoodFeeEstimates,

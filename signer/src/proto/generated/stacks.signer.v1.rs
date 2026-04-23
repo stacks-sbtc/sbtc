@@ -26,9 +26,6 @@ pub struct Fees {
     /// The fee rate paid in sats per virtual byte.
     #[prost(double, tag = "2")]
     pub rate: f64,
-    /// The size of the transaction package in virtual bytes.
-    #[prost(uint64, tag = "3")]
-    pub vsize: u64,
 }
 /// Represents a decision to accept or reject a deposit request.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]

@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::num::NonZeroU64;
 
 use bitcoin::OutPoint;
 use clarity::codec::StacksMessageCodec as _;
@@ -1211,16 +1210,7 @@ impl From<Fees> for proto::Fees {
         proto::Fees {
             total: value.total,
             rate: value.rate(),
-            vsize: value.vsize.map(NonZeroU64::get).unwrap_or(0),
         }
-    }
-}
-
-impl TryFrom<proto::Fees> for Fees {
-    type Error = Error;
-    fn try_from(value: proto::Fees) -> Result<Self, Self::Error> {
-        let vsize = NonZeroU64::new(value.vsize);
-        Fees::new(value.total, value.rate, vsize)
     }
 }
 
@@ -1248,7 +1238,9 @@ impl TryFrom<proto::BitcoinPreSignRequest> for BitcoinPreSignRequest {
                 .map(|v| v.try_into())
                 .collect::<Result<Vec<_>, _>>()?,
             fee_rate: value.fee_rate,
-            last_fees: value.last_fees.map(|v| v.try_into()).transpose()?,
+            // We compute the last fees ourselves, no need to require the
+            // sender include them.
+            last_fees: None,
         })
     }
 }
@@ -1704,7 +1696,6 @@ mod tests {
     #[test_case(PhantomData::<(Signed<SignerMessage>, proto::Signed)>; "Signed")]
     #[test_case(PhantomData::<(QualifiedRequestId, proto::QualifiedRequestId)>; "QualifiedRequestId")]
     #[test_case(PhantomData::<(TxRequestIds, proto::TxRequestIds)>; "TxRequestIds")]
-    #[test_case(PhantomData::<(Fees, proto::Fees)>; "Fees")]
     #[test_case(PhantomData::<(BitcoinPreSignRequest, proto::BitcoinPreSignRequest)>; "BitcoinPreSignRequest")]
     #[test_case(PhantomData::<(BitcoinPreSignAck, proto::BitcoinPreSignAck)>; "BitcoinPreSignAck")]
     fn convert_protobuf_type<T, U, E>(_: PhantomData<(T, U)>)
