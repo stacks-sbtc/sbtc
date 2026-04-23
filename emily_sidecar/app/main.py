@@ -28,7 +28,10 @@ class NewBlockEventModel(BaseModel, extra="allow"):
 
 
 # Initialize the FastAPI app
-app = FastAPI()
+app = FastAPI(
+    # Don't require `Content-Type` header for json requests
+    strict_content_type=False,
+)
 
 
 @app.post("/new_block")
