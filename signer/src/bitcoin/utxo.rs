@@ -43,6 +43,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::DEPOSIT_DUST_LIMIT;
+use crate::MAX_MEMPOOL_PACKAGE_SIZE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::bitcoin::packaging::Weighted;
 use crate::bitcoin::packaging::compute_optimal_packages;
@@ -127,13 +128,11 @@ static DUMMY_SIGNATURE: LazyLock<Signature> = LazyLock::new(|| Signature {
 pub struct Fees {
     /// The total fee paid in sats for the transaction package.
     pub total: u64,
-    /// The fee rate paid in sats per virtual byte.
-    rate: f64,
     /// The size of the transaction package in virtual bytes.
     ///
     /// This is optional because we need to be backwards compatible until
     /// we know that all signers are sending this value.
-    pub vsize: Option<NonZeroU64>,
+    vsize: NonZeroU64,
 }
 
 impl Fees {
@@ -141,17 +140,26 @@ impl Fees {
     ///
     /// This function will return an error if the total fees are greater than
     /// the maximum amount of bitcoin.
-    pub fn new(total: u64, rate: f64, vsize: Option<NonZeroU64>) -> Result<Self, Error> {
+    pub fn new(total: u64, vsize: u64) -> Result<Self, Error> {
         if total > Amount::MAX_MONEY.to_sat() {
             return Err(Error::InvalidTotalFees(total));
         }
-        Ok(Self { total, rate, vsize })
+
+        let Some(vsize) = NonZeroU64::new(vsize) else {
+            return Err(Error::InvalidLastFee { total, vsize });
+        };
+
+        if vsize.get() > MAX_MEMPOOL_PACKAGE_SIZE {
+            return Err(Error::InvalidLastFee { total, vsize: vsize.get() });
+        }
+
+        Ok(Self { total, vsize })
     }
 
     /// Create a new [`Fees`] instance.
     #[cfg(any(test, feature = "testing"))]
-    pub fn new_unchecked(total: u64, rate: f64, vsize: Option<NonZeroU64>) -> Self {
-        Self { total, rate, vsize }
+    pub fn new_unchecked(total: u64, vsize: NonZeroU64) -> Self {
+        Self { total, vsize }
     }
 
     /// Compute the fee rate, in sats per vbyte.
@@ -161,11 +169,7 @@ impl Fees {
     /// way is only temporary until signers have upgraded to always send
     /// the vsize.
     pub fn rate(&self) -> f64 {
-        if let Some(vsize) = self.vsize {
-            self.total as f64 / vsize.get() as f64
-        } else {
-            self.rate
-        }
+        self.total as f64 / self.vsize.get() as f64
     }
 }
 
@@ -2645,7 +2649,7 @@ mod tests {
         // In the below code, we need to make sure that we take the _first_
         // transaction in each package as that is the one that will be RBF'd.
 
-        let (old_fee_total, old_fee_rate) = {
+        let (old_fee_total, old_vsize) = {
             let transactions = requests.construct_transactions().unwrap();
             let utx = transactions.first().unwrap();
 
@@ -2654,15 +2658,10 @@ mod tests {
 
             more_asserts::assert_gt!(input_amounts, output_amounts);
             let fee_total = input_amounts - output_amounts;
-            let fee_rate = fee_total as f64 / utx.tx.vsize() as f64;
-            (fee_total, fee_rate)
+            (fee_total, utx.tx.vsize() as u64)
         };
 
-        requests.signer_state.last_fees = Some(Fees {
-            total: old_fee_total,
-            rate: old_fee_rate,
-            vsize: None,
-        });
+        requests.signer_state.last_fees = Some(Fees::new(old_fee_total, old_vsize).unwrap());
 
         let transactions = requests.construct_transactions().unwrap();
         let utx = transactions.first().unwrap();
@@ -3270,33 +3269,18 @@ mod tests {
         assert_eq!(package_vsize, total_vsize);
     }
 
-    #[test_case(0, true; "total is zero")]
-    #[test_case(100, true; "total is one hundred")]
-    #[test_case(f64::exp2(f64::MANTISSA_DIGITS as f64) as u64, false; "total is max f64 lossless integer")]
-    #[test_case(Amount::MAX_MONEY.to_sat() + 1, false; "total is over max money")]
-    #[test_case(Amount::MAX_MONEY.to_sat(), true; "total is max money")]
-    #[test_case(Amount::MAX_MONEY.to_sat() - 1, true; "total is just below max money")]
-    fn test_fees_creation(total: u64, is_ok: bool) {
-        let fees = Fees::new(total, 1.0, None);
+    #[test_case(0, 1, true; "total is zero")]
+    #[test_case(100, 1, true; "total is one hundred")]
+    #[test_case(f64::exp2(f64::MANTISSA_DIGITS as f64) as u64, 1, false; "total is max f64 lossless integer")]
+    #[test_case(Amount::MAX_MONEY.to_sat() + 1, 1, false; "total is over max money")]
+    #[test_case(Amount::MAX_MONEY.to_sat(), 1, true; "total is max money")]
+    #[test_case(Amount::MAX_MONEY.to_sat() - 1, 1, true; "total is just below max money")]
+    #[test_case(100, MAX_MEMPOOL_PACKAGE_SIZE, true; "max mempool package size")]
+    #[test_case(100, 0, false; "vsize is zero")]
+    #[test_case(100, MAX_MEMPOOL_PACKAGE_SIZE + 1, false; "vsize is over max mempool package size")]
+    fn test_fees_creation(total: u64, vsize: u64, is_ok: bool) {
+        let fees = Fees::new(total, vsize);
         assert_eq!(fees.is_ok(), is_ok);
-    }
-
-    #[test]
-    fn test_fees_rate() {
-        // Whenever the vsize is missing, the rate is whatever was set.
-        let fees = Fees::new(100, 1.0, None).unwrap();
-        assert_eq!(fees.rate(), 1.0);
-
-        let fees = Fees::new(100, 2.0, None).unwrap();
-        assert_eq!(fees.rate(), 2.0);
-
-        // Whenever the vsize is set, the rate() is whatever total / vsize
-        // is, and the rate field is ignored.
-        let fees = Fees::new(100, 2.0, NonZeroU64::new(100)).unwrap();
-        assert_eq!(fees.rate(), 1.0);
-
-        let fees = Fees::new(100, 25.0, NonZeroU64::new(200)).unwrap();
-        assert_eq!(fees.rate(), 0.5);
     }
 
     #[test_case(
