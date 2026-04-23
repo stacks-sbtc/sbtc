@@ -565,7 +565,7 @@ where
                 .map(|tx| (&tx.requests).into())
                 .collect(),
             fee_rate: signer_btc_state.fee_rate,
-            last_fees: signer_btc_state.last_fees,
+            last_fees: signer_btc_state.last_fees.map(Into::into),
         };
 
         let presign_ack_filter = |event: &SignerSignal| {

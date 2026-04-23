@@ -284,7 +284,7 @@ pub enum Error {
 
     /// Getting this error means a programming error or an error in
     /// bitcoin-core.
-    #[error("the Fees object was invalid: total: {total}, vsize: {vsize:?}")]
+    #[error("the Fees object was invalid: total: {total}, vsize: {vsize}")]
     InvalidLastFee {
         /// The total fees passed into Fees::new.
         total: u64,
@@ -819,6 +819,17 @@ pub enum Error {
     #[cfg(any(test, feature = "testing"))]
     #[error("Test utility error: {0}")]
     TestUtility(crate::testing::TestUtilityError),
+
+    /// Getting this error means a programming error or an error in
+    /// bitcoin-core.
+    #[cfg(any(test, feature = "testing"))]
+    #[error("the Fees object received from the network was invalid: total: {total}, rate: {rate}")]
+    InvalidProtobufLastFee {
+        /// The total fees passed into Fees::new.
+        total: u64,
+        /// The fee rate sent over the network.
+        rate: f64,
+    },
 }
 
 impl From<std::convert::Infallible> for Error {

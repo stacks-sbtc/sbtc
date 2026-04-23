@@ -50,6 +50,7 @@ use wsts::net::SignatureType;
 use wsts::traits::PartyState;
 use wsts::traits::SignerState;
 
+use crate::MAX_BITCOIN_BLOCK_VSIZE;
 use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::BitcoinTxVin;
@@ -755,7 +756,7 @@ impl fake::Dummy<fake::Faker> for TxRequestIds {
 impl fake::Dummy<fake::Faker> for Fees {
     fn dummy_with_rng<R: rand::RngCore + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
         let total: u64 = (0..=Amount::MAX_MONEY.to_sat()).fake_with_rng(rng);
-        let vsize: u64 = (1..101000).fake_with_rng(rng);
+        let vsize: u64 = (1..MAX_BITCOIN_BLOCK_VSIZE).fake_with_rng(rng);
         Fees::new_unchecked(total, NonZeroU64::new(vsize).unwrap())
     }
 }
@@ -765,7 +766,7 @@ impl fake::Dummy<fake::Faker> for BitcoinPreSignRequest {
         BitcoinPreSignRequest {
             request_package: fake::vec![TxRequestIds; 0..20],
             fee_rate: config.fake_with_rng(rng),
-            last_fees: config.fake_with_rng(rng),
+            last_fees: Some(config.fake_with_rng::<Fees, _>(rng).into()),
         }
     }
 }

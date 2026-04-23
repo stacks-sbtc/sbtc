@@ -138,7 +138,7 @@ impl Fees {
     /// This function will return an error if the total fees are greater
     /// than the maximum amount of bitcoin, or if the vsize is greater than
     /// the maximum bitcoin block vsize. We strongly suspect that something
-    /// has gone wrong if these limits are exceeded. 
+    /// has gone wrong if these limits are exceeded.
     pub fn new(total: u64, vsize: u64) -> Result<Self, Error> {
         if total > Amount::MAX_MONEY.to_sat() {
             return Err(Error::InvalidTotalFees(total));
