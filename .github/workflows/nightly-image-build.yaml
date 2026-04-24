@@ -18,6 +18,7 @@ env:
 
 jobs:
   image:
+    if: ${{ github.repository == 'stacks-sbtc/sbtc' }}
     name: Build Image
     strategy:
       fail-fast: false
