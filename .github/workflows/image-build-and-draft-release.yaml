@@ -64,15 +64,6 @@ jobs:
         id: setup_buildx
         uses: stacks-sbtc/actions/docker/setup-buildx-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
 
-      ## if the repo owner is not `stacks-network`, default to a docker-org of the repo owner (i.e. github user id)
-      ## this allows forks to run the docker push workflows without having to hardcode a dockerhub org (but it does require docker hub user to match github username)
-      - name: Set Local env vars
-        id: set_env
-        if: |
-          github.repository_owner != 'stacks-network'
-        run: |
-          echo "ghcr_org=ghcr.io/${{ github.repository_owner }}" >> "$GITHUB_ENV"
-
       ## Set docker metatdata
       ## - depending on the matrix.dist, different tags will be enabled
       ## ex. debian will have this tag: `type=ref,event=tag,enable=${{ matrix.dist == 'debian' }}`
@@ -81,7 +72,7 @@ jobs:
         uses: stacks-sbtc/actions/docker/metadata-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
         with:
           images: |
-            ${{ env.ghcr_org }}/sbtc
+            ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }}
             type=raw,value=${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }},enable=${{ matrix.dist == 'debian' }}
@@ -110,7 +101,7 @@ jobs:
         id: generate_attestation
         uses: stacks-sbtc/actions/attest-build-provenance@505c42b153ba2ac261c276e96bc5dc7b68d61039
         with:
-          subject-name: ${{ env.ghcr_org }}/sbtc
+          subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.docker_build.outputs.digest }}
 
       - name: Download artifact attestation
@@ -118,7 +109,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh attestation download oci://${{ env.ghcr_org }}/sbtc:${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }} -R ${{ github.repository_owner }}/sbtc
+          gh attestation download oci://ghcr.io/${{ github.repository }}:${{ matrix.docker_target }}-${{ github.event.client_payload.tag_name }}-${{ matrix.dist }} -R ${{ github.repository }}
           
           # Rename the attestation bundle (replace ":" with "_")
           ATTESTATION_FILE="$(echo "${{ steps.docker_build.outputs.digest }}.jsonl" | tr ':' '_')"
@@ -156,8 +147,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SIGNER_DIGEST: ${{ needs.image.outputs.signer }}
           BLOCKLIST_DIGEST: ${{ needs.image.outputs.blocklist-client }}
-          API_PATH: /orgs/${{ github.repository_owner }}/packages/container/sbtc/versions
-          FALLBACK_URL: https://github.com/${{ github.repository }}/pkgs/container/sbtc
+          API_PATH: /orgs/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/versions
+          FALLBACK_URL: https://github.com/${{ github.repository }}/pkgs/container/${{ github.event.repository.name }}
         run: |
           SIGNER=$(gh api --paginate "$API_PATH" \
             --jq ".[] | select(.name == \"$SIGNER_DIGEST\") | .html_url" \
@@ -190,16 +181,16 @@ jobs:
           > [!IMPORTANT]
           > Always use [immutable image tags](https://docs.docker.com/reference/cli/docker/image/pull/#pull-an-image-by-digest-immutable-identifier) - the image digests are provided below. Verify the attestation of these images using this [guide](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds#verifying-artifact-attestations-with-the-github-cli).
           >
-          > We publish our images on [GitHub Container Registry](https://github.com/${{ github.repository_owner }}/sbtc/pkgs/container/sbtc).
+          > We publish our images on [GitHub Container Registry](https://github.com/${{ github.repository }}/pkgs/container/${{ github.event.repository.name }}).
 
           ### sBTC Signer
-          [\`ghcr.io/${{ github.repository_owner }}/sbtc:signer-${{ env.TAG_NAME }}@${{ needs.image.outputs.signer }}\`](${{ env.SIGNER_URL }})
-          - 🏷️ \`${{ github.repository_owner }}/sbtc:signer-${{ env.TAG_NAME }}\`
+          [\`ghcr.io/${{ github.repository }}:signer-${{ env.TAG_NAME }}@${{ needs.image.outputs.signer }}\`](${{ env.SIGNER_URL }})
+          - 🏷️ \`${{ github.repository }}:signer-${{ env.TAG_NAME }}\`
           - 🔒 \`${{ needs.image.outputs.signer }}\`
 
           ### Blocklist Client
-          [\`ghcr.io/${{ github.repository_owner }}/sbtc:blocklist-client-${{ env.TAG_NAME }}@${{ needs.image.outputs.blocklist-client }}\`](${{ env.BLOCKLIST_CLIENT_URL }})
-          - 🏷️ \`${{ github.repository_owner }}/sbtc:blocklist-client-${{ env.TAG_NAME }}\`
+          [\`ghcr.io/${{ github.repository }}:blocklist-client-${{ env.TAG_NAME }}@${{ needs.image.outputs.blocklist-client }}\`](${{ env.BLOCKLIST_CLIENT_URL }})
+          - 🏷️ \`${{ github.repository }}:blocklist-client-${{ env.TAG_NAME }}\`
           - 🔒 \`${{ needs.image.outputs.blocklist-client }}\`
 
           # 📙 Database migrations
@@ -208,7 +199,7 @@ jobs:
           >
           > **`--migrate-db` is enabled by default in our official Docker images.**
 
-          Database migrations may be found at [`signer/migrations`](https://github.com/${{ github.repository_owner }}/sbtc/tree/${{ env.TAG_NAME }}/signer/migrations).
+          Database migrations may be found at [`signer/migrations`](https://github.com/${{ github.repository }}/tree/${{ env.TAG_NAME }}/signer/migrations).
 
           # 🛠️ Upgrade Instructions: <a id="upgrade-instructions">
 
