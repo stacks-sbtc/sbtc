@@ -928,14 +928,14 @@ mod tests {
 
     /// Each opcode in the BIP-342 `OP_SUCCESSx` range causes the
     /// user-supplied reclaim script to be rejected.
-    #[test_case(opcodes::OP_RESERVED   ; "OP_RESERVED (80)")]
-    #[test_case(opcodes::OP_VER        ; "OP_VER (98)")]
-    #[test_case(opcodes::OP_CAT        ; "OP_CAT (126)")]
-    #[test_case(opcodes::OP_SUBSTR     ; "OP_SUBSTR (127)")]
-    #[test_case(opcodes::OP_INVERT     ; "OP_INVERT (131)")]
-    #[test_case(opcodes::OP_RESERVED1  ; "OP_RESERVED1 (137)")]
-    #[test_case(opcodes::OP_2MUL       ; "OP_2MUL (141)")]
-    #[test_case(opcodes::OP_MUL        ; "OP_MUL (149)")]
+    #[test_case(opcodes::OP_RESERVED ; "OP_RESERVED (80)")]
+    #[test_case(opcodes::OP_VER ; "OP_VER (98)")]
+    #[test_case(opcodes::OP_CAT ; "OP_CAT (126)")]
+    #[test_case(opcodes::OP_SUBSTR ; "OP_SUBSTR (127)")]
+    #[test_case(opcodes::OP_INVERT ; "OP_INVERT (131)")]
+    #[test_case(opcodes::OP_RESERVED1 ; "OP_RESERVED1 (137)")]
+    #[test_case(opcodes::OP_2MUL ; "OP_2MUL (141)")]
+    #[test_case(opcodes::OP_MUL ; "OP_MUL (149)")]
     #[test_case(opcodes::OP_RETURN_187 ; "OP_RETURN_187 (187)")]
     #[test_case(opcodes::OP_RETURN_254 ; "OP_RETURN_254 (254)")]
     fn reclaim_script_op_success_rejected(op: bitcoin::opcodes::Opcode) {
