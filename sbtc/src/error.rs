@@ -69,6 +69,14 @@ pub enum Error {
         from_request: Txid,
     },
 
+    /// The reclaim script was invalid because it was too long.
+    #[error("the reclaim script was too long: was {0} bytes")]
+    InvalidReclaimScriptLength(usize),
+
+    /// The reclaim script contained an OP_SUCCESS opcode.
+    #[error("the reclaim script contained an OP_SUCCESS opcode")]
+    ReclaimScriptWithSuccessOp,
+
     /// This is thrown when failing to parse a hex string into bytes.
     #[cfg(any(test, feature = "webhooks"))]
     #[error("could not decode the hex string into bytes: {0}")]

@@ -9,7 +9,10 @@ use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::XOnlyPublicKey;
 use bitcoin::locktime::relative::LockTime;
+use bitcoin::opcodes::Class;
+use bitcoin::opcodes::ClassifyContext;
 use bitcoin::opcodes::all as opcodes;
+use bitcoin::script::Instruction;
 use bitcoin::script::PushBytesBuf;
 use bitcoin::taproot::LeafVersion;
 use bitcoin::taproot::NodeInfo;
@@ -21,6 +24,7 @@ use clarity::vm::types::QualifiedContractIdentifier;
 use secp256k1::SECP256K1;
 use stacks_common::types::chainstate::STACKS_ADDRESS_ENCODED_SIZE;
 
+use crate::MAX_RECLAIM_SCRIPT_LENGTH;
 use crate::error::Error;
 
 /// This is the length of the fixed portion of the deposit script, which
@@ -400,8 +404,36 @@ pub struct ReclaimScriptInputs {
 }
 
 impl ReclaimScriptInputs {
-    /// Create a new one
+    /// Create a new one, validating that:
+    ///
+    /// * the lock time is a non-disabled block based time,
+    /// * the script is within the maximum length allowed for a reclaim
+    ///   script,
+    /// * the script does not contain any of the OP_SUCCESS opcodes.
     pub fn try_new(lock_time: u32, script: ScriptBuf) -> Result<Self, Error> {
+        // OP_CSV checks can be disabled if the locktime has the disabled
+        // locktime bit set to 1. So we disallow such locktimes to ensure
+        // that the OP_CSV check is always enabled.
+        //
+        // <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L560-L592>
+        let lock_time = LockTime::from_consensus(lock_time).map_err(Error::DisabledLockTime)?;
+
+        // For now, we only accept locktimes denominated in bitcoin block
+        // units.
+        if matches!(lock_time, LockTime::Time(_)) {
+            return Err(Error::UnsupportedLockTimeUnits(
+                lock_time.to_consensus_u32(),
+            ));
+        }
+
+        Self::validate_script(&script)?;
+
+        Ok(Self { lock_time, script })
+    }
+
+    /// Create a new one, but without validating the script.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn try_new_unvalidated(lock_time: u32, script: ScriptBuf) -> Result<Self, Error> {
         // OP_CSV checks can be disabled if the locktime has the disabled
         // locktime bit set to 1. So we disallow such locktimes to ensure
         // that the OP_CSV check is always enabled.
@@ -503,6 +535,30 @@ impl ReclaimScriptInputs {
 
         let script = ScriptBuf::from_bytes(script.to_vec());
         ReclaimScriptInputs::try_new(lock_time, script)
+    }
+
+    /// Check if the script is a valid reclaim script.
+    ///
+    /// This function checks that the script does not contain any of the
+    /// OP_SUCCESS opcodes, and that the script length does not exceed
+    /// MAX_RECLAIM_SCRIPT_LENGTH.
+    pub fn validate_script(script: &ScriptBuf) -> Result<(), Error> {
+        if script.len() > MAX_RECLAIM_SCRIPT_LENGTH {
+            return Err(Error::InvalidReclaimScriptLength(script.len()));
+        }
+
+        let has_op_success_ops = script.instructions().any(|op| match op {
+            Ok(Instruction::Op(opcode)) => {
+                opcode.classify(ClassifyContext::TapScript) == Class::SuccessOp
+            }
+            _ => false,
+        });
+
+        if has_op_success_ops {
+            return Err(Error::ReclaimScriptWithSuccessOp);
+        }
+
+        Ok(())
     }
 }
 
