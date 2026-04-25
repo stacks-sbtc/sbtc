@@ -70,7 +70,7 @@ pub enum Error {
     },
 
     /// The reclaim script was invalid because it was too long.
-    #[error("the reclaim script was too long: was {0} bytes")]
+    #[error("the reclaim script was too long: {0} bytes")]
     InvalidReclaimScriptLength(usize),
 
     /// The reclaim script contained an OP_SUCCESS opcode.

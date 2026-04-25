@@ -466,11 +466,11 @@ impl ReclaimScriptInputs {
     /// * it does not contain any OP_SUCCESSx opcodes.
     ///
     /// We reject OP_SUCCESSx in order for the OP_CSV lock to be
-    /// meaningful: [BIP-342] states that any tapscript containing such an
+    /// meaningful. BIP-342[1] states that any tapscript containing such an
     /// opcode is unconditionally valid, which would let a depositor spend
     /// the reclaim path without satisfying the lock-time.
     ///
-    /// [BIP-342]: <https://github.com/bitcoin/bips/blob/554be702d7d28e3cd1cbf2e84c153f041fdde898/bip-0342.mediawiki>
+    /// [1]: <https://github.com/bitcoin/bips/blob/554be702d7d28e3cd1cbf2e84c153f041fdde898/bip-0342.mediawiki>
     fn validate_script(script: &ScriptBuf) -> Result<(), Error> {
         if script.len() > MAX_RECLAIM_SCRIPT_LENGTH {
             return Err(Error::InvalidReclaimScriptLength(script.len()));
@@ -978,7 +978,8 @@ mod tests {
 
         ReclaimScriptInputs::try_new(lock_time, script).unwrap();
 
-        // This is different, this is just the invalid opcode.
+        // For comparison: the same byte used as a bare opcode (rather
+        // than inside a push payload) is rejected.
         let script = ScriptBuf::builder()
             .push_opcode(opcodes::OP_RETURN_187)
             .push_opcode(opcodes::OP_DROP)

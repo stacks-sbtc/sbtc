@@ -593,7 +593,7 @@ mod serial {
     ///
     /// The test proceeds as follows:
     /// 1. Confirm a deposit whose reclaim path's user script contains an
-    ///    OP_SUCCESSx opcode, gated by an u16::MAX-block OP_CSV lock.
+    ///    OP_SUCCESSx opcode, gated by an u16::MAX block OP_CSV lock.
     /// 2. Verify that CreateDepositRequest::validate_tx rejects this
     ///    deposit, so that we know that the signers will reject it.
     /// 3. Build a reclaim transaction with Sequence::ZERO so the OP_CSV
@@ -635,7 +635,7 @@ mod serial {
         // OP_SUCCESSx opcode. Bitcoin-core's OP_SUCCESSx scan in tapscript
         // happens before execution, so even an OP_RETURN ahead of the
         // OP_SUCCESSx opcode does not prevent unconditional success. See
-        // the tapscript branch of xecuteWitnessScript:
+        // the tapscript branch of ExecuteWitnessScript:
         // <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L1792-L1808>
         let x_only_key = depositor.keypair.public_key().x_only_public_key().0;
         let reclaim_script = ScriptBuf::builder()
@@ -750,7 +750,6 @@ mod serial {
             control_block.serialize(),
         ];
         reclaim_tx.input[0].witness = Witness::from_slice(&witness_data);
-
 
         // We haven't generated enough blocks to satisfy the OP_CSV lock,
         // so this should fail regardless. In this case, it fails because
