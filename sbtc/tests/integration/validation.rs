@@ -585,19 +585,29 @@ mod serial {
         );
     }
 
-    /// This validates that a user can reclaim their funds after the locktime.
+    /// This validates the motivation for rejecting reclaim scripts that
+    /// contain OP_SUCCESSx opcodes. Per BIP-342, any tapscript that
+    /// contains such an opcode is unconditionally valid, which means such
+    /// a script bypasses the <lock-time> OP_CSV lock entirely at the
+    /// consensus level.
     ///
     /// The test proceeds as follows:
-    /// 1. Spend all the user's funds for a sBTC deposit. Check that the
-    ///    balance is zero.
-    /// 2. Wait locktime blocks after the first confirmation.
-    /// 3. Create and submit another transaction reclaiming the funds.
-    /// 4. Confirm the transaction and check that the balance is what it is
-    ///    supposed to be, less the bitcoin transaction fees.
+    /// 1. Confirm a deposit whose reclaim path's user script contains an
+    ///    OP_SUCCESSx opcode, gated by an u16::MAX-block OP_CSV lock.
+    /// 2. Verify that CreateDepositRequest::validate_tx rejects this
+    ///    deposit, so that we know that the signers will reject it.
+    /// 3. Build a reclaim transaction with Sequence::ZERO so the OP_CSV
+    ///    lock is not satisfied, and confirm that the bitcoin-core mempool
+    ///    rejects it as non-standard with OP_SUCCESSx reserved for
+    ///    soft-fork upgrades.
+    /// 4. Force-mine the reclaim transaction with generateblock, which
+    ///    bypasses standardness, and confirm that consensus accepts.
     #[test]
     fn reclaiming_rejected_deposits_op_success() {
         let max_fee: u64 = 15000;
         let amount_sats = 49_900_000;
+        // Set far higher than any block we'll mine in the test, so the
+        // OP_CSV lock cannot possibly be satisfied via timing alone.
         let lock_time = u16::MAX as u32;
 
         let (rpc, faucet) = regtest::initialize_blockchain();
@@ -621,10 +631,12 @@ mod serial {
             max_fee,
         };
 
-        // const OP_RETURN_187: u8 = opcodes::all::OP_RETURN_187.to_u8();
-        // Now the depositor's reclaim script is locked with a P2PK script that
-        // is locked with an x-only public key. This means we need to use a
-        // BIP-341 Schnorr signature to spend the funds.
+        // The depositor's reclaim path has a leading OP_RETURN with an
+        // OP_SUCCESSx opcode. Bitcoin-core's OP_SUCCESSx scan in tapscript
+        // happens before execution, so even an OP_RETURN ahead of the
+        // OP_SUCCESSx opcode does not prevent unconditional success. See
+        // the tapscript branch of xecuteWitnessScript:
+        // <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L1792-L1808>
         let x_only_key = depositor.keypair.public_key().x_only_public_key().0;
         let reclaim_script = ScriptBuf::builder()
             .push_opcode(opcodes::all::OP_RETURN)
@@ -633,8 +645,9 @@ mod serial {
             .push_slice(x_only_key.serialize())
             .push_opcode(opcodes::all::OP_CHECKSIG)
             .into_script();
-        // The full reclaim path script includes an OP_CSV lock, so let's
-        // create one.
+        // We use try_new_unvalidated because the whole point of the
+        // test is to construct an OP_SUCCESSx-bearing reclaim script
+        // that the production try_new is supposed to reject.
         let reclaim = ReclaimScriptInputs::try_new_unvalidated(lock_time, reclaim_script).unwrap();
 
         // Now we have both scripts in the taproot scriptPubKey.
@@ -738,12 +751,10 @@ mod serial {
         ];
         reclaim_tx.input[0].witness = Witness::from_slice(&witness_data);
 
-        // Let's generate one block, which is not enough to spend the funds
-        // because they are locked for u16::MAX blocks. We can spend the
-        // funds at the consensus level but bitcoin-core evaluates the
-        // script when it doesn't need to.
-        faucet.generate_blocks(1);
 
+        // We haven't generated enough blocks to satisfy the OP_CSV lock,
+        // so this should fail regardless. In this case, it fails because
+        // of the OP_SUCCESSx opcode.
         match rpc.send_raw_transaction(&reclaim_tx).unwrap_err() {
             BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -26, message, .. }))
                 if message
@@ -754,8 +765,12 @@ mod serial {
 
         assert_eq!(depositor.get_balance(rpc).to_sat(), 0);
 
-        // Let's confirm the reclaim transaction to reclaim the funds. In
-        // this test scenario the signers have not swept the funds.
+        // Bypass mempool standardness using the generateblock RPC, which
+        // mines a block including the given raw transactions even if they
+        // would not pass the mempool's policy checks. At the consensus
+        // level tapscript treats OP_SUCCESSx as unconditional success, so
+        // the reclaim transaction is accepted despite the unsatisfied
+        // OP_CSV lock.
         #[derive(serde::Deserialize)]
         struct GeneratedBlockHash {
             hash: bitcoin::BlockHash,
