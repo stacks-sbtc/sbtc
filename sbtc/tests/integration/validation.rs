@@ -616,7 +616,7 @@ mod serial {
 
         // Start off with some initial UTXOs to work with.
         let outpoint = faucet.send_to(50_000_000, &depositor.address);
-        faucet.generate_blocks(1);
+        faucet.generate_block();
 
         // There is only one UTXO under the depositor's name, so let's get it
         let utxos = depositor.get_utxos(rpc, None);
@@ -680,7 +680,7 @@ mod serial {
         regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &utxos, &depositor.keypair);
         rpc.send_raw_transaction(&deposit_tx).unwrap();
         // Let's confirm it.
-        faucet.generate_blocks(1);
+        faucet.generate_block();
         // Nice, the depositor spent all of their funds on the deposit.
         assert_eq!(depositor.get_balance(rpc).to_sat(), 0);
 
