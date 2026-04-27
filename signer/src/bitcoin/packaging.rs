@@ -629,7 +629,6 @@ mod tests {
     use test_case::test_case;
 
     use crate::bitcoin::utxo::DepositRequest;
-    use crate::bitcoin::utxo::Fees;
     use crate::bitcoin::utxo::PROTOBUF_ENCODED_SIZE_OVERHEAD;
     use crate::bitcoin::utxo::RequestRef;
     use crate::bitcoin::utxo::WithdrawalRequest;
@@ -1510,7 +1509,10 @@ mod tests {
                 withdrawals: Vec::new(),
             }],
             fee_rate: 25.0,
-            last_fees: Some(Fees { total: u64::MAX, rate: 25.0 }),
+            last_fees: Some(proto::Fees {
+                total: u64::MAX,
+                rate: 25.1234567,
+            }),
         };
         let large_overhead = measure_overhead(large_presign_request);
 
@@ -1653,7 +1655,7 @@ mod tests {
         // Now we add in the fee rate and some last fees to make the final
         // check more realistic.
         presign.fee_rate = 25.1234567;
-        presign.last_fees = Some(Fees {
+        presign.last_fees = Some(proto::Fees {
             total: u64::MAX,
             rate: 25.1234567,
         });

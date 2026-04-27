@@ -69,6 +69,29 @@ pub const SIGNER_CHANNEL_CAPACITY: usize = 1024;
 /// for the signers UTXO.
 pub const MAX_REORG_BLOCK_COUNT: u64 = 10;
 
+/// The maximum fee rate, in sats per vbyte, for a bitcoin transaction.
+/// Transactions with a fee rate that exceeds this value will be rejected.
+///
+/// This value is about two times the max fee rate observed on bitcoin
+/// mainnet.
+pub const MAX_BITCOIN_FEE_RATE: f64 = 1000.0;
+
+/// The minimum fee rate, in sats per vbyte, for a bitcoin transaction.
+/// Transactions with a fee rate below this value will be rejected.
+///
+/// This value is below the default of bitcoin core's `minrelaytxfee`
+/// setting, which is 1.0 sats/vB in bitcoin-core v25–v29 and was lowered
+/// to 0.1 sats/vB in v30. We set it low to allow the sBTC signer network
+/// to easily accommodate changes in our bitcoin node's mempool policy
+/// without requiring a change to the signer binary.
+///
+/// <https://bitcoincore.org/en/releases/30.0/>
+pub const MIN_BITCOIN_FEE_RATE: f64 = 0.001;
+
+/// The range of valid fee rates for a bitcoin transaction.
+pub const BITCOIN_FEE_RATE_RANGE: std::ops::RangeInclusive<f64> =
+    MIN_BITCOIN_FEE_RATE..=MAX_BITCOIN_FEE_RATE;
+
 /// The maximum number of sweep transactions that the signers can confirm
 /// per block.
 ///
@@ -127,6 +150,9 @@ pub const WITHDRAWAL_EXPIRY_BUFFER: u64 = 6;
 /// <https://bitcoincore.reviews/21800>
 /// <https://github.com/bitcoin/bitcoin/blob/v25.0/src/policy/policy.h#L60-L61>
 pub const MAX_MEMPOOL_PACKAGE_SIZE: u64 = 101000;
+
+/// This is the maximum size of a bitcoin block in virtual bytes.
+pub const MAX_BITCOIN_BLOCK_VSIZE: u64 = 4_000_000;
 
 /// This is an upper bound on the number of signer state machines that we
 /// "could" need if we wanted to sign all inputs in parallel and running

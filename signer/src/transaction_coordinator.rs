@@ -13,16 +13,18 @@ use std::time::Duration;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use futures::Stream;
 use futures::StreamExt as _;
-use futures::future::try_join_all;
 use sha2::Digest as _;
 
+use crate::BITCOIN_FEE_RATE_RANGE;
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
+use crate::MAX_BITCOIN_FEE_RATE;
+use crate::MIN_BITCOIN_FEE_RATE;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::bitcoin::BitcoinInteract as _;
+use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo;
-use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::context::Context;
 use crate::context::P2PEvent;
@@ -563,7 +565,7 @@ where
                 .map(|tx| (&tx.requests).into())
                 .collect(),
             fee_rate: signer_btc_state.fee_rate,
-            last_fees: signer_btc_state.last_fees,
+            last_fees: signer_btc_state.last_fees.map(Into::into),
         };
 
         let presign_ack_filter = |event: &SignerSignal| {
@@ -718,9 +720,7 @@ where
             let retry_fee_rate = match fallback_fee {
                 Some(fee) => fee,
                 None => {
-                    self.context
-                        .get_bitcoin_client()
-                        .estimate_fee_rate(FEE_RETRY_TARGET_BLOCKS)
+                    self.estimate_bitcoin_tx_fee(FEE_RETRY_TARGET_BLOCKS)
                         .await?
                 }
             };
@@ -1940,7 +1940,7 @@ where
     ) -> Result<utxo::SignerBtcState, Error> {
         let bitcoin_client = self.context.get_bitcoin_client();
         // Target next block confirmation
-        let fee_rate = bitcoin_client.estimate_fee_rate(1).await?;
+        let fee_rate = self.estimate_bitcoin_tx_fee(1).await?;
 
         // Retrieve the signer's current UTXO.
         let utxo = self
@@ -1950,7 +1950,9 @@ where
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
 
-        let last_fees = self.assess_mempool_sweep_transaction_fees(&utxo).await?;
+        // We still need to send these to the other signers, since they may
+        // not have upgraded their binaries yet.
+        let last_fees = assess_mempool_sweep_transaction_fees(&bitcoin_client, &utxo).await?;
 
         Ok(utxo::SignerBtcState {
             fee_rate,
@@ -2424,103 +2426,35 @@ where
         PublicKey::from_private_key(&self.private_key)
     }
 
-    /// Assesses the total fees paid for any outstanding sweep transactions in
-    /// the mempool which may need to be RBF'd. If there are no sweep
-    /// transactions which are spending the signer's UTXO, then this function
-    /// will return [`None`].
+    /// Estimate the fee rate for a bitcoin transaction targeting
+    /// confirmation within `num_blocks` blocks.
     ///
-    /// TODO: This method currently blindly assumes that the mempool transactions
-    /// are correct. Maybe we need some validation?
-    #[tracing::instrument(skip_all, fields(signer_utxo = %signer_utxo.outpoint))]
-    pub async fn assess_mempool_sweep_transaction_fees(
-        &self,
-        signer_utxo: &utxo::SignerUtxo,
-    ) -> Result<Option<Fees>, Error> {
-        let bitcoin_client = self.context.get_bitcoin_client();
-
-        // Find the mempool transactions that are spending the provided UTXO.
-        let mempool_txs_spending_utxo = bitcoin_client
-            .find_mempool_transactions_spending_output(&signer_utxo.outpoint)
+    /// # Notes
+    ///
+    /// - This function includes a defensive check against bitcoin-core
+    ///   returning a bogus fee rate.
+    /// - NaN fee rates returned by bitcoin-core are set to 1.0.
+    #[tracing::instrument(skip_all, fields(%num_blocks))]
+    async fn estimate_bitcoin_tx_fee(&self, num_blocks: u16) -> Result<f64, Error> {
+        let mut fee_rate = self
+            .context
+            .get_bitcoin_client()
+            .estimate_fee_rate(num_blocks)
             .await?;
 
-        // If no transactions are found, we have nothing to do.
-        if mempool_txs_spending_utxo.is_empty() {
-            tracing::debug!(
-                outpoint = %signer_utxo.outpoint,
-                "no mempool transactions found spending signer output; nothing to do"
-            );
-            return Ok(None);
+        if fee_rate.is_nan() {
+            // This really shouldn't happen, but if it does there is
+            // probably a bug in bitcoin-core so we want to know about it.
+            tracing::error!(%fee_rate, "bitcoin-core returned a NaN fee rate, using 1");
+            fee_rate = 1.0;
         }
 
-        tracing::debug!(
-            outpoint = %signer_utxo.outpoint,
-            "found mempool transactions spending signer output; assessing fees"
-        );
+        if !BITCOIN_FEE_RATE_RANGE.contains(&fee_rate) {
+            tracing::warn!(%fee_rate, "invalid fee rate, clamping it");
+            fee_rate = fee_rate.clamp(MIN_BITCOIN_FEE_RATE, MAX_BITCOIN_FEE_RATE);
+        }
 
-        // If we have some transactions, we need to find the one that pays the
-        // highest fee. This is the transaction that we will use as the root of
-        // the sweep package. Note that even if only one transaction was
-        // returned above, we still need to get the fee for it, which is why
-        // there's no special logic for one vs multiple.
-        //
-        // This can technically error if the mempool transactions are not found,
-        // but it shouldn't happen since we got the transaction ids from
-        // bitcoin-core itself.
-        let best_sweep_root = try_join_all(mempool_txs_spending_utxo.iter().map(|txid| {
-            let bitcoin_client = bitcoin_client.clone();
-            async move {
-                bitcoin_client
-                    .get_transaction_fee(txid)
-                    .await
-                    .map(|fee| (txid, fee))
-            }
-        }))
-        .await?
-        .into_iter()
-        .max_by_key(|(_, fees)| fees.fee);
-
-        // Since we got the transaction ids from bitcoin-core, these should
-        // not be missing, but we double-check here just in case (it could
-        // happen that the client has failed-over to the next node which isn't
-        // in sync with the previous one, for example).
-        let Some((best_sweep_root_txid, fees)) = best_sweep_root else {
-            tracing::warn!(
-                outpoint = %signer_utxo.outpoint,
-                "no fees found for mempool transactions spending signer output"
-            );
-            return Ok(None);
-        };
-
-        // Retrieve all descendant transactions of the best sweep root.
-        let descendant_txids = bitcoin_client
-            .find_mempool_descendants(best_sweep_root_txid)
-            .await?;
-
-        // Retrieve fees for all descendant transactions. If there were no
-        // descendants then this will just result in an empty list.
-        let descendant_fees = try_join_all(descendant_txids.iter().map(|txid| {
-            let bitcoin_client = bitcoin_client.clone();
-            async move { bitcoin_client.get_transaction_fee(txid).await }
-        }))
-        .await?;
-
-        // Sum the fees of the best sweep root and its descendants, while also
-        // summing the vsize of the transactions for fee-rate calculation later.
-        // If there were no descendants then this will just be the fee and size
-        // from the best root sweep transaction.
-        let (total_fees, total_vsize) = descendant_fees
-            .into_iter()
-            .fold((fees.fee, fees.vsize), |acc, fees| {
-                (acc.0 + fees.fee, acc.1 + fees.vsize)
-            });
-
-        // Calculate the fee rate based on the total fees and vsizes of the
-        // transactions which we've found. Since this is returning transactions
-        // from bitcoin-core, we should have valid fees and sizes, so we don't
-        // need to check for division by zero.
-        let rate = total_fees as f64 / total_vsize as f64;
-
-        Ok(Some(Fees { total: total_fees, rate }))
+        Ok(fee_rate)
     }
 
     /// Estimate transaction fees for a Stacks contract call. This function

@@ -52,7 +52,11 @@ where
         utxo: signer_utxo,
         fee_rate: request.fee_rate,
         public_key: btc_ctx.aggregate_key.into(),
-        last_fees: request.last_fees,
+        last_fees: request
+            .last_fees
+            .map(TryInto::try_into)
+            .transpose()
+            .unwrap(),
         magic_bytes: [b'T', b'3'],
     }
 }

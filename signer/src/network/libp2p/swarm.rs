@@ -524,7 +524,6 @@ mod tests {
 
     use crate::bitcoin::packaging::MAX_PRESIGN_REQUEST_SIZE;
     use crate::bitcoin::packaging::compute_optimal_packages;
-    use crate::bitcoin::utxo::Fees;
     use crate::bitcoin::utxo::WithdrawalRequest;
     use crate::bitcoin::validation::TxRequestIds;
     use crate::ecdsa::SignEcdsa as _;
@@ -1102,7 +1101,7 @@ mod tests {
         let presign = BitcoinPreSignRequest {
             request_package,
             fee_rate: 25.1234567,
-            last_fees: Some(Fees {
+            last_fees: Some(proto::Fees {
                 total: u64::MAX,
                 rate: 25.1234567,
             }),
