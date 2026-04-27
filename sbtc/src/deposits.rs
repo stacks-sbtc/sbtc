@@ -9,7 +9,10 @@ use bitcoin::ScriptBuf;
 use bitcoin::Transaction;
 use bitcoin::XOnlyPublicKey;
 use bitcoin::locktime::relative::LockTime;
+use bitcoin::opcodes::Class;
+use bitcoin::opcodes::ClassifyContext;
 use bitcoin::opcodes::all as opcodes;
+use bitcoin::script::Instruction;
 use bitcoin::script::PushBytesBuf;
 use bitcoin::taproot::LeafVersion;
 use bitcoin::taproot::NodeInfo;
@@ -400,13 +403,44 @@ pub struct ReclaimScriptInputs {
 }
 
 impl ReclaimScriptInputs {
-    /// Create a new one
+    /// Create a new one, validating that:
+    ///
+    /// * the lock time is a non-disabled block-based time,
+    /// * the user-supplied script does not contain any OP_SUCCESSx
+    ///   opcodes, see [BIP-342].
+    ///
+    /// [BIP-342]: https://github.com/bitcoin/bips/blob/master/bip-0342.mediawiki
     pub fn try_new(lock_time: u32, script: ScriptBuf) -> Result<Self, Error> {
-        // OP_CSV checks can be disabled if the locktime has the disabled
-        // locktime bit set to 1. So we disallow such locktimes to ensure
-        // that the OP_CSV check is always enabled.
-        //
-        // <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L560-L592>
+        let lock_time = Self::validate_lock_time(lock_time)?;
+        Self::validate_script(&script)?;
+
+        Ok(Self { lock_time, script })
+    }
+
+    /// Create a new one, but without validating the user-supplied script.
+    ///
+    /// The lock time is still validated; only the script-content checks
+    /// performed by [`Self::validate_script`] are skipped. This is used
+    /// to construct otherwise-rejected reclaim scripts in tests that
+    /// exercise the validation logic itself.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn try_new_unvalidated(lock_time: u32, script: ScriptBuf) -> Result<Self, Error> {
+        let lock_time = Self::validate_lock_time(lock_time)?;
+
+        Ok(Self { lock_time, script })
+    }
+
+    /// Validate the lock time used in the `<lock-time> OP_CSV` prefix of
+    /// the reclaim script.
+    ///
+    /// OP_CSV checks can be disabled if the lock time has the disabled
+    /// lock-time bit set, so we reject any such lock time to ensure that
+    /// the OP_CSV check is always enforced. We also reject time-based
+    /// (as opposed to block-height-based) lock times since we do not yet
+    /// support them.
+    ///
+    /// <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L560-L592>
+    fn validate_lock_time(lock_time: u32) -> Result<LockTime, Error> {
         let lock_time = LockTime::from_consensus(lock_time).map_err(Error::DisabledLockTime)?;
 
         // For now, we only accept locktimes denominated in bitcoin block
@@ -417,7 +451,39 @@ impl ReclaimScriptInputs {
             ));
         }
 
-        Ok(Self { lock_time, script })
+        Ok(lock_time)
+    }
+
+    /// Validate the user-supplied portion of a reclaim script.
+    ///
+    /// This is the script that follows the `<lock-time> OP_CSV` prefix. We
+    /// require that it does not contain any OP_SUCCESSx opcodes.
+    ///
+    /// We reject OP_SUCCESSx in order for the OP_CSV lock to be
+    /// meaningful. BIP-342[1] states that any tapscript containing such an
+    /// opcode is unconditionally valid, which would let a depositor spend
+    /// the reclaim path without satisfying the lock-time.
+    ///
+    /// [1]: <https://github.com/bitcoin/bips/blob/554be702d7d28e3cd1cbf2e84c153f041fdde898/bip-0342.mediawiki>
+    fn validate_script(script: &ScriptBuf) -> Result<(), Error> {
+        // We mirror bitcoin-core's pre-execution scan for OP_SUCCESSx
+        // opcodes in tapscript.
+        //
+        // For the corresponding bitcoin-core logic, see the following:
+        // <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L1784-L1807>
+        // <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/script.cpp#L341-L347>
+        let has_op_success_ops = script.instructions().any(|op| match op {
+            Ok(Instruction::Op(opcode)) => {
+                opcode.classify(ClassifyContext::TapScript) == Class::SuccessOp
+            }
+            _ => false,
+        });
+
+        if has_op_success_ops {
+            return Err(Error::ReclaimScriptWithSuccessOp(script.clone()));
+        }
+
+        Ok(())
     }
 
     /// Get the lock time in the reclaim script.
@@ -828,6 +894,94 @@ mod tests {
         let reclaim = ReclaimScriptInputs::try_new(lock_time, ScriptBuf::new()).unwrap_err();
 
         assert!(matches!(reclaim, Error::UnsupportedLockTimeUnits(_)));
+    }
+
+    /// Each opcode in the BIP-342 `OP_SUCCESSx` range causes the
+    /// user-supplied reclaim script to be rejected.
+    #[test_case(opcodes::OP_RESERVED ; "OP_RESERVED (80)")]
+    #[test_case(opcodes::OP_VER ; "OP_VER (98)")]
+    #[test_case(opcodes::OP_CAT ; "OP_CAT (126)")]
+    #[test_case(opcodes::OP_SUBSTR ; "OP_SUBSTR (127)")]
+    #[test_case(opcodes::OP_INVERT ; "OP_INVERT (131)")]
+    #[test_case(opcodes::OP_RESERVED1 ; "OP_RESERVED1 (137)")]
+    #[test_case(opcodes::OP_2MUL ; "OP_2MUL (141)")]
+    #[test_case(opcodes::OP_MUL ; "OP_MUL (149)")]
+    #[test_case(opcodes::OP_RETURN_187 ; "OP_RETURN_187 (187)")]
+    #[test_case(opcodes::OP_RETURN_254 ; "OP_RETURN_254 (254)")]
+    fn reclaim_script_op_success_rejected(op: bitcoin::opcodes::Opcode) {
+        let lock_time = 50;
+
+        let script = ScriptBuf::builder()
+            .push_opcode(opcodes::OP_RETURN)
+            .push_opcode(op)
+            .into_script();
+
+        let err = ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
+        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp(_));
+    }
+
+    /// `OP_INVALIDOPCODE` (255) is not in the BIP-342 `OP_SUCCESSx`
+    /// range, so a script containing it as an opcode is not flagged by
+    /// the `OP_SUCCESSx` check. The script is still bytewise within the
+    /// length limit, so `try_new` accepts it.
+    #[test]
+    fn reclaim_script_op_invalidopcode_not_op_success() {
+        let lock_time = 50;
+        let script = ScriptBuf::from_bytes(vec![opcodes::OP_INVALIDOPCODE.to_u8()]);
+        ReclaimScriptInputs::try_new(lock_time, script).unwrap();
+    }
+
+    /// Bytes that *equal* an `OP_SUCCESSx` value but appear inside a
+    /// pushed data payload must not trigger the `OP_SUCCESSx` check.
+    /// Bitcoin-core's scan walks opcodes (skipping over push payloads),
+    /// and ours must do the same.
+    #[test]
+    fn reclaim_script_op_success_byte_in_pushdata_allowed() {
+        let lock_time = 50;
+        // A 32-byte payload of `OP_RETURN_187` bytes pushed via
+        // `push_slice` — the leading length byte is the opcode and the
+        // payload bytes are skipped by the instruction iterator.
+        let script = ScriptBuf::builder()
+            .push_slice([opcodes::OP_RETURN_187.to_u8(); 32])
+            .push_opcode(opcodes::OP_DROP)
+            .into_script();
+
+        ReclaimScriptInputs::try_new(lock_time, script).unwrap();
+
+        // For comparison: the same byte used as a bare opcode (rather
+        // than inside a push payload) is rejected.
+        let script = ScriptBuf::builder()
+            .push_opcode(opcodes::OP_RETURN_187)
+            .push_opcode(opcodes::OP_DROP)
+            .into_script();
+
+        let err = ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
+        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp(_));
+    }
+
+    /// We check that we catch reclaim scripts with OP_SUCCESSx opcodes
+    /// that are also unparsable on bitcoin-core.
+    #[test]
+    fn reclaim_script_op_success_byte_in_malformed_script() {
+        let lock_time = 50;
+        let bytes: Vec<u8> = vec![
+            // (1) OP_SUCCESS first — short-circuits the rest of the script
+            opcodes::OP_RETURN_187.to_u8(),
+            // (2) Malformed push: OP_PUSHDATA1 followed by length 0xff, but
+            //     zero bytes of payload. bitcoin-core's GetOp on this should
+            //     return false and fail the script.
+            OP_PUSHDATA1,
+            0xff, // "the next 255 bytes are the push", except not really
+        ];
+
+        let script = ScriptBuf::from_bytes(bytes);
+
+        // check that the script is malformed
+        let is_malformed = script.instructions().any(|op| op.is_err());
+        assert!(is_malformed);
+
+        let err = ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
+        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp(_));
     }
 
     #[test]

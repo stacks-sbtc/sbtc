@@ -22,6 +22,7 @@ mod serial {
     use bitcoin::taproot::TaprootSpendInfo;
     use bitcoin::transaction::Version;
     use bitcoincore_rpc::Error as BtcRpcError;
+    use bitcoincore_rpc::RawTx as _;
     use bitcoincore_rpc::RpcApi as _;
     use bitcoincore_rpc::jsonrpc::error::Error as JsonRpcError;
     use bitcoincore_rpc::jsonrpc::error::RpcError;
@@ -582,5 +583,217 @@ mod serial {
             depositor.get_balance(rpc).to_sat(),
             amount_sats - reclaim_tx_fee
         );
+    }
+
+    /// This validates the motivation for rejecting reclaim scripts that
+    /// contain OP_SUCCESSx opcodes. Per BIP-342, any tapscript that
+    /// contains such an opcode is unconditionally valid, which means such
+    /// a script bypasses the <lock-time> OP_CSV lock entirely at the
+    /// consensus level.
+    ///
+    /// The test proceeds as follows:
+    /// 1. Confirm a deposit whose reclaim path's user script contains an
+    ///    OP_SUCCESSx opcode, gated by an u16::MAX block OP_CSV lock.
+    /// 2. Verify that CreateDepositRequest::validate_tx rejects this
+    ///    deposit, so that we know that the signers will reject it.
+    /// 3. Build a reclaim transaction with Sequence::ZERO so the OP_CSV
+    ///    lock is not satisfied, and confirm that the bitcoin-core mempool
+    ///    rejects it as non-standard with OP_SUCCESSx reserved for
+    ///    soft-fork upgrades.
+    /// 4. Force-mine the reclaim transaction with generateblock, which
+    ///    bypasses standardness, and confirm that consensus accepts.
+    #[test]
+    fn reclaiming_rejected_deposits_op_success() {
+        let max_fee: u64 = 15000;
+        let amount_sats = 49_900_000;
+        // Set far higher than any block we'll mine in the test, so the
+        // OP_CSV lock cannot possibly be satisfied via timing alone.
+        let lock_time = u16::MAX as u32;
+
+        let (rpc, faucet) = regtest::initialize_blockchain();
+        let depositor = Recipient::new(AddressType::P2tr);
+        assert_eq!(depositor.get_balance(rpc).to_sat(), 0);
+
+        // Start off with some initial UTXOs to work with.
+        let outpoint = faucet.send_to(50_000_000, &depositor.address);
+        faucet.generate_block();
+
+        // There is only one UTXO under the depositor's name, so let's get it
+        let utxos = depositor.get_utxos(rpc, None);
+
+        assert_eq!(depositor.get_balance(rpc).to_sat(), 50_000_000);
+        // This is the "signers' secret". It doesn't matter for this test, so we
+        // generate one randomly.
+        let secret_key = SecretKey::new(&mut OsRng);
+        let deposit = DepositScriptInputs {
+            signers_public_key: secret_key.x_only_public_key(SECP256K1).0,
+            recipient: PrincipalData::from(StacksAddress::burn_address(false)),
+            max_fee,
+        };
+
+        // The depositor's reclaim path has a leading OP_RETURN with an
+        // OP_SUCCESSx opcode. Bitcoin-core's OP_SUCCESSx scan in tapscript
+        // happens before execution, so even an OP_RETURN ahead of the
+        // OP_SUCCESSx opcode does not prevent unconditional success. See
+        // the tapscript branch of ExecuteWitnessScript:
+        // <https://github.com/bitcoin/bitcoin/blob/v27.1/src/script/interpreter.cpp#L1792-L1808>
+        let x_only_key = depositor.keypair.public_key().x_only_public_key().0;
+        let reclaim_script = ScriptBuf::builder()
+            .push_opcode(opcodes::all::OP_RETURN)
+            .push_opcode(opcodes::all::OP_RETURN_187)
+            .push_opcode(opcodes::all::OP_DROP)
+            .push_slice(x_only_key.serialize())
+            .push_opcode(opcodes::all::OP_CHECKSIG)
+            .into_script();
+        // We use try_new_unvalidated because the whole point of the
+        // test is to construct an OP_SUCCESSx-bearing reclaim script
+        // that the production try_new is supposed to reject.
+        let reclaim = ReclaimScriptInputs::try_new_unvalidated(lock_time, reclaim_script).unwrap();
+
+        // Now we have both scripts in the taproot scriptPubKey.
+        let deposit_script = deposit.deposit_script();
+        let reclaim_script = reclaim.reclaim_script();
+
+        // This is a valid deposit UTXO for sBTC.
+        let deposit_utxo = TxOut {
+            value: Amount::from_sat(amount_sats),
+            script_pubkey: sbtc::deposits::to_script_pubkey(
+                deposit_script.clone(),
+                reclaim_script.clone(),
+            ),
+        };
+
+        // This is a full transaction including our deposit UTXO. Let's sign
+        // and submit it.
+        let mut deposit_tx = Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: outpoint,
+                sequence: Sequence::ZERO,
+                script_sig: ScriptBuf::new(),
+                witness: Witness::new(),
+            }],
+            output: vec![deposit_utxo.clone()],
+        };
+
+        regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &utxos, &depositor.keypair);
+        rpc.send_raw_transaction(&deposit_tx).unwrap();
+        // Let's confirm it.
+        faucet.generate_block();
+        // Nice, the depositor spent all of their funds on the deposit.
+        assert_eq!(depositor.get_balance(rpc).to_sat(), 0);
+
+        // Let's check that this is an invalid sBTC deposit.
+        let request = CreateDepositRequest {
+            outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
+            reclaim_script: reclaim_script.clone(),
+            deposit_script: deposit_script.clone(),
+        };
+
+        request.validate_tx(&deposit_tx, false).unwrap_err();
+
+        // Alright now we know the signers haven't moved our funds, so we
+        // reclaim it. We construct a transaction spending the funds back to
+        // ourselves.
+        let reclaim_tx_fee = 30000;
+        let mut reclaim_tx = Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::new(deposit_tx.compute_txid(), 0),
+                sequence: Sequence::ZERO,
+                script_sig: ScriptBuf::new(),
+                witness: Witness::new(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(amount_sats - reclaim_tx_fee),
+                script_pubkey: depositor.script_pubkey.clone(),
+            }],
+        };
+
+        // Now we need to sign our input. We construct the sighash and create a
+        // BIP-341 Schnorr signature. This part is not obvious.
+        let input_utxos: Vec<TxOut> = vec![deposit_utxo];
+
+        let prevouts = Prevouts::All(input_utxos.as_slice());
+        let sighash_type = TapSighashType::Default;
+        let mut sighasher = SighashCache::new(&reclaim_tx);
+
+        let leaf_hash = TapLeafHash::from_script(&reclaim_script, LeafVersion::TapScript);
+        let reclaim_sighash = sighasher
+            .taproot_script_spend_signature_hash(0, &prevouts, leaf_hash, sighash_type)
+            .unwrap();
+        let msg = secp256k1::Message::from(reclaim_sighash);
+
+        // Now we sign the sighash
+        let signature = SECP256K1.sign_schnorr(&msg, &depositor.keypair);
+
+        // Now we need to construct the merkle path proving that the merkle
+        // tree is what we say it is.
+        let ver = LeafVersion::TapScript;
+        // For such a simple tree, we construct it by hand.
+        let leaf1 = NodeInfo::new_leaf_with_ver(deposit_script.clone(), ver);
+        let leaf2 = NodeInfo::new_leaf_with_ver(reclaim_script.clone(), ver);
+
+        let node = NodeInfo::combine(leaf1, leaf2).unwrap();
+        let internal_key = *sbtc::UNSPENDABLE_TAPROOT_KEY;
+
+        let taproot = TaprootSpendInfo::from_node_info(SECP256K1, internal_key, node);
+        let control_block = taproot
+            .control_block(&(reclaim_script.clone(), ver))
+            .unwrap();
+        // Now we can set the witness data.
+        let witness_data = [
+            signature.serialize().to_vec(),
+            reclaim_script.to_bytes(),
+            control_block.serialize(),
+        ];
+        reclaim_tx.input[0].witness = Witness::from_slice(&witness_data);
+
+        // We haven't generated enough blocks to satisfy the OP_CSV lock,
+        // so this should fail regardless. In this case, it fails because
+        // of the OP_SUCCESSx opcode.
+        match rpc.send_raw_transaction(&reclaim_tx).unwrap_err() {
+            BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -26, message, .. }))
+                if message
+                    == "non-mandatory-script-verify-flag (OP_SUCCESSx reserved for soft-fork upgrades)" =>
+                {}
+            err => panic!("{err}"),
+        };
+
+        assert_eq!(depositor.get_balance(rpc).to_sat(), 0);
+
+        // Bypass mempool standardness using the generateblock RPC, which
+        // mines a block including the given raw transactions even if they
+        // would not pass the mempool's policy checks. At the consensus
+        // level tapscript treats OP_SUCCESSx as unconditional success, so
+        // the reclaim transaction is accepted despite the unsatisfied
+        // OP_CSV lock.
+        #[derive(serde::Deserialize)]
+        struct GeneratedBlockHash {
+            hash: bitcoin::BlockHash,
+        }
+        let args = [
+            faucet.address.to_string().into(),
+            [reclaim_tx.raw_hex()].into(),
+        ];
+        let block_hash = rpc
+            .call::<GeneratedBlockHash>("generateblock", &args)
+            .unwrap()
+            .hash;
+
+        // Okay, the reclaim transaction is confirmed. Let's get the
+        // transaction, and check that looks like the one that we are
+        // expecting.
+        let reclaim_txid = reclaim_tx.compute_txid();
+        let tx_info = rpc
+            .get_raw_transaction_info(&reclaim_txid, Some(&block_hash))
+            .unwrap();
+
+        let expected_balance = amount_sats - reclaim_tx_fee;
+        assert_eq!(tx_info.blockhash, Some(block_hash));
+        assert_eq!(tx_info.confirmations, Some(1));
+        assert_eq!(depositor.get_balance(rpc).to_sat(), expected_balance);
     }
 }

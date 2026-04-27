@@ -69,6 +69,10 @@ pub enum Error {
         from_request: Txid,
     },
 
+    /// The reclaim script contained an OP_SUCCESSx opcode.
+    #[error("the reclaim script contained an OP_SUCCESSx opcode: {0}")]
+    ReclaimScriptWithSuccessOp(bitcoin::ScriptBuf),
+
     /// This is thrown when failing to parse a hex string into bytes.
     #[cfg(any(test, feature = "webhooks"))]
     #[error("could not decode the hex string into bytes: {0}")]
