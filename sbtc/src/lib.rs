@@ -56,10 +56,3 @@ pub static UNSPENDABLE_TAPROOT_KEY: LazyLock<XOnlyPublicKey> =
 /// of https://github.com/stacks-network/sbtc/discussions/12 and in the
 /// comments of https://github.com/stacks-network/sbtc/issues/16.
 pub const WITHDRAWAL_MIN_CONFIRMATIONS: u64 = 6;
-
-/// The maximum length, in bytes, of the portion of a reclaim script that
-/// follows the `<lock-time> OP_CSV`.
-///
-/// This value was chosen to allow for most known reclaim scripts, while
-/// keeping potential storage costs low for depositors.
-pub const MAX_RECLAIM_SCRIPT_LENGTH: usize = 2048;
