@@ -141,7 +141,7 @@ impl Fees {
     /// has gone wrong if these limits are exceeded.
     pub fn new(total: u64, vsize: u64) -> Result<Self, Error> {
         if total > Amount::MAX_MONEY.to_sat() {
-            return Err(Error::InvalidTotalFees(total));
+            return Err(Error::InvalidLastFee { total, vsize });
         }
 
         let Some(vsize) = NonZeroU64::new(vsize) else {

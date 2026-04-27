@@ -279,11 +279,6 @@ pub enum Error {
 
     /// Getting this error means a programming error or an error in
     /// bitcoin-core.
-    #[error("total fees paid for a transaction package was more than the max amount of sats: {0}")]
-    InvalidTotalFees(u64),
-
-    /// Getting this error means a programming error or an error in
-    /// bitcoin-core.
     #[error("the Fees object was invalid: total: {total}, vsize: {vsize}")]
     InvalidLastFee {
         /// The total fees passed into Fees::new.
