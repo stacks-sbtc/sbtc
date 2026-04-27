@@ -24,6 +24,7 @@ use clarity::vm::types::QualifiedContractIdentifier;
 use secp256k1::SECP256K1;
 use stacks_common::types::chainstate::STACKS_ADDRESS_ENCODED_SIZE;
 
+use crate::MAX_RECLAIM_SCRIPT_LENGTH;
 use crate::error::Error;
 
 /// This is the length of the fixed portion of the deposit script, which
@@ -406,6 +407,8 @@ impl ReclaimScriptInputs {
     /// Create a new one, validating that:
     ///
     /// * the lock time is a non-disabled block-based time,
+    /// * the user-supplied script is within the maximum length allowed
+    ///   for a reclaim script,
     /// * the user-supplied script does not contain any OP_SUCCESSx
     ///   opcodes, see [BIP-342].
     ///
@@ -457,7 +460,10 @@ impl ReclaimScriptInputs {
     /// Validate the user-supplied portion of a reclaim script.
     ///
     /// This is the script that follows the `<lock-time> OP_CSV` prefix. We
-    /// require that it does not contain any OP_SUCCESSx opcodes.
+    /// require:
+    ///
+    /// * its length is at most [`MAX_RECLAIM_SCRIPT_LENGTH`] bytes, and
+    /// * it does not contain any OP_SUCCESSx opcodes.
     ///
     /// We reject OP_SUCCESSx in order for the OP_CSV lock to be
     /// meaningful. BIP-342[1] states that any tapscript containing such an
@@ -466,6 +472,10 @@ impl ReclaimScriptInputs {
     ///
     /// [1]: <https://github.com/bitcoin/bips/blob/554be702d7d28e3cd1cbf2e84c153f041fdde898/bip-0342.mediawiki>
     fn validate_script(script: &ScriptBuf) -> Result<(), Error> {
+        if script.len() > MAX_RECLAIM_SCRIPT_LENGTH {
+            return Err(Error::InvalidReclaimScriptLength(script.len()));
+        }
+
         // We mirror bitcoin-core's pre-execution scan for OP_SUCCESSx
         // opcodes in tapscript.
         //
@@ -894,6 +904,24 @@ mod tests {
         let reclaim = ReclaimScriptInputs::try_new(lock_time, ScriptBuf::new()).unwrap_err();
 
         assert!(matches!(reclaim, Error::UnsupportedLockTimeUnits(_)));
+    }
+
+    /// A user script of exactly `MAX_RECLAIM_SCRIPT_LENGTH` bytes is
+    /// accepted; one byte more is rejected.
+    #[test]
+    fn reclaim_script_length_boundary() {
+        let lock_time = 50;
+
+        // Build a script of length exactly MAX_RECLAIM_SCRIPT_LENGTH out
+        // of OP_CSV opcodes. OP_CSV is a single byte and is not an
+        // OP_SUCCESSx opcode, so it isolates the length check.
+        let max_script = ScriptBuf::from_bytes(vec![OP_CSV; MAX_RECLAIM_SCRIPT_LENGTH]);
+        assert_eq!(max_script.len(), MAX_RECLAIM_SCRIPT_LENGTH);
+        ReclaimScriptInputs::try_new(lock_time, max_script).unwrap();
+
+        let too_long = ScriptBuf::from_bytes(vec![OP_CSV; MAX_RECLAIM_SCRIPT_LENGTH + 1]);
+        let err = ReclaimScriptInputs::try_new(lock_time, too_long).unwrap_err();
+        assert_matches::assert_matches!(err, Error::InvalidReclaimScriptLength(n) if n == MAX_RECLAIM_SCRIPT_LENGTH + 1);
     }
 
     /// Each opcode in the BIP-342 `OP_SUCCESSx` range causes the

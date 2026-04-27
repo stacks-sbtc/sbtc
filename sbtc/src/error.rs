@@ -21,6 +21,9 @@ pub enum Error {
     /// Length of the deposit script is necessarily too short.
     #[error("script is invalid, it is too short")]
     InvalidDepositScriptLength,
+    /// The reclaim script was invalid because it was too long.
+    #[error("the reclaim script was too long: {0} bytes")]
+    InvalidReclaimScriptLength(usize),
     /// The lock time included in the reclaim script was invalid. This
     /// could be because the number is out of range for an acceptable lock
     /// time, or because the 32nd bit has been set.
@@ -68,7 +71,6 @@ pub enum Error {
         /// This is the transaction ID of from the request
         from_request: Txid,
     },
-
     /// The reclaim script contained an OP_SUCCESSx opcode.
     #[error("the reclaim script contained an OP_SUCCESSx opcode: {0}")]
     ReclaimScriptWithSuccessOp(bitcoin::ScriptBuf),
