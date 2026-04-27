@@ -482,7 +482,7 @@ impl ReclaimScriptInputs {
         });
 
         if has_op_success_ops {
-            return Err(Error::ReclaimScriptWithSuccessOp);
+            return Err(Error::ReclaimScriptWithSuccessOp(script.clone()));
         }
 
         Ok(())
@@ -919,7 +919,7 @@ mod tests {
             .into_script();
 
         let err = ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
-        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp);
+        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp(_));
     }
 
     /// `OP_INVALIDOPCODE` (255) is not in the BIP-342 `OP_SUCCESSx`
@@ -958,7 +958,7 @@ mod tests {
             .into_script();
 
         let err = ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
-        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp);
+        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp(_));
     }
 
     /// We check that we catch reclaim scripts with OP_SUCCESSx opcodes
@@ -984,7 +984,7 @@ mod tests {
         assert!(is_malformed);
 
         let err = ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
-        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp);
+        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp(_));
     }
 
     #[test]

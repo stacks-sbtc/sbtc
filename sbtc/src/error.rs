@@ -73,9 +73,9 @@ pub enum Error {
     #[error("the reclaim script was too long: {0} bytes")]
     InvalidReclaimScriptLength(usize),
 
-    /// The reclaim script contained an OP_SUCCESS opcode.
-    #[error("the reclaim script contained an OP_SUCCESS opcode")]
-    ReclaimScriptWithSuccessOp,
+    /// The reclaim script contained an OP_SUCCESSx opcode.
+    #[error("the reclaim script contained an OP_SUCCESSx opcode: {0}")]
+    ReclaimScriptWithSuccessOp(bitcoin::ScriptBuf),
 
     /// This is thrown when failing to parse a hex string into bytes.
     #[cfg(any(test, feature = "webhooks"))]
