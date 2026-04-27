@@ -69,10 +69,6 @@ pub enum Error {
         from_request: Txid,
     },
 
-    /// The reclaim script was invalid because it was too long.
-    #[error("the reclaim script was too long: {0} bytes")]
-    InvalidReclaimScriptLength(usize),
-
     /// The reclaim script contained an OP_SUCCESSx opcode.
     #[error("the reclaim script contained an OP_SUCCESSx opcode: {0}")]
     ReclaimScriptWithSuccessOp(bitcoin::ScriptBuf),
