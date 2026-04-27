@@ -816,8 +816,9 @@ pub enum Error {
     #[error("Test utility error: {0}")]
     TestUtility(crate::testing::TestUtilityError),
 
-    /// Getting this error means a programming error or an error in
-    /// bitcoin-core.
+    /// We do not use it in production code so getting this error probably
+    /// means a programming error when converting a protobuf Fees object
+    /// into its local counterpart.
     #[cfg(any(test, feature = "testing"))]
     #[error("the Fees object received from the network was invalid: total: {total}, rate: {rate}")]
     InvalidProtobufLastFee {
