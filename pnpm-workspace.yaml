@@ -4,3 +4,5 @@ packages:
   - 'blocklist-openapi-gen'
   - 'emily/openapi-gen'
   - 'devenv/local/docker-compose/stacking'
+
+minimumReleaseAge: 1440 # 24 hours

@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     npm \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm@9
+RUN npm install -g pnpm@10
 
 # Build the codebase from the local sources.
 # -------------------------------------------
