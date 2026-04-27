@@ -157,7 +157,8 @@ impl Fees {
 
     /// Create a new [`Fees`] instance.
     #[cfg(any(test, feature = "testing"))]
-    pub fn new_unchecked(total: u64, vsize: NonZeroU64) -> Self {
+    pub fn new_unchecked(total: u64, vsize: u64) -> Self {
+        let vsize = NonZeroU64::new(vsize).unwrap();
         Self { total, vsize }
     }
 

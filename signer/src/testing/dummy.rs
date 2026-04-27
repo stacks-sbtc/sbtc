@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::num::NonZeroU64;
 use std::ops::Range;
 
 use bitcoin::Amount;
@@ -757,7 +756,7 @@ impl fake::Dummy<fake::Faker> for Fees {
     fn dummy_with_rng<R: rand::RngCore + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
         let total: u64 = (0..=Amount::MAX_MONEY.to_sat()).fake_with_rng(rng);
         let vsize: u64 = (1..MAX_BITCOIN_BLOCK_VSIZE).fake_with_rng(rng);
-        Fees::new_unchecked(total, NonZeroU64::new(vsize).unwrap())
+        Fees::new_unchecked(total, vsize)
     }
 }
 

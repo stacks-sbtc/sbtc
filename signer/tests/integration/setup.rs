@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::num::NonZeroU64;
 use std::ops::Deref as _;
 use std::str::FromStr as _;
 use std::time::Duration;
@@ -909,7 +908,7 @@ impl TestSweepSetup2 {
             .filter_map(|txid| self.client.get_mempool_entry(txid).unwrap())
             .map(|entry| {
                 let total = entry.fees.base.to_sat();
-                Fees::new_unchecked(total, NonZeroU64::new(entry.vsize).unwrap())
+                Fees::new_unchecked(total, entry.vsize)
             })
             .max_by_key(|fees| fees.total);
 

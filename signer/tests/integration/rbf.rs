@@ -1,6 +1,4 @@
 mod serial {
-    use std::num::NonZeroU64;
-
     use bitcoin::AddressType;
     use bitcoin::Amount;
     use bitcoin::OutPoint;
@@ -280,7 +278,7 @@ mod serial {
                 _ => panic!("Unexpected response when sending bad replacement transaction"),
             }
 
-            Fees::new_unchecked(last_fee, NonZeroU64::new(last_size as u64).unwrap())
+            Fees::new_unchecked(last_fee, last_size as u64)
         };
 
         // Step 3. Construct an RBF transaction
