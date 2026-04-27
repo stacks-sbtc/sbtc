@@ -406,8 +406,6 @@ impl ReclaimScriptInputs {
     /// Create a new one, validating that:
     ///
     /// * the lock time is a non-disabled block-based time,
-    /// * the user-supplied script is within the maximum length allowed
-    ///   for a reclaim script,
     /// * the user-supplied script does not contain any OP_SUCCESSx
     ///   opcodes, see [BIP-342].
     ///
