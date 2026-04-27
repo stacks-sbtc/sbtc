@@ -717,20 +717,13 @@ where
         if transaction_package.is_empty() {
             let fallback_fee = self.context.config().bitcoin.fallback_fee;
 
-            let mut retry_fee_rate = match fallback_fee {
+            let retry_fee_rate = match fallback_fee {
                 Some(fee) => fee,
                 None => {
-                    self.context
-                        .get_bitcoin_client()
-                        .estimate_fee_rate(FEE_RETRY_TARGET_BLOCKS)
+                    self.estimate_bitcoin_tx_fee(FEE_RETRY_TARGET_BLOCKS)
                         .await?
                 }
             };
-
-            if !BITCOIN_FEE_RATE_RANGE.contains(&retry_fee_rate) {
-                tracing::warn!(%retry_fee_rate, "invalid fee rate, clamping it");
-                retry_fee_rate = retry_fee_rate.clamp(MIN_BITCOIN_FEE_RATE, MAX_BITCOIN_FEE_RATE);
-            }
 
             if retry_fee_rate < pending_requests.signer_state.fee_rate {
                 tracing::debug!(
@@ -1947,15 +1940,7 @@ where
     ) -> Result<utxo::SignerBtcState, Error> {
         let bitcoin_client = self.context.get_bitcoin_client();
         // Target next block confirmation
-        let mut fee_rate = bitcoin_client.estimate_fee_rate(1).await?;
-
-        // Defensive check against bitcoin-core returning a bogus fee rate.
-        // This doesn't guard against f64::NAN, we'll need to manually
-        // intervene if it happens or hope that it resolves itself.
-        if !BITCOIN_FEE_RATE_RANGE.contains(&fee_rate) {
-            tracing::warn!(%fee_rate, "invalid 1 block fee rate, clamping it");
-            fee_rate = fee_rate.clamp(MIN_BITCOIN_FEE_RATE, MAX_BITCOIN_FEE_RATE);
-        }
+        let fee_rate = self.estimate_bitcoin_tx_fee(1).await?;
 
         // Retrieve the signer's current UTXO.
         let utxo = self
@@ -2439,6 +2424,37 @@ where
     /// Helper method to get this signer's public key from its private key.
     fn signer_public_key(&self) -> PublicKey {
         PublicKey::from_private_key(&self.private_key)
+    }
+
+    /// Estimate the fee rate for a bitcoin transaction targeting
+    /// confirmation within `num_blocks` blocks.
+    ///
+    /// # Notes
+    ///
+    /// - This function includes a defensive check against bitcoin-core
+    ///   returning a bogus fee rate.
+    /// - NaN fee rates returned by bitcoin-core are set to 1.0.
+    #[tracing::instrument(skip_all, fields(%num_blocks))]
+    async fn estimate_bitcoin_tx_fee(&self, num_blocks: u16) -> Result<f64, Error> {
+        let mut fee_rate = self
+            .context
+            .get_bitcoin_client()
+            .estimate_fee_rate(num_blocks)
+            .await?;
+
+        if fee_rate.is_nan() {
+            // This really shouldn't happen, but if it does there is
+            // probably a bug in bitcoin-core so we want to know about it.
+            tracing::error!(%fee_rate, "bitcoin-core returned a NaN fee rate, using 1");
+            fee_rate = 1.0;
+        }
+
+        if !BITCOIN_FEE_RATE_RANGE.contains(&fee_rate) {
+            tracing::warn!(%fee_rate, "invalid fee rate, clamping it");
+            fee_rate = fee_rate.clamp(MIN_BITCOIN_FEE_RATE, MAX_BITCOIN_FEE_RATE);
+        }
+
+        Ok(fee_rate)
     }
 
     /// Estimate transaction fees for a Stacks contract call. This function
