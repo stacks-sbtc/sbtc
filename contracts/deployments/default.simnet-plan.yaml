@@ -1,72 +1,80 @@
----
 id: 0
-name: "Simulated deployment, used as a default for `clarinet console`, `clarinet test` and `clarinet check`"
+name: Simulated deployment, used as a default for `clarinet console`, `clarinet test` and `clarinet check`
 network: simnet
 genesis:
   wallets:
-    - name: deployer
-      address: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
-      balance: "100000000000000"
-    - name: faucet
-      address: STNHKEPYEPJ8ET55ZZ0M5A34J0R3N5FM2CMMMAZ6
-      balance: "100000000000000"
-    - name: wallet_1
-      address: ST1YEHRRYJ4GF9CYBFFN0ZVCXX1APSBEEQ5KEDN7M
-      balance: "100000000000000"
-    - name: wallet_2
-      address: ST1WNJTS9JM1JYGK758B10DBAMBZ0K23ADP392SBV
-      balance: "100000000000000"
-    - name: wallet_3
-      address: ST1MDWBDVDGAANEH9001HGXQA6XRNK7PX7A7X8M6R
-      balance: "100000000000000"
+  - name: deployer
+    address: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
+    balance: '100000000000000'
+    sbtc-balance: '1000000000'
+  - name: faucet
+    address: STNHKEPYEPJ8ET55ZZ0M5A34J0R3N5FM2CMMMAZ6
+    balance: '100000000000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_1
+    address: ST1YEHRRYJ4GF9CYBFFN0ZVCXX1APSBEEQ5KEDN7M
+    balance: '100000000000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_2
+    address: ST1WNJTS9JM1JYGK758B10DBAMBZ0K23ADP392SBV
+    balance: '100000000000000'
+    sbtc-balance: '1000000000'
+  - name: wallet_3
+    address: ST1MDWBDVDGAANEH9001HGXQA6XRNK7PX7A7X8M6R
+    balance: '100000000000000'
+    sbtc-balance: '1000000000'
   contracts:
-    - costs
-    - pox
-    - pox-2
-    - pox-3
-    - pox-4
-    - lockup
-    - costs-2
-    - costs-3
-    - cost-voting
-    - bns
+  - genesis
+  - lockup
+  - bns
+  - cost-voting
+  - costs
+  - pox
+  - costs-2
+  - pox-2
+  - costs-3
+  - pox-3
+  - pox-4
+  - signers
+  - signers-voting
+  - costs-4
 plan:
   batches:
-    - id: 0
-      transactions:
-        - emulated-contract-publish:
-            contract-name: sbtc-registry
-            emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
-            path: contracts/sbtc-registry.clar
-            clarity-version: 3
-        - emulated-contract-publish:
-            contract-name: sbtc-bootstrap-signers
-            emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
-            path: contracts/sbtc-bootstrap-signers.clar
-            clarity-version: 3
-        - emulated-contract-publish:
-            contract-name: sbtc-token
-            emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
-            path: contracts/sbtc-token.clar
-            clarity-version: 3
-        - emulated-contract-publish:
-            contract-name: sbtc-deposit
-            emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
-            path: contracts/sbtc-deposit.clar
-            clarity-version: 3
-        - emulated-contract-publish:
-            contract-name: sbtc-deposit-update-test
-            emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
-            path: contracts/sbtc-deposit.clar
-            clarity-version: 3
-        - emulated-contract-publish:
-            contract-name: sbtc-token-test
-            emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
-            path: contracts/sbtc-token-test.clar
-            clarity-version: 3
-        - emulated-contract-publish:
-            contract-name: sbtc-withdrawal
-            emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
-            path: contracts/sbtc-withdrawal.clar
-            clarity-version: 3
-      epoch: "3.0"
+  - id: 0
+    transactions:
+    - transaction-type: emulated-contract-publish
+      contract-name: sbtc-registry
+      emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
+      path: contracts/sbtc-registry.clar
+      clarity-version: 3
+    - transaction-type: emulated-contract-publish
+      contract-name: sbtc-bootstrap-signers
+      emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
+      path: contracts/sbtc-bootstrap-signers.clar
+      clarity-version: 3
+    - transaction-type: emulated-contract-publish
+      contract-name: sbtc-token
+      emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
+      path: contracts/sbtc-token.clar
+      clarity-version: 3
+    - transaction-type: emulated-contract-publish
+      contract-name: sbtc-deposit
+      emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
+      path: contracts/sbtc-deposit.clar
+      clarity-version: 3
+    - transaction-type: emulated-contract-publish
+      contract-name: sbtc-deposit-update-test
+      emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
+      path: contracts/sbtc-deposit.clar
+      clarity-version: 3
+    - transaction-type: emulated-contract-publish
+      contract-name: sbtc-token-test
+      emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
+      path: contracts/sbtc-token-test.clar
+      clarity-version: 3
+    - transaction-type: emulated-contract-publish
+      contract-name: sbtc-withdrawal
+      emulated-sender: ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039
+      path: contracts/sbtc-withdrawal.clar
+      clarity-version: 3
+    epoch: '3.0'
