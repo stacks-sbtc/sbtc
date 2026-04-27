@@ -966,16 +966,15 @@ mod tests {
     #[test]
     fn reclaim_script_op_success_byte_in_malformed_script() {
         let lock_time = 50;
-        let mut bytes: Vec<u8> = Vec::new();
-
-        // (1) OP_SUCCESS first — short-circuits the rest of the script
-        bytes.push(opcodes::OP_RETURN_187.to_u8());
-
-        // (2) Malformed push: OP_PUSHDATA1 followed by length 0xff, but
-        //     zero bytes of payload. bitcoin-core's GetOp on this should
-        //     return false and fail the script.
-        bytes.push(OP_PUSHDATA1);
-        bytes.push(0xff); // "the next 255 bytes are the push", except not really
+        let bytes: Vec<u8> = vec![
+            // (1) OP_SUCCESS first — short-circuits the rest of the script
+            opcodes::OP_RETURN_187.to_u8(),
+            // (2) Malformed push: OP_PUSHDATA1 followed by length 0xff, but
+            //     zero bytes of payload. bitcoin-core's GetOp on this should
+            //     return false and fail the script.
+            OP_PUSHDATA1,
+            0xff, // "the next 255 bytes are the push", except not really
+        ];
 
         let script = ScriptBuf::from_bytes(bytes);
 
