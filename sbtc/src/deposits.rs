@@ -919,7 +919,7 @@ mod tests {
             .into_script();
 
         let err = ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
-        assert!(matches!(err, Error::ReclaimScriptWithSuccessOp));
+        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp);
     }
 
     /// `OP_INVALIDOPCODE` (255) is not in the BIP-342 `OP_SUCCESSx`
@@ -957,7 +957,8 @@ mod tests {
             .push_opcode(opcodes::OP_DROP)
             .into_script();
 
-        ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
+        let err = ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
+        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp);
     }
 
     #[test]
