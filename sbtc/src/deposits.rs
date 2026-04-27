@@ -961,6 +961,32 @@ mod tests {
         assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp);
     }
 
+    /// We check that we catch reclaim scripts with OP_SUCCESSx opcodes
+    /// that are also unparsable on bitcoin-core.
+    #[test]
+    fn reclaim_script_op_success_byte_in_malformed_script() {
+        let lock_time = 50;
+        let mut bytes: Vec<u8> = Vec::new();
+
+        // (1) OP_SUCCESS first — short-circuits the rest of the script
+        bytes.push(opcodes::OP_RETURN_187.to_u8());
+
+        // (2) Malformed push: OP_PUSHDATA1 followed by length 0xff, but
+        //     zero bytes of payload. bitcoin-core's GetOp on this should
+        //     return false and fail the script.
+        bytes.push(OP_PUSHDATA1);
+        bytes.push(0xff); // "the next 255 bytes are the push", except not really
+
+        let script = ScriptBuf::from_bytes(bytes);
+
+        // check that the script is malformed
+        let is_malformed = script.instructions().any(|op| op.is_err());
+        assert!(is_malformed);
+
+        let err = ReclaimScriptInputs::try_new(lock_time, script).unwrap_err();
+        assert_matches::assert_matches!(err, Error::ReclaimScriptWithSuccessOp);
+    }
+
     #[test]
     fn happy_path_tx_validation() {
         let max_fee: u64 = 15000;
