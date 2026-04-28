@@ -9,4 +9,4 @@ Closes #?
 ## Checklist
 
 - [ ] I have performed a self-review of my code
-- [ ] I have had a machine review my code
+- [ ] I have had an AI agent review my code
