@@ -5,4 +5,4 @@ packages:
   - 'emily/openapi-gen'
   - 'devenv/local/docker-compose/stacking'
 
-minimumReleaseAge: 1440 # 24 hours
+minimumReleaseAge: 10080 # 1 week
