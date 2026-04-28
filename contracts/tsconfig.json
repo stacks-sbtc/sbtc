@@ -18,5 +18,8 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["@clarigen/test", "tests"]
+  "include": [
+    "node_modules/@stacks/clarinet-sdk/vitest-helpers/src/global.d.ts",
+    "tests"
+  ]
 }
