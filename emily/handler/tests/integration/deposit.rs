@@ -492,8 +492,8 @@ async fn get_deposits_large_max_fee() {
     for deposit_info in response.deposits.iter() {
         let deposit_script = ScriptBuf::from_hex(&deposit_info.deposit_script).unwrap();
         let deposit_script_inputs = DepositScriptInputs::parse(&deposit_script).unwrap();
-        // Remove returns whether the element was actually present in the
-        // set.
+        // BTreeSet::remove returns whether the element was actually
+        // present in the set.
         assert!(expected_max_fees.remove(&deposit_script_inputs.max_fee));
     }
     // Not strictly necessary, since we have the length check and the
