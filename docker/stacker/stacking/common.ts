@@ -29,14 +29,23 @@ if (process.env.STACKS_LOG_JSON === '1') {
 export const nodeUrl = `http://${process.env.STACKS_CORE_RPC_HOST}:${process.env.STACKS_CORE_RPC_PORT}`;
 export const network: StacksNetwork = { ...STACKS_TESTNET, client: { baseUrl: nodeUrl } };
 
+async function fetchJson<T>(path: string): Promise<T> {
+  const url = `${nodeUrl}${path}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`GET ${url} failed: ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
 export async function fetchLatestBlock(): Promise<NakamotoBlock> {
-  const res = await fetch(`${nodeUrl}/extended/v2/blocks/latest`);
-  return (await res.json()) as NakamotoBlock;
+  return fetchJson<NakamotoBlock>('/extended/v2/blocks/latest');
 }
 
 export async function fetchLatestBlockTransactions(): Promise<Transaction[]> {
-  const res = await fetch(`${nodeUrl}/extended/v2/blocks/latest/transactions`);
-  const data = (await res.json()) as { results: Transaction[] };
+  const data = await fetchJson<{ results: Transaction[] }>(
+    '/extended/v2/blocks/latest/transactions'
+  );
   return data.results;
 }
 
