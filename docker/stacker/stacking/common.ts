@@ -1,19 +1,8 @@
 import { StackingClient } from '@stacks/stacking';
-import { StacksTestnet } from '@stacks/network';
-import {
-  getAddressFromPrivateKey,
-  TransactionVersion,
-  createStacksPrivateKey,
-} from '@stacks/transactions';
+import { STACKS_TESTNET, StacksNetwork } from '@stacks/network';
+import { getAddressFromPrivateKey } from '@stacks/transactions';
 import { getPublicKeyFromPrivate, publicKeyToBtcAddress } from '@stacks/encryption';
-import {
-  InfoApi,
-  Configuration,
-  BlocksApi,
-  TransactionsApi,
-  SmartContractsApi,
-  AccountsApi,
-} from '@stacks/blockchain-api-client';
+import type { NakamotoBlock, Transaction } from '@stacks/stacks-blockchain-api-types';
 import pino, { Logger } from 'pino';
 
 const serviceName = process.env.SERVICE_NAME || 'JS';
@@ -38,15 +27,18 @@ if (process.env.STACKS_LOG_JSON === '1') {
 }
 
 export const nodeUrl = `http://${process.env.STACKS_CORE_RPC_HOST}:${process.env.STACKS_CORE_RPC_PORT}`;
-export const network = new StacksTestnet({ url: nodeUrl });
-const apiConfig = new Configuration({
-  basePath: nodeUrl,
-});
-export const infoApi = new InfoApi(apiConfig);
-export const blocksApi = new BlocksApi(apiConfig);
-export const txApi = new TransactionsApi(apiConfig);
-export const contractsApi = new SmartContractsApi(apiConfig);
-export const accountsApi = new AccountsApi(apiConfig);
+export const network: StacksNetwork = { ...STACKS_TESTNET, client: { baseUrl: nodeUrl } };
+
+export async function fetchLatestBlock(): Promise<NakamotoBlock> {
+  const res = await fetch(`${nodeUrl}/extended/v2/blocks/latest`);
+  return (await res.json()) as NakamotoBlock;
+}
+
+export async function fetchLatestBlockTransactions(): Promise<Transaction[]> {
+  const res = await fetch(`${nodeUrl}/extended/v2/blocks/latest/transactions`);
+  const data = (await res.json()) as { results: Transaction[] };
+  return data.results;
+}
 
 export const EPOCH_30_START = parseEnvInt('STACKS_30_HEIGHT', true);
 export const EPOCH_25_START = parseEnvInt('STACKS_25_HEIGHT', true);
@@ -55,19 +47,17 @@ export const POX_REWARD_LENGTH = parseEnvInt('POX_REWARD_LENGTH', true);
 
 export const accounts = process.env.STACKING_KEYS!.split(',').map((privKey, index) => {
   const pubKey = getPublicKeyFromPrivate(privKey);
-  const stxAddress = getAddressFromPrivateKey(privKey, TransactionVersion.Testnet);
-  const signerPrivKey = createStacksPrivateKey(privKey);
-  const signerPubKey = getPublicKeyFromPrivate(signerPrivKey.data);
+  const stxAddress = getAddressFromPrivateKey(privKey, STACKS_TESTNET);
   return {
     privKey,
     pubKey,
     stxAddress,
     btcAddr: publicKeyToBtcAddress(pubKey),
-    signerPrivKey: signerPrivKey,
-    signerPubKey: signerPubKey,
+    signerPrivKey: privKey,
+    signerPubKey: pubKey,
     targetSlots: index + 1,
     index,
-    client: new StackingClient(stxAddress, network),
+    client: new StackingClient({ address: stxAddress, network }),
     logger: logger.child({
       account: stxAddress,
       index: index,
@@ -84,7 +74,8 @@ export async function waitForSetup() {
   try {
     await accounts[0].client.getPoxInfo();
   } catch (error) {
-    if (/(ECONNREFUSED|ENOTFOUND|SyntaxError)/.test(error.cause?.message)) {
+    const cause = (error as { cause?: { message?: string } })?.cause?.message;
+    if (cause && /(ECONNREFUSED|ENOTFOUND|SyntaxError)/.test(cause)) {
       console.log(`Stacks node not ready, waiting...`);
     }
     await new Promise(resolve => setTimeout(resolve, 3000));
