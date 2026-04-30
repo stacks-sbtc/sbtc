@@ -456,9 +456,9 @@ export class EmilyStack extends cdk.Stack {
             architecture: lambda.Architecture.X86_64,
             runtime: lambda.Runtime.PROVIDED_AL2023,
             // TODO: this is the al2023.v127 arn, we should remove `runtimeManagementMode`
-            // once we figure it out what's the actual issue
+            // once we figure out what the actual issue is
             runtimeManagementMode: lambda.RuntimeManagementMode.manual(
-                'arn:aws:lambda:us-west-2::runtime:a799c0d61fd847116050854cbdf000d9cd8c0f54a08bab9986d23958f542efeb'
+                `arn:aws:lambda:${this.region}::runtime:a799c0d61fd847116050854cbdf000d9cd8c0f54a08bab9986d23958f542efeb`
             ),
             code: lambda.Code.fromAsset(EmilyStackUtils.getPathFromProjectRoot(
                 props.stageName === Constants.UNIT_TEST_STAGE_NAME
