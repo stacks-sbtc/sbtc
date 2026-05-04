@@ -147,6 +147,29 @@ jobs:
         id: set_env
         run: echo "TAG_NAME=${{ github.event.client_payload.tag_name }}" >> "$GITHUB_ENV"
 
+      # Resolve the GHCR package-version page URL for each image by matching
+      # the pushed SHA256 digest against the `name` field returned by the
+      # GitHub Packages API. See: https://cli.github.com/manual/gh_api
+      - name: Look up GHCR package version URLs
+        id: lookup_pkg_urls
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SIGNER_DIGEST: ${{ needs.image.outputs.signer }}
+          BLOCKLIST_DIGEST: ${{ needs.image.outputs.blocklist-client }}
+          API_PATH: /orgs/${{ github.repository_owner }}/packages/container/sbtc/versions
+          FALLBACK_URL: https://github.com/${{ github.repository }}/pkgs/container/sbtc
+        run: |
+          SIGNER=$(gh api --paginate "$API_PATH" \
+            --jq ".[] | select(.name == \"$SIGNER_DIGEST\") | .html_url" \
+            | head -n 1)
+
+          BLOCKLIST=$(gh api --paginate "$API_PATH" \
+            --jq ".[] | select(.name == \"$BLOCKLIST_DIGEST\") | .html_url" \
+            | head -n 1)
+
+          echo "SIGNER_URL=${SIGNER:-$FALLBACK_URL}" >> "$GITHUB_ENV"
+          echo "BLOCKLIST_CLIENT_URL=${BLOCKLIST:-$FALLBACK_URL}" >> "$GITHUB_ENV"
+
       - name: Generate Release Notes
         id: generate_release_notes
         run: |
@@ -155,44 +178,50 @@ jobs:
 
           [Highlights](#highlights) • [Images](#images) • [Upgrade Instructions](#upgrade-instructions)
 
-          ## ✨ Highlights <a id="highlights">
+          # ✨ Highlights <a id="highlights">
 
           __✏️ Complete the highlights section with a brief list of notable changes__
           - Highlight 1
           - Highlight 2
           - etc...
 
-          ## 🐳 Images: <a id="images">
-          ⚠️ Always use [immutable image tags](https://docs.docker.com/reference/cli/docker/image/pull/#pull-an-image-by-digest-immutable-identifier) - the image digests are provided below. Verify the attestation of these images using this [guide](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds#verifying-artifact-attestations-with-the-github-cli).
+          # 🐳 Images: <a id="images">
 
-          We publish our images on [GitHub Container Registry](https://github.com/${{ github.repository_owner }}/sbtc/pkgs/container/sbtc).
+          > [!IMPORTANT]
+          > Always use [immutable image tags](https://docs.docker.com/reference/cli/docker/image/pull/#pull-an-image-by-digest-immutable-identifier) - the image digests are provided below. Verify the attestation of these images using this [guide](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds#verifying-artifact-attestations-with-the-github-cli).
+          >
+          > We publish our images on [GitHub Container Registry](https://github.com/${{ github.repository_owner }}/sbtc/pkgs/container/sbtc).
 
           ### sBTC Signer
-          [\`ghcr.io/${{ github.repository_owner }}/sbtc:signer-${{ env.TAG_NAME }}@${{ needs.image.outputs.signer }}\`](https://github.com/${{ github.repository }}/pkgs/container/sbtc/signer-${{ env.TAG_NAME }})
+          [\`ghcr.io/${{ github.repository_owner }}/sbtc:signer-${{ env.TAG_NAME }}@${{ needs.image.outputs.signer }}\`](${{ env.SIGNER_URL }})
           - 🏷️ \`${{ github.repository_owner }}/sbtc:signer-${{ env.TAG_NAME }}\`
           - 🔒 \`${{ needs.image.outputs.signer }}\`
 
           ### Blocklist Client
-          [\`ghcr.io/${{ github.repository_owner }}/sbtc:blocklist-client-${{ env.TAG_NAME }}@${{ needs.image.outputs.blocklist-client }}\`](https://github.com/${{ github.repository }}/pkgs/container/sbtc/blocklist-client-${{ env.TAG_NAME }})
+          [\`ghcr.io/${{ github.repository_owner }}/sbtc:blocklist-client-${{ env.TAG_NAME }}@${{ needs.image.outputs.blocklist-client }}\`](${{ env.BLOCKLIST_CLIENT_URL }})
           - 🏷️ \`${{ github.repository_owner }}/sbtc:blocklist-client-${{ env.TAG_NAME }}\`
           - 🔒 \`${{ needs.image.outputs.blocklist-client }}\`
 
-          ## 📙 Database migrations
+          # 📙 Database migrations
+          > [!IMPORTANT]
+          > If you run your signer using the `--migrate-db` flag, the database will be applied automatically. If you do not use this flag, you must apply the migrations manually.
+          >
+          > **`--migrate-db` is enabled by default in our official Docker images.**
 
-          Database migrations may be found at [\`signer/migrations\`](https://github.com/stacks-network/sbtc/tree/${{ env.TAG_NAME }}/signer/migrations).
+          Database migrations may be found at [`signer/migrations`](https://github.com/${{ github.repository_owner }}/sbtc/tree/${{ env.TAG_NAME }}/signer/migrations).
 
-          **Important:** If you run your signer using the \`--migrate-db\` flag (which is the default when using the official docker images), the database will be automatically migrated to the latest version. If you do not use this flag, you must manually apply the migrations.
-
-          ## 🛠️ Upgrade Instructions: <a id="upgrade-instructions">
+          # 🛠️ Upgrade Instructions: <a id="upgrade-instructions">
 
           1. Stop your sBTC signer
           2. Backup your database
-          3. Edit your configuration as instructed
-          4. Apply database migrations (only if not running with the \`--migrate-db\` flag)
-          5. Update your sBTC images as specified above
-          6. Restart your sBTC signer and blocklist client
+          3. Database migrations:
+              - _**(recommended)**_ If you run your signer with `--migrate-db`, database migrations will be automatically applied upon startup,
+              - _(advanced)_ Otherwise, apply database migrations manually
+          4. Update your sBTC images as specified above
+          5. Restart your sBTC signer and blocklist client
 
-          ## 📝 What's Changed <a id="whats-changed">
+          # 📝 What's Changed <a id="whats-changed">
+
           ### Protocol Breaking Changes 🚨
           __✏️ Move the protocol breaking changes (if any) here, otherwise delete this section.__
 

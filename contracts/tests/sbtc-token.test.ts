@@ -467,7 +467,11 @@ describe("sBTC token contract", () => {
         deployer
       );
       const receipt = txOk(tokenTest.callAllTokenProtocolFunctions(), alice);
-      expect(receipt.value).toStrictEqual([75n, 70n, 5n]);
+      expect(receipt.value).toStrictEqual([
+        { isOk: true, value: 75n },
+        { isOk: true, value: 70n },
+        { isOk: true, value: 5n },
+      ]);
 
       const supply1 = rov(token.getTotalSupply());
       expect(supply1.value).toEqual(75n);

@@ -72,7 +72,7 @@ impl From<[u8; 64]> for SchnorrProof {
 pub mod test_helpers {
     use crate::{
         common::{PolyCommitment, PublicNonce, SignatureShare},
-        errors::DkgError,
+        errors::{AggregatorError, DkgError},
         v2,
     };
 
@@ -134,9 +134,10 @@ pub mod test_helpers {
     ) -> (Vec<PublicNonce>, Vec<SignatureShare>) {
         let (signer_ids, key_ids, nonces) = sign_params(signers, rng);
         let shares = signers
-            .iter()
+            .iter_mut()
             .map(|s| s.sign_taproot(msg, &signer_ids, &key_ids, &nonces, merkle_root))
-            .collect();
+            .collect::<Result<Vec<SignatureShare>, AggregatorError>>()
+            .unwrap();
 
         (nonces, shares)
     }

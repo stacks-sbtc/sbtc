@@ -23,6 +23,7 @@ x-common-vars:
   - &STACKS_31_HEIGHT ${STACKS_31_HEIGHT:-233}
   - &STACKS_32_HEIGHT ${STACKS_32_HEIGHT:-234}
   - &STACKS_33_HEIGHT ${STACKS_33_HEIGHT:-235}
+  - &STACKS_34_HEIGHT ${STACKS_34_HEIGHT:-236}
   - &STACKING_CYCLES ${STACKING_CYCLES:-12} # number of cycles to stack-stx or stack-extend for
   - &POX_PREPARE_LENGTH ${POX_PREPARE_LENGTH:-5}
   - &POX_REWARD_LENGTH ${POX_REWARD_LENGTH:-20}
@@ -71,7 +72,7 @@ services:
     entrypoint: /miner.sh
 
   stacks-node:
-    image: ghcr.io/stacks-network/stacks-core:3.3.0.0.6@sha256:01c1d538f5b54e68e73f67a0034f13458c52d78837a0d4291e30a338cb34af32
+    image: ghcr.io/stacks-network/stacks-core:3.4.0.0.1@sha256:e6469f24086faad11c45977016c1f4340e836f5b8f34778c1b88eab7b6e7cb80
     depends_on:
       bitcoin:
         condition: service_healthy
@@ -102,6 +103,7 @@ services:
       STACKS_31_HEIGHT: *STACKS_31_HEIGHT
       STACKS_32_HEIGHT: *STACKS_32_HEIGHT
       STACKS_33_HEIGHT: *STACKS_33_HEIGHT
+      STACKS_34_HEIGHT: *STACKS_34_HEIGHT
       POX_PREPARE_LENGTH: *POX_PREPARE_LENGTH
       POX_REWARD_LENGTH: *POX_REWARD_LENGTH
       REWARD_RECIPIENT: *REWARD_RECIPIENT
@@ -153,7 +155,7 @@ services:
         exec npx tsx /root/tx-broadcaster.ts
 
   stacks-signer:
-    image: ghcr.io/stacks-network/stacks-signer:3.3.0.0.6@sha256:292ad4d4e3e8d77571c7ee0bbf9f3eddf86af87030ab320f7c3202ad46ca0255
+    image: ghcr.io/stacks-network/stacks-signer:3.4.0.0.1.0@sha256:afe4332e967b4a509cc05b5f6d4f15389b7afa100398ebdc1b5ae8c15cac996c
     depends_on:
       - stacks-node
     volumes:

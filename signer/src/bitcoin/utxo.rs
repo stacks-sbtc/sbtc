@@ -30,6 +30,7 @@ use bitcoin::taproot::TaprootSpendInfo;
 use bitcoin::transaction::Version;
 use bitvec::array::BitArray;
 use bitvec::field::BitField as _;
+use prost::Message as _;
 use sbtc::idpack::BitmapSegmenter;
 use sbtc::idpack::Decodable as _;
 use sbtc::idpack::Encodable as _;
@@ -48,6 +49,7 @@ use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::context::SbtcLimits;
 use crate::error::Error;
 use crate::keys::SignerScriptPubKey as _;
+use crate::proto;
 use crate::storage::model;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::QualifiedRequestId;
@@ -72,14 +74,14 @@ const DEFAULT_INCREMENTAL_RELAY_FEE_RATE: f64 =
 /// of the signers' input UTXO and a UTXO for a deposit request. The output
 /// is the signers' new UTXO. The deposit request is such that the sweep
 /// transaction has the largest size of solo deposit sweep transactions.
-const SOLO_DEPOSIT_TX_VSIZE: f64 = 249.0;
+pub const SOLO_DEPOSIT_TX_VSIZE: f64 = 249.0;
 
 /// This constant represents the virtual size (in vBytes) of a BTC
 /// transaction servicing only one withdrawal request, except the
 /// withdrawal output is not in the transaction. This way the sweep
 /// transaction's OP_RETURN output is the right size, and we can handle the
 /// variability of output sizes.
-const BASE_WITHDRAWAL_TX_VSIZE: f64 = MAX_BASE_TX_VSIZE as f64;
+pub const BASE_WITHDRAWAL_TX_VSIZE: f64 = MAX_BASE_TX_VSIZE as f64;
 
 /// This constant represents the maximum virtual size (in vBytes) of a BTC
 /// transaction excluding withdrawals outputs and deposit inputs.
@@ -100,6 +102,15 @@ const OP_RETURN_HEADER_SIZE: usize = 3;
 
 /// The maximum total size of an OP_RETURN output
 const OP_RETURN_MAX_SIZE: usize = 80;
+
+/// Per-item protobuf overhead when an `OutPoint` or `QualifiedRequestId`
+/// is embedded as an element of a `repeated` field inside `TxRequestIds`.
+///
+/// Each element in a protobuf `repeated` message field incurs a 1-byte
+/// field tag and a length-delimiting varint. Both `OutPoint` and
+/// `QualifiedRequestId` encode to fewer than 128 bytes, so the length
+/// varint is always 1 byte, giving 2 bytes of overhead total.
+pub const PROTOBUF_ENCODED_SIZE_OVERHEAD: usize = 2;
 
 /// The available size for encoded withdrawal IDs in OP_RETURN
 pub(super) const OP_RETURN_AVAILABLE_SIZE: usize = OP_RETURN_MAX_SIZE - OP_RETURN_HEADER_SIZE;
@@ -536,6 +547,11 @@ impl Weighted for DepositRequest {
             .segwit_weight()
             .to_vbytes_ceil()
     }
+    fn presign_weight(&self) -> usize {
+        proto::OutPoint::from(self.outpoint)
+            .encoded_len()
+            .saturating_add(PROTOBUF_ENCODED_SIZE_OVERHEAD)
+    }
 }
 
 /// An accepted or pending withdrawal request.
@@ -607,6 +623,11 @@ impl Weighted for WithdrawalRequest {
     fn withdrawal_id(&self) -> Option<u64> {
         Some(self.request_id)
     }
+    fn presign_weight(&self) -> usize {
+        proto::QualifiedRequestId::from(self.qualified_id())
+            .encoded_len()
+            .saturating_add(PROTOBUF_ENCODED_SIZE_OVERHEAD)
+    }
 }
 
 /// A reference to either a deposit or withdraw request
@@ -665,6 +686,12 @@ impl Weighted for RequestRef<'_> {
     }
     fn withdrawal_id(&self) -> Option<u64> {
         self.as_withdrawal().map(|req| req.request_id)
+    }
+    fn presign_weight(&self) -> usize {
+        match self {
+            Self::Deposit(req) => req.presign_weight(),
+            Self::Withdrawal(req) => req.presign_weight(),
+        }
     }
 }
 

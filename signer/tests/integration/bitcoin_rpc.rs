@@ -1,5 +1,14 @@
 //! Test the RPC clients
 
+use crate::containers::BitcoinContainerExt as _;
+use crate::setup::SweepAmounts;
+use crate::setup::TestSignerSet;
+use crate::setup::TestSweepSetup2;
+use bitcoin::AddressType;
+use sbtc::testing::containers::TestContainersBuilder;
+use sbtc::testing::regtest::Recipient;
+use signer::testing::get_rng;
+
 mod serial {
     use std::time::Duration;
 
@@ -573,4 +582,98 @@ mod serial {
         assert_eq!(txout.value, Amount::from_sat(10_000));
         assert_eq!(txout.confirmations, 0); // Unconfirmed txs will have 0 confirmations
     }
+}
+
+/// [`BitcoinCoreClient::get_utxo_info`] returns information about outputs
+/// that are confirmed, and unspent. If an output is being spent in a
+/// transaction that is in the mempool, then it is still considered
+/// unspent until that transaction is confirmed.
+#[tokio::test]
+async fn get_utxo_info_confirmed_unspent_mempool_only_and_spent() {
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let faucet = &bitcoin.get_faucet();
+    let client = bitcoin.get_client();
+
+    let mut rng = get_rng();
+
+    // Now let's confirm a deposit output and see what our UTXO function
+    // does.
+    let signers = TestSignerSet::new(&mut rng);
+    let amounts = [SweepAmounts {
+        amount: 1_000_000,
+        max_fee: 500_000,
+        is_deposit: true,
+    }];
+    // When this object is created, it creates a deposit transaction and
+    // confirms it in a block.
+    let mut setup = TestSweepSetup2::new_setup(signers, client.clone(), faucet, &amounts);
+    let deposit_outpoint = setup.deposits[0].0.outpoint;
+
+    // The deposit output should be confirmed and unspent. So get_utxo_info
+    // should return information about it.
+    let summary = client.get_utxo_info(&deposit_outpoint).unwrap().unwrap();
+
+    assert_eq!(summary.block_hash, setup.deposit_block_hash);
+    assert!(!summary.is_coinbase);
+
+    // After a transaction spending the deposit is in the mempool, the
+    // deposit output is still considered unspent, so get_utxo_info should
+    // return the same summary as before.
+    setup.broadcast_sweep_tx();
+
+    let summary2 = client
+        .get_utxo_info(&deposit_outpoint)
+        .expect("get_utxo_info")
+        .expect("confirmed deposit UTXO should be visible");
+
+    assert_eq!(summary2, summary);
+
+    // Let's do another check about what happens for transactions in the
+    // mempool. In this case the signer's UTXO is just in the mempool, so
+    // it is not considered to be a UTXO yet.
+    let txid = setup.broadcast_info.as_ref().unwrap().txid;
+    let signer_output = bitcoin::OutPoint::new(txid, 0);
+    let sweep_in_mempool = client.get_utxo_info(&signer_output).unwrap();
+
+    assert!(sweep_in_mempool.is_none());
+
+    // Let's create a transaction, spending to some recipient and broadcast
+    // it to the mempool. Since it is not confirmed, it should not be
+    // considered a UTXO yet.
+    let addr = Recipient::new(AddressType::P2wpkh);
+    let random_outpoint = faucet.send_to(20_000, &addr.address);
+    assert!(client.get_utxo_info(&random_outpoint).unwrap().is_none());
+
+    // Let's generate a block confirming the sweep transaction, as well as
+    // the `random_outpoint` transaction that we created above.
+    let block_hash = faucet.generate_block();
+
+    // The deposit output is no longer considered unspent so get_utxo_info
+    // should return None.
+    assert!(client.get_utxo_info(&deposit_outpoint).unwrap().is_none());
+    // But that random output that we created should be confirmed now, so
+    // it is an unspent output.
+    let random_utxo = client.get_utxo_info(&random_outpoint).unwrap().unwrap();
+    assert_eq!(random_utxo.block_hash, block_hash);
+    assert!(!random_utxo.is_coinbase);
+
+    // The signer's new UTXO exists so get_utxo_info should return it.
+    let signer_utxo = client.get_utxo_info(&signer_output).unwrap().unwrap();
+
+    assert_eq!(signer_utxo.block_hash, block_hash);
+    assert!(!signer_utxo.is_coinbase);
+
+    // Lastly, let's take a coinbase transaction and check that we label it
+    // as such.
+    let block = client.get_block(&block_hash).unwrap().unwrap();
+    // The coinbase is always first in the block.
+    let coinbase = &block.transactions[0];
+    assert!(coinbase.tx.is_coinbase());
+
+    // And now we check that we get consistent information.
+    let coinbase_outpoint = bitcoin::OutPoint::new(coinbase.tx.compute_txid(), 0);
+    let coinbase_utxo = client.get_utxo_info(&coinbase_outpoint).unwrap().unwrap();
+    assert_eq!(coinbase_utxo.block_hash, block_hash);
+    assert!(coinbase_utxo.is_coinbase);
 }

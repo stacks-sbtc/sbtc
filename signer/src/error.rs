@@ -153,6 +153,20 @@ pub enum Error {
     #[error("bitcoin-core getblockheader RPC error for hash {1}: {0}")]
     BitcoinCoreGetBlockHeader(#[source] bitcoincore_rpc::Error, bitcoin::BlockHash),
 
+    /// Attempt to fetch a bitcoin block hash for a given height resulted in
+    /// an unexpected error.
+    #[error("bitcoin-core getblockhash RPC error for height {1}: {0}")]
+    BitcoinCoreGetBlockHash(#[source] bitcoincore_rpc::Error, u64),
+
+    /// The given chain tip block hash could not be found in bitcoin-core.
+    ///
+    /// This is returned when trying to fetch the header of the given block
+    /// hash. However, this error scenario should never happen, since the
+    /// block hash included here is what bitcoin-core has told us is the
+    /// chain tip, so it should have the header for that block.
+    #[error("could not find header for bitcoin-core's chain tip block hash: {0}, outpoint: {1}")]
+    BitcoinCoreUnknownChainTip(bitcoin::BlockHash, bitcoin::OutPoint),
+
     /// Bitcoin block header is unknown to bitcoin-core. This is only
     /// triggered if bitcoin-core does not know about the block hash.
     #[error("Unknown block hash response from bitcoin-core getblockheader RPC call: {0}")]

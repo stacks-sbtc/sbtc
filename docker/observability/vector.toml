@@ -29,35 +29,35 @@ address = "0.0.0.0:9598"
 
 
 ## App Logs
-
-[sources.docker_logs]
-type = "docker_logs"
-include_containers = [
-    "sbtc-signer-1",
-    "sbtc-signer-2",
-    "sbtc-signer-3",
-]
-
-# Reshape the logs produced by the docker source.
 #
-# We map the "message" field, which contains the log produced by the source
-# docker service, into a JSON and drop some of the fields that were added
-# by docker or vector. A list of added fields could be found here:
-# https://vector.dev/docs/reference/configuration/sources/docker_logs/#log-fields.
+# Receives logs from Docker's fluentd logging driver over the Fluentd
+# forward protocol. This avoids mounting the Docker socket into the
+# vector container, or writing to a file.
+#
+# Vector docs on this are at https://vector.dev/docs/reference/configuration/sources/fluent/ 
+[sources.signer_logs]
+type = "fluent"
+address = "0.0.0.0:24224"
+
+# Parse the JSON log messages from the signer's stdout. The fluentd driver
+# sends the log line in the "log" field. If it parses as JSON, merge it
+# into the top-level event.
 [transforms.json_messages]
 type = "remap"
-inputs = ["docker_logs"]
+inputs = ["signer_logs"]
 drop_on_error = true
 source = '''
-item = parse_json(.message) ?? {}
-if item == {} {
-  item.message = to_string!(.message)
-}
+.docker_container_id = del(.container_id)
+.docker_container_name = del(.container_name)
+.docker_host = del(.host)
+.docker_source = del(.source)
+.docker_source_type = del(.source_type)
 
-item.docker_container_name = .container_name
-item.docker_host = .host
-item.docker_image = .image
-. = item
+parsed, err = parse_json(.log)
+if err == null && is_object(parsed) {
+  . = merge(., object!(parsed))
+  del(.log)
+}
 '''
 
 [sinks.loki]
@@ -70,4 +70,4 @@ out_of_order_action = "accept"
   codec = "json"
 
   [sinks.loki.labels]
-  docker_image = "{{ docker_image }}"
+  service = "{{ tag }}"

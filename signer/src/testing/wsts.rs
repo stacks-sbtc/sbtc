@@ -118,11 +118,6 @@ impl Coordinator {
             threshold,
             dkg_threshold,
             message_private_key: signer_info.signer_private_key.into(),
-            dkg_public_timeout: None,
-            dkg_private_timeout: None,
-            dkg_end_timeout: None,
-            nonce_timeout: None,
-            sign_timeout: None,
             signer_key_ids,
             signer_public_keys,
         };
@@ -151,7 +146,7 @@ impl Coordinator {
             .start_public_shares()
             .expect("failed to start public shares");
 
-        self.send_packet(bitcoin_chain_tip, id, outbound.msg).await;
+        self.send_packet(bitcoin_chain_tip, id, outbound).await;
 
         match self.loop_until_result(bitcoin_chain_tip, id).await {
             wsts::state_machine::OperationResult::Dkg(aggregate_key) => {
@@ -174,7 +169,7 @@ impl Coordinator {
             .start_signing_round(msg, signature_type)
             .expect("failed to start signing round");
 
-        self.send_packet(bitcoin_chain_tip, id, outbound.msg).await;
+        self.send_packet(bitcoin_chain_tip, id, outbound).await;
 
         match self.loop_until_result(bitcoin_chain_tip, id).await {
             wsts::state_machine::OperationResult::SignTaproot(signature)
@@ -196,19 +191,14 @@ impl Coordinator {
                     continue;
                 };
 
-                let packet = wsts::net::Packet {
-                    msg: wsts_msg.inner,
-                    sig: Vec::new(),
-                };
-
-                let (outbound_packet, operation_result) = self
+                let (outbound_message, operation_result) = self
                     .wsts_coordinator
-                    .process_message(&packet)
+                    .process_message(&wsts_msg.inner)
                     .expect("message processing failed");
 
-                if let Some(packet) = outbound_packet {
+                if let Some(message) = outbound_message {
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    self.send_packet(bitcoin_chain_tip, id, packet.msg).await;
+                    self.send_packet(bitcoin_chain_tip, id, message).await;
                 }
 
                 if let Some(result) = operation_result {

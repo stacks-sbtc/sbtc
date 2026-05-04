@@ -146,6 +146,39 @@ pub const MAX_SIGNER_STATE_MACHINES: u64 = MAX_MEMPOOL_PACKAGE_SIZE
 /// bitcoin.
 pub const MIN_BITCOIN_INPUT_VSIZE: u64 = 58;
 
+/// The `max_transmit_size` configured on our libp2p-gossipsub behaviour.
+/// This is the value passed to
+/// [`gossipsub::ConfigBuilder::max_transmit_size`], and it controls the
+/// maximum size of a published message, as well as the maximum size of a
+/// received message.
+///
+/// ## Publish side
+///
+/// `Behaviour::publish` checks `data.len() > max_transmit_size` before
+/// queuing the message. The check is against the raw application payload,
+/// not the final wire frame. So our encoded `Signed<SignerMessage>` bytes
+/// must stay within this limit.
+///
+/// Source (libp2p-gossipsub 0.49.3):
+/// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/behaviour.rs#L574-L595>
+///
+/// ## Receive side
+///
+/// Inbound gossipsub frames are decoded by `quick-protobuf-codec`, whose
+/// `max_len` is also set from `max_transmit_size`. This acts as a
+/// frame-level limit: any single RPC frame (which carries one published
+/// message) exceeding `max_len` is rejected by the codec before gossipsub
+/// ever sees it. This check is against the full libp2p wire message size,
+/// not just the part of the message that we've encoded. So our messages
+/// need to stay well below the limit because libp2p adds in some
+/// additional data.
+///
+/// Source (quick-protobuf-codec 0.3.1, decode rejects oversized frames):
+/// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/protocol.rs#L134-L146>
+/// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/protocol.rs#L184-L195>
+/// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/misc/quick-protobuf-codec/src/lib.rs#L74-L89>
+pub const GOSSIPSUB_MAX_TRANSMIT_SIZE: usize = 65536;
+
 // These are all build info variables. Many of them are set in build.rs.
 
 /// The name of the binary that is being run,

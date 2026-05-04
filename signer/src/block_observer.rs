@@ -81,21 +81,23 @@ impl DepositRequestValidator for CreateDepositRequest {
     where
         C: BitcoinInteract,
     {
-        // Fetch the transaction from either a block or from the mempool
-        let Some(response) = client.get_tx(&self.outpoint.txid).await? else {
+        // Fetch the UTXO info for a confirmed outpoint
+        let Some(response) = client.get_utxo_info(&self.outpoint).await? else {
             return Ok(None);
         };
 
-        // If the transaction has not been confirmed yet, then the block
-        // hash will be None. The transaction has not failed validation,
-        // let's try again when it gets confirmed.
-        let Some(block_hash) = response.block_hash else {
-            return Ok(None);
-        };
-
-        if response.tx.is_coinbase() {
+        if response.is_coinbase {
             return Err(Error::BitcoinTxCoinbase(self.outpoint.txid));
         }
+
+        // This is usually the block hash confirming the transaction
+        // associated with the outpoint. However, it can be incorrect if
+        // our bitcoin node detects a reorg in the middle of the above
+        // function call and the reorg affects the outpoint in question.
+        // The call below to get_tx_info will detect this and we will
+        // either return Ok(None) or an error, which is fine, it will get
+        // sorted out at the arrival of the next bitcoin block.
+        let block_hash = response.block_hash;
 
         // The `get_tx_info` call here should not return None, we know that
         // it has been included in a block.
@@ -144,8 +146,9 @@ where
     }
 
     /// Run the block observer
-    #[tracing::instrument(skip_all, name = "block-observer")]
+    #[tracing::instrument(skip_all, name = "block-observer", fields(bitcoin_tip_hash = tracing::field::Empty))]
     pub async fn run(self) -> Result<(), Error> {
+        let span = tracing::Span::current();
         let term = self.context.get_termination_handle();
         let mut bitcoin_blocks = self.bitcoin_block_source.get_block_hash_stream();
 
@@ -163,7 +166,9 @@ where
 
             match poll.await {
                 Ok(Some(Ok(block_hash))) => {
-                    tracing::info!(%block_hash, "observed new bitcoin block from stream");
+                    span.record("bitcoin_tip_hash", tracing::field::display(block_hash));
+
+                    tracing::info!("observed new bitcoin block from stream");
                     metrics::counter!(
                         Metrics::BlocksObservedTotal,
                         "blockchain" => BITCOIN_BLOCKCHAIN,
@@ -171,15 +176,15 @@ where
                     .increment(1);
 
                     if let Err(error) = self.process_bitcoin_chain_tip(block_hash).await {
-                        tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
+                        tracing::error!(%error, "could not process bitcoin blocks");
                     }
 
                     if let Err(error) = self.process_stacks_blocks().await {
-                        tracing::warn!(%error, "could not process stacks blocks");
+                        tracing::error!(%error, "could not process stacks blocks");
                     }
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
-                        tracing::warn!(%error, "could not check pending dkg shares");
+                        tracing::error!(%error, "could not check pending dkg shares");
                         continue;
                     }
 
@@ -187,21 +192,21 @@ where
                     let chain_tip = match self.update_signer_state(block_hash).await {
                         Ok(chain_tip) => chain_tip,
                         Err(error) => {
-                            tracing::warn!(%error, "could not update the signer state");
+                            tracing::error!(%error, "could not update the signer state");
                             continue;
                         }
                     };
 
                     tracing::info!("loading latest deposit requests from Emily");
                     if let Err(error) = self.load_latest_deposit_requests().await {
-                        tracing::warn!(%error, "could not load latest deposit requests from Emily");
+                        tracing::error!(%error, "could not load latest deposit requests from Emily");
                     }
 
                     self.context
                         .signal(SignerEvent::BitcoinBlockObserved(chain_tip).into())?;
                 }
                 Ok(Some(Err(error))) => {
-                    tracing::warn!(%error, "error decoding new bitcoin block hash from stream");
+                    tracing::error!(%error, "error decoding new bitcoin block hash from stream");
                     continue;
                 }
                 _ => continue,
@@ -358,7 +363,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This function must only be called with the bitcoin chain tip since
     /// it updates all blocks that are reachable from the given block hash
     /// as canonical and may update blocks not reachable as non-canonical.
-    #[tracing::instrument(skip_all, fields(%chain_tip))]
+    #[tracing::instrument(skip_all)]
     async fn process_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
         self.process_bitcoin_blocks_until(chain_tip).await?;
 

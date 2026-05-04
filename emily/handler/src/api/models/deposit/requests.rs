@@ -8,6 +8,7 @@ use bitcoin::consensus::encode;
 use bitcoin::{OutPoint, ScriptBuf, Txid};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use warp::http::StatusCode;
 
 use sbtc::deposits::{CreateDepositRequest, DepositInfo};
 
