@@ -97,6 +97,9 @@ async fn main() {
     let addr: std::net::SocketAddr = addr_str.parse().expect("Failed to parse address");
 
     let app = api::routes::routes_axum()
+        .layer(axum::middleware::from_fn(
+            api::handlers::ensure_json_error_body,
+        ))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {

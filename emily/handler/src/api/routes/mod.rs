@@ -16,23 +16,17 @@ use axum::routing::get;
 use axum::routing::patch;
 use axum::routing::post;
 
+use crate::api::handlers;
 use crate::api::handlers::chainstate;
 use crate::api::handlers::deposit;
 use crate::api::handlers::health;
 use crate::api::handlers::limits;
 use crate::api::handlers::new_block;
+use crate::api::handlers::new_block::EVENT_OBSERVER_BODY_LIMIT;
 #[cfg(feature = "testing")]
 use crate::api::handlers::testing;
 use crate::api::handlers::throttle;
 use crate::api::handlers::withdrawal;
-/// Maximum request body size for the event observer endpoint.
-///
-/// Stacks blocks have a limit of 2 MB, which is enforced at the p2p level, but
-/// event observer events can be larger than that since they contain the
-/// subscribed sbtc events. Luckily, the size of the sbtc events themselves are
-/// bounded by the size of the transactions that create them, so a limit of 8 MB
-/// will be fine since it is twice as high as required.
-pub const EVENT_OBSERVER_BODY_LIMIT: usize = 8 * 1024 * 1024;
 
 /// This function logs the response from an Axum route.
 pub fn axum_log_response(response: &Response<Body>, duration: Duration, _: &Span) {
@@ -94,7 +88,9 @@ pub fn routes_axum() -> Router<EmilyContext> {
         .route("/start_throttle", post(throttle::start_throttle))
         .route("/throttle/activate", patch(throttle::activate_throttle_key))
         .route("/throttle/deactivate", patch_deactivate_throttle_key)
-        .route("/new_block", new_block);
+        .route("/new_block", new_block)
+        .fallback(handlers::not_found_fallback)
+        .method_not_allowed_fallback(handlers::method_not_allowed_fallback);
 
     router
 }

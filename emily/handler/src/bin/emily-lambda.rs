@@ -33,6 +33,9 @@ async fn main() {
 
     // Setup service filters.
     let router = api::routes::routes_axum()
+        .layer(axum::middleware::from_fn(
+            api::handlers::ensure_json_error_body,
+        ))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {
@@ -63,8 +66,11 @@ async fn main() {
         ))
         .with_state(context);
 
-    // We need to ignore the stage prefix that is passed in by AWS Lambda.
-    let app = Router::new().nest("/{*ignored}", router);
+    // We need to ignore the stage prefix that is passed in by AWS API Gateway
+    // (REST APIs forward the deployment stage as the first path segment).
+    // axum disallows wildcards inside `nest`, so we strip exactly one path
+    // segment, which is what `routes_with_stage_prefix` did on the warp impl.
+    let app = Router::new().nest("/{_stage}", router);
 
     // Create axum-lambda service.
     lambda_http::run(app).await.expect("An error occurred");

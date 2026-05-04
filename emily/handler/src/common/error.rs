@@ -401,8 +401,27 @@ pub struct ErrorResponse {
 }
 
 impl IntoResponse for Error {
+    /// Convert the error into a JSON `ErrorResponse` with the appropriate
+    /// status code. In production builds, internal error variants are first
+    /// collapsed to `Error::InternalServer` so we don't leak DynamoDB or
+    /// internal serialization detail to API clients.
+    #[cfg(not(feature = "testing"))]
     fn into_response(self) -> axum::response::Response {
-        let status_code = axum::http::StatusCode::from_u16(self.status_code().as_u16()).unwrap();
-        (status_code, self.to_string()).into_response()
+        self.into_production_error().into_json_response()
+    }
+
+    #[cfg(feature = "testing")]
+    fn into_response(self) -> axum::response::Response {
+        self.into_json_response()
+    }
+}
+
+impl Error {
+    /// Render the error as a JSON `ErrorResponse` body with the matching
+    /// status code, without performing any sanitization.
+    fn into_json_response(self) -> axum::response::Response {
+        let status = self.status_code();
+        let body = ErrorResponse { message: self.to_string() };
+        (status, axum::Json(body)).into_response()
     }
 }
