@@ -1775,18 +1775,6 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.tracing-attributes]]
-version = "0.1.31"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-core]]
-version = "0.1.36"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-serde]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.typenum]]
 version = "1.17.0"
 criteria = "safe-to-deploy"
@@ -1798,10 +1786,6 @@ criteria = "safe-to-deploy"
 [[exemptions.uint]]
 version = "0.10.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.unarray]]
-version = "0.1.4"
-criteria = "safe-to-run"
 
 [[exemptions.unicase]]
 version = "2.7.0"

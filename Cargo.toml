@@ -16,13 +16,12 @@ members = [
 
 [workspace.dependencies]
 # Local Dependencies
-blocklist-api = { path = "./.generated-sources/blocklist-api", default-features = false, features = ["rustls"] }
+blocklist-api = { path = "./.generated-sources/blocklist-api" }
 blocklist-client = { path = "./blocklist-client" }
-emily-client = { path = "./.generated-sources/emily/client/rust/public", default-features = false, features = ["rustls"] }
+emily-client = { path = "./.generated-sources/emily/client/rust/public" }
 emily-handler = { path = "./emily/handler" }
-private-emily-client = { path = "./.generated-sources/emily/client/rust/private", default-features = false, features = ["rustls"] }
 sbtc = { path = "./sbtc" }
-testing-emily-client = { path = "./.generated-sources/emily/client/rust/testing", default-features = false, features = ["rustls"] }
+testing-emily-client = { path = "./.generated-sources/emily/client/rust/testing" }
 wsts = { path = "./wsts" }
 
 # Stacks-Core Dependencies
