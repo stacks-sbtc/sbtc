@@ -15,9 +15,9 @@ use aws_sdk_dynamodb::{
 };
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use reqwest::StatusCode as ReqwestStatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use reqwest::StatusCode as ReqwestStatusCode;
 
 use crate::{
     api::models::{

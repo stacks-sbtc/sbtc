@@ -32,9 +32,8 @@ pub mod withdrawal;
 
 /// Fallback handler for unmatched routes.
 ///
-/// This is the axum equivalent of the warp-era `handle_rejection` 404 branch:
-/// it returns the canonical `ErrorResponse` JSON body so clients (and our
-/// integration tests) can decode every error the same way.
+/// This returns the canonical `ErrorResponse` JSON body so clients (and
+/// our integration tests) can decode every error the same way.
 pub(crate) async fn not_found_fallback(req: Request<Body>) -> Response {
     let body = ErrorResponse {
         message: format!("Not Found: {} {}", req.method(), req.uri()),
@@ -42,10 +41,10 @@ pub(crate) async fn not_found_fallback(req: Request<Body>) -> Response {
     (StatusCode::NOT_FOUND, axum::Json(body)).into_response()
 }
 
-/// Fallback invoked when a route exists but the request method does not match.
+/// Fallback invoked when a route exists but the request method does not
+/// match.
 ///
-/// Replaces the warp-era `handle_rejection` `MethodNotAllowed` branch and
-/// emits an `ErrorResponse` JSON body.
+/// Emits an `ErrorResponse` JSON body.
 pub(crate) async fn method_not_allowed_fallback(req: Request<Body>) -> Response {
     let body = ErrorResponse {
         message: format!("Method Not Allowed: {} {}", req.method(), req.uri()),
@@ -84,10 +83,15 @@ pub async fn ensure_json_error_body(req: Request<Body>, next: Next) -> Response 
     let (parts, body) = response.into_parts();
     let message = match axum::body::to_bytes(body, usize::MAX).await {
         Ok(bytes) if !bytes.is_empty() => String::from_utf8_lossy(&bytes).into_owned(),
-        Ok(_) => parts.status.canonical_reason().unwrap_or("Error").to_string(),
-        Err(error) => {
-            tracing::warn!(%error, "failed to buffer error response body for re-encoding");
-            parts.status.canonical_reason().unwrap_or("Error").to_string()
+        res @ Ok(_) | res @ Err(_) => {
+            if let Err(error) = res {
+                tracing::warn!(%error, "failed to buffer error response body for re-encoding");
+            }
+            parts
+                .status
+                .canonical_reason()
+                .unwrap_or("Error")
+                .to_string()
         }
     };
 
