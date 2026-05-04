@@ -1,7 +1,6 @@
 //! Handlers for the emily API
 
 use axum::body::Body;
-use axum::http::HeaderValue;
 use axum::http::Request;
 use axum::http::StatusCode;
 use axum::http::header::CONTENT_TYPE;
@@ -54,67 +53,43 @@ pub(crate) async fn method_not_allowed_fallback(req: Request<Body>) -> Response 
     (StatusCode::METHOD_NOT_ALLOWED, axum::Json(body)).into_response()
 }
 
-/// Middleware that ensures every error response (4xx/5xx) carries a JSON
-/// `ErrorResponse` body.
+/// Middleware that ensures every error response is a JSON `ErrorResponse`
+/// response.
 ///
-/// This is the axum equivalent of the warp-era `handle_rejection`
-/// `BodyDeserializeError`/internal-error branches: it catches axum's
-/// built-in extractor rejections (for example malformed JSON bodies which
-/// axum surfaces as `text/plain`) and re-encodes them so clients always
-/// see the same error shape.
+/// This is catches axum's built-in extractor rejections which axum
+/// surfaces as `text/plain` and re-encodes them so clients always see the
+/// same error shape.
 pub async fn ensure_json_error_body(req: Request<Body>, next: Next) -> Response {
     let response = next.run(req).await;
     let status = response.status();
+
+    // If the response is not an error, we can just return it as is.
     if !status.is_client_error() && !status.is_server_error() {
         return response;
     }
+
     let already_json = response
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|ct| ct.starts_with("application/json"));
+        .is_some_and(|ct| ct.contains("application/json"));
+
+    // If the response is already JSON, we can just return it as is.
     if already_json {
         return response;
     }
 
-    let (mut parts, body) = response.into_parts();
-    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
-        Ok(bytes) => bytes,
+    // So this isn't a JSON response, we need to re-encode it as JSON,
+    // because that is the API.
+    let (parts, body) = response.into_parts();
+    let message = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) if !bytes.is_empty() => String::from_utf8_lossy(&bytes).into_owned(),
+        Ok(_) => parts.status.canonical_reason().unwrap_or("Error").to_string(),
         Err(error) => {
             tracing::warn!(%error, "failed to buffer error response body for re-encoding");
-            return (
-                parts.status,
-                axum::Json(ErrorResponse {
-                    message: format!(
-                        "{} {}",
-                        parts.status.as_u16(),
-                        parts.status.canonical_reason().unwrap_or("Error")
-                    ),
-                }),
-            )
-                .into_response();
+            parts.status.canonical_reason().unwrap_or("Error").to_string()
         }
     };
-    let message = if bytes.is_empty() {
-        parts
-            .status
-            .canonical_reason()
-            .unwrap_or("Error")
-            .to_string()
-    } else {
-        String::from_utf8_lossy(&bytes).into_owned()
-    };
-    let body = ErrorResponse { message };
-    let json_response = axum::Json(body).into_response();
-    let (json_parts, json_body) = json_response.into_parts();
-    parts.headers.insert(
-        CONTENT_TYPE,
-        json_parts
-            .headers
-            .get(CONTENT_TYPE)
-            .cloned()
-            .unwrap_or_else(|| HeaderValue::from_static("application/json")),
-    );
-    parts.headers.remove(axum::http::header::CONTENT_LENGTH);
-    Response::from_parts(parts, json_body)
+
+    (parts.status, axum::Json(ErrorResponse { message })).into_response()
 }
