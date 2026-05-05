@@ -18,6 +18,7 @@ use p256k1::scalar::Scalar;
 use polynomial::Polynomial;
 use secp256k1::ecdsa::RecoverableSignature;
 use stacks_common::types::chainstate::StacksAddress;
+use wsts::common::Nonce;
 use wsts::common::PolyCommitment;
 use wsts::common::PublicNonce;
 use wsts::common::SignatureShare;
@@ -1447,13 +1448,32 @@ impl TryFrom<proto::PrivateKeyShare> for (u32, Scalar) {
     }
 }
 
+impl From<Nonce> for proto::PrivateNonce {
+    fn from(value: Nonce) -> Self {
+        proto::PrivateNonce {
+            nonce_d: Some(value.d.into()),
+            nonce_e: Some(value.e.into()),
+        }
+    }
+}
+
+impl TryFrom<proto::PrivateNonce> for Nonce {
+    type Error = Error;
+    fn try_from(value: proto::PrivateNonce) -> Result<Self, Self::Error> {
+        Ok(Nonce {
+            d: value.nonce_d.required()?.try_into()?,
+            e: value.nonce_e.required()?.try_into()?,
+        })
+    }
+}
+
 impl From<(u32, PartyState)> for proto::PartyState {
     fn from((key_id, value): (u32, PartyState)) -> Self {
         proto::PartyState {
             key_id,
             polynomial: value.polynomial.map(|v| v.into()),
             private_keys: value.private_keys.into_iter().map(|v| v.into()).collect(),
-            nonce: None,
+            nonce: Some(value.nonce.into()),
         }
     }
 }
@@ -1470,6 +1490,7 @@ impl TryFrom<proto::PartyState> for (u32, PartyState) {
                     .into_iter()
                     .map(|v| v.try_into())
                     .collect::<Result<Vec<_>, Error>>()?,
+                nonce: value.nonce.required()?.try_into()?,
             },
         ))
     }
@@ -1760,6 +1781,7 @@ mod tests {
     #[test_case(PhantomData::<(SignatureShareRequest, proto::SignatureShareRequest)>; "SignatureShareRequest")]
     #[test_case(PhantomData::<(SignatureShare, proto::SignatureShare)>; "SignatureShare")]
     #[test_case(PhantomData::<(SignatureShareResponse, proto::SignatureShareResponse)>; "SignatureShareResponse")]
+    #[test_case(PhantomData::<(Nonce, proto::PrivateNonce)>; "PrivateNonce")]
     #[test_case(PhantomData::<(wsts::schnorr::ID, proto::ProofIdentifier)>; "ProofIdentifier")]
     #[test_case(PhantomData::<(PolyCommitment, proto::PolyCommitment)>; "PolyCommitment")]
     #[test_case(PhantomData::<((u32, PolyCommitment), proto::PartyCommitment)>; "PartyCommitment")]
