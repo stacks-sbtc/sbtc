@@ -152,7 +152,7 @@ pub const WITHDRAWAL_EXPIRY_BUFFER: u64 = 6;
 pub const MAX_MEMPOOL_PACKAGE_SIZE: u64 = 101000;
 
 /// This is the maximum size of a bitcoin block in virtual bytes.
-pub const MAX_BITCOIN_BLOCK_VSIZE: u64 = 4_000_000;
+pub const MAX_BITCOIN_BLOCK_VSIZE: u64 = 1_000_000;
 
 /// This is an upper bound on the number of signer state machines that we
 /// "could" need if we wanted to sign all inputs in parallel and running
