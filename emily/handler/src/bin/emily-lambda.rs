@@ -1,6 +1,5 @@
 //! Emily API entrypoint.
 
-use axum::Router;
 use axum::http::HeaderName;
 use axum::http::Method;
 use axum::http::Request;
@@ -31,8 +30,14 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([CONTENT_TYPE, HeaderName::from_static("x-api-key")]);
 
-    // Setup service filters.
-    let router = api::routes::routes_axum()
+    // The Lambda function is fronted by an API Gateway REST API which forwards
+    // the deployment stage as the first path segment of the request URI (e.g.
+    // `/Prod/health`). We rely on `lambda_http` to strip that segment for us
+    // via the `AWS_LAMBDA_HTTP_IGNORE_STAGE_IN_PATH=true` environment variable
+    // (set on the Lambda in CDK). With that var set, the URI delivered to
+    // axum is already stage-free, so we can register routes without nesting
+    // under `/{stage}` (which conflicts with axum 0.8's fallback wildcard).
+    let app = api::routes::routes_axum()
         .layer(axum::middleware::from_fn(
             api::handlers::ensure_json_error_body,
         ))
@@ -65,12 +70,6 @@ async fn main() {
             api::routes::inject_request_context,
         ))
         .with_state(context);
-
-    // We need to ignore the stage prefix that is passed in by AWS API Gateway
-    // (REST APIs forward the deployment stage as the first path segment).
-    // axum disallows wildcards inside `nest`, so we strip exactly one path
-    // segment, which is what `routes_with_stage_prefix` did on the warp impl.
-    let app = Router::new().nest("/{_stage}", router);
 
     // Create axum-lambda service.
     lambda_http::run(app).await.expect("An error occurred");
