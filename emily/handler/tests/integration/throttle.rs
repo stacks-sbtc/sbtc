@@ -1,5 +1,5 @@
 use argon2::{Argon2, password_hash::PasswordHasher as _};
-use reqwest::StatusCode;
+use reqwest_012::StatusCode;
 use std::collections::HashMap;
 use test_case::test_case;
 
