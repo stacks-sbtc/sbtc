@@ -100,7 +100,7 @@ export function stxAddressToPoxAddress(stxAddr: string) {
   return btcAddressToPoxAddress(stxAddrToBtcAddr(stxAddr, 0));
 }
 
-export const randomPrivateKey = secp.utils.randomSecretKey;
+export const { randomPrivateKey } = secp.utils;
 
 /**
  * Get a random public key
@@ -130,7 +130,7 @@ export function constructMultisigAddress(
       isTestnet
         ? AddressVersion.TestnetMultiSig
         : AddressVersion.MainnetMultiSig,
-      AddressHashMode.P2SH,
+      AddressHashMode.SerializeP2SH,
       Number(m),
       pubkeys.map((k) => createStacksPublicKey(hex.encode(k)))
     )

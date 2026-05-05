@@ -21,7 +21,7 @@ install-py:
 	uv --directory emily_sidecar venv && uv --directory emily_sidecar pip sync pyproject.toml
 
 install-pnpm:
-	pnpm install --frozen-lockfile
+	pnpm --recursive install
 
 install: install-py install-pnpm
 
