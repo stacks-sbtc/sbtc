@@ -54,10 +54,7 @@ impl Party {
             f: Some(VSS::random_poly(threshold - 1, rng)),
             private_keys: Default::default(),
             group_key: Point::zero(),
-            nonce: Nonce {
-                d: Scalar::from(0),
-                e: Scalar::from(0),
-            },
+            nonce: Nonce::zero(),
         }
     }
 
