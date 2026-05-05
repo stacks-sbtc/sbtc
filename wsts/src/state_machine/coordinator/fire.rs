@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use hashbrown::{HashMap, HashSet};
 use std::{collections::BTreeMap, time::Instant};
 use tracing::{debug, error, info, warn};
 
@@ -703,7 +703,7 @@ impl Coordinator {
                 }
             }
             if dkg_failures.is_empty() {
-                info!("no dkg failures");
+                warn!("no dkg failures");
                 self.dkg_end_gathered()?;
             } else {
                 // TODO: see if we have sufficient non-malicious signers to continue
@@ -1014,8 +1014,8 @@ impl Coordinator {
                 .collect::<Vec<SignatureShare>>();
 
             debug!(
-                "aggregator.sign({}, {}, {}, {})",
-                hex::encode(&self.message),
+                "aggregator.sign({}, {:?}, {:?}, {})",
+                bs58::encode(&self.message).into_string(),
                 nonces.len(),
                 shares.len(),
                 self.party_polynomials.len(),
@@ -1374,7 +1374,7 @@ pub mod test {
         traits::Signer as _,
         util::create_rng,
     };
-    use std::collections::HashMap;
+    use hashbrown::HashMap;
     use std::{thread, time::Duration};
 
     #[test]
@@ -1966,10 +1966,10 @@ pub mod test {
                 // we mutated the private shares themselves, so we should see a BadPrivateShares from signer_id 0
                 match dkg_error {
                     DkgError::DkgEndFailure(failure_map) => {
-                        for dkg_failure in failure_map.values() {
+                        for (_signer_id, dkg_failure) in failure_map {
                             match dkg_failure {
                                 DkgFailure::BadPrivateShares(bad_share_map) => {
-                                    for bad_signer_id in bad_share_map.keys() {
+                                    for (bad_signer_id, _bad_private_share) in bad_share_map {
                                         assert_eq!(*bad_signer_id, 0u32);
                                     }
                                 }
@@ -2078,7 +2078,7 @@ pub mod test {
                 // we mutated the public shares themselves, so we should see a BadPublicShares from signer_ids 0 and 1
                 match dkg_error {
                     DkgError::DkgEndFailure(failure_map) => {
-                        for dkg_failure in failure_map.values() {
+                        for (_signer_id, dkg_failure) in failure_map {
                             match dkg_failure {
                                 DkgFailure::BadPublicShares(bad_shares) => {
                                     for bad_signer_id in bad_shares {
