@@ -434,11 +434,11 @@ pub mod test {
         assert_eq!(coordinator.get_state(), State::DkgPublicGather);
     }
 
-    pub fn setup<Coordinator: CoordinatorTrait>(
+    pub fn setup<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         num_signers: u32,
         keys_per_signer: u32,
-    ) -> (Vec<Coordinator>, Vec<Signer>) {
-        setup_with_timeouts::<Coordinator>(
+    ) -> (Vec<Coordinator>, Vec<Signer<SignerType>>) {
+        setup_with_timeouts::<Coordinator, SignerType>(
             num_signers,
             keys_per_signer,
             None,
@@ -449,7 +449,7 @@ pub mod test {
         )
     }
 
-    pub fn setup_with_timeouts<Coordinator: CoordinatorTrait>(
+    pub fn setup_with_timeouts<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         num_signers: u32,
         keys_per_signer: u32,
         dkg_public_timeout: Option<Duration>,
@@ -457,7 +457,7 @@ pub mod test {
         dkg_end_timeout: Option<Duration>,
         nonce_timeout: Option<Duration>,
         sign_timeout: Option<Duration>,
-    ) -> (Vec<Coordinator>, Vec<Signer>) {
+    ) -> (Vec<Coordinator>, Vec<Signer<SignerType>>) {
         INIT.call_once(|| {
             tracing_subscriber::registry()
                 .with(fmt::layer())
@@ -506,7 +506,7 @@ pub mod test {
             .iter()
             .enumerate()
             .map(|(signer_id, (private_key, _public_key))| {
-                Signer::new(
+                Signer::<SignerType>::new(
                     threshold,
                     dkg_threshold,
                     num_signers,
@@ -519,7 +519,7 @@ pub mod test {
                 )
                 .unwrap()
             })
-            .collect::<Vec<Signer>>();
+            .collect::<Vec<Signer<SignerType>>>();
         let coordinators = key_pairs
             .into_iter()
             .map(|(private_key, _public_key)| {
@@ -544,49 +544,49 @@ pub mod test {
     }
 
     /// Helper function for feeding messages back from the processor into the signing rounds and coordinators
-    pub fn feedback_messages<Coordinator: CoordinatorTrait>(
+    pub fn feedback_messages<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         coordinators: &mut [Coordinator],
-        signers: &mut [Signer],
+        signers: &mut [Signer<SignerType>],
         messages: &[Packet],
     ) -> (Vec<Packet>, Vec<OperationResult>) {
         feedback_mutated_messages(coordinators, signers, messages, |_signer, msgs| msgs)
     }
 
     /// Helper function for feeding mutated messages back from the processor into the signing rounds and coordinators
-    pub fn feedback_mutated_messages<C, F>(
-        coordinators: &mut [C],
-        signers: &mut [Signer],
+    pub fn feedback_mutated_messages<
+        Coordinator: CoordinatorTrait,
+        SignerType: SignerTrait,
+        F: Fn(&Signer<SignerType>, Vec<Packet>) -> Vec<Packet>,
+    >(
+        coordinators: &mut [Coordinator],
+        signers: &mut [Signer<SignerType>],
         messages: &[Packet],
         signer_mutator: F,
-    ) -> (Vec<Packet>, Vec<OperationResult>)
-    where
-        F: Fn(&Signer, Vec<Packet>) -> Vec<Packet>,
-        C: CoordinatorTrait,
-    {
+    ) -> (Vec<Packet>, Vec<OperationResult>) {
         feedback_mutated_messages_with_errors(coordinators, signers, messages, signer_mutator)
             .unwrap()
     }
 
     /// Helper function for feeding mutated messages back from the processor into the signing rounds and coordinators
-    pub fn feedback_messages_with_errors<Coordinator: CoordinatorTrait>(
+    pub fn feedback_messages_with_errors<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         coordinators: &mut [Coordinator],
-        signers: &mut [Signer],
+        signers: &mut [Signer<SignerType>],
         messages: &[Packet],
     ) -> Result<(Vec<Packet>, Vec<OperationResult>), StateMachineError> {
         feedback_mutated_messages_with_errors(coordinators, signers, messages, |_signer, msgs| msgs)
     }
 
     /// Helper function for feeding mutated messages back from the processor into the signing rounds and coordinators
-    pub fn feedback_mutated_messages_with_errors<C, F>(
-        coordinators: &mut [C],
-        signers: &mut [Signer],
+    pub fn feedback_mutated_messages_with_errors<
+        Coordinator: CoordinatorTrait,
+        SignerType: SignerTrait,
+        F: Fn(&Signer<SignerType>, Vec<Packet>) -> Vec<Packet>,
+    >(
+        coordinators: &mut [Coordinator],
+        signers: &mut [Signer<SignerType>],
         messages: &[Packet],
         signer_mutator: F,
-    ) -> Result<(Vec<Packet>, Vec<OperationResult>), StateMachineError>
-    where
-        F: Fn(&Signer, Vec<Packet>) -> Vec<Packet>,
-        C: CoordinatorTrait,
-    {
+    ) -> Result<(Vec<Packet>, Vec<OperationResult>), StateMachineError> {
         let mut inbound_messages = vec![];
         let mut feedback_messages = vec![];
         let mut rng = create_rng();
@@ -619,11 +619,12 @@ pub mod test {
         Ok((messages, results))
     }
 
-    pub fn run_dkg<Coordinator: CoordinatorTrait>(
+    pub fn run_dkg<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         num_signers: u32,
         keys_per_signer: u32,
-    ) -> (Vec<Coordinator>, Vec<Signer>) {
-        let (mut coordinators, mut signers) = setup::<Coordinator>(num_signers, keys_per_signer);
+    ) -> (Vec<Coordinator>, Vec<Signer<SignerType>>) {
+        let (mut coordinators, mut signers) =
+            setup::<Coordinator, SignerType>(num_signers, keys_per_signer);
 
         // We have started a dkg round
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -665,8 +666,8 @@ pub mod test {
 
         let new_signers = signers
             .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
+            .map(|s| Signer::<SignerType>::load(&s.save()))
+            .collect::<Vec<Signer<SignerType>>>();
 
         assert_eq!(signers, new_signers);
 
@@ -696,8 +697,8 @@ pub mod test {
 
         let new_signers = signers
             .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
+            .map(|s| Signer::<SignerType>::load(&s.save()))
+            .collect::<Vec<Signer<SignerType>>>();
 
         assert_eq!(signers, new_signers);
 
@@ -736,8 +737,8 @@ pub mod test {
 
         let new_signers = signers
             .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
+            .map(|s| Signer::<SignerType>::load(&s.save()))
+            .collect::<Vec<Signer<SignerType>>>();
 
         assert_eq!(signers, new_signers);
 
@@ -746,9 +747,9 @@ pub mod test {
         (coordinators, signers)
     }
 
-    pub fn run_sign<Coordinator: CoordinatorTrait>(
+    pub fn run_sign<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         coordinators: &mut [Coordinator],
-        signers: &mut Vec<Signer>,
+        signers: &mut Vec<Signer<SignerType>>,
         msg: &[u8],
         signature_type: SignatureType,
     ) -> OperationResult {
@@ -788,8 +789,8 @@ pub mod test {
 
         let new_signers = signers
             .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
+            .map(|s| Signer::<SignerType>::load(&s.save()))
+            .collect::<Vec<Signer<SignerType>>>();
 
         assert_eq!(signers, &new_signers);
 
@@ -853,27 +854,36 @@ pub mod test {
         operation_results[0].clone()
     }
 
-    pub fn run_dkg_sign<Coordinator: CoordinatorTrait>(num_signers: u32, keys_per_signer: u32) {
-        let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
+    pub fn run_dkg_sign<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
+        num_signers: u32,
+        keys_per_signer: u32,
+    ) {
+        let (mut coordinators, mut signers) =
+            run_dkg::<Coordinator, SignerType>(num_signers, keys_per_signer);
 
         let msg = "It was many and many a year ago, in a kingdom by the sea"
             .as_bytes()
             .to_vec();
 
-        run_sign::<Coordinator>(&mut coordinators, &mut signers, &msg, SignatureType::Frost);
-        run_sign::<Coordinator>(
+        run_sign::<Coordinator, SignerType>(
+            &mut coordinators,
+            &mut signers,
+            &msg,
+            SignatureType::Frost,
+        );
+        run_sign::<Coordinator, SignerType>(
             &mut coordinators,
             &mut signers,
             &msg,
             SignatureType::Schnorr,
         );
-        run_sign::<Coordinator>(
+        run_sign::<Coordinator, SignerType>(
             &mut coordinators,
             &mut signers,
             &msg,
             SignatureType::Taproot(None),
         );
-        run_sign::<Coordinator>(
+        run_sign::<Coordinator, SignerType>(
             &mut coordinators,
             &mut signers,
             &msg,
@@ -883,13 +893,14 @@ pub mod test {
 
     /// Run DKG then sign a message, but alter the signature shares for signer 0.  This should trigger the aggregator internal check_signature_shares function to run and determine which parties signatures were bad.
     /// Because of the differences between how parties are represented in v1 and v2, we need to pass in a vector of the expected bad parties.
-    pub fn check_signature_shares<Coordinator: CoordinatorTrait>(
+    pub fn check_signature_shares<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         num_signers: u32,
         keys_per_signer: u32,
         signature_type: SignatureType,
         bad_parties: Vec<u32>,
     ) {
-        let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) =
+            run_dkg::<Coordinator, SignerType>(num_signers, keys_per_signer);
 
         let msg = "It was many and many a year ago, in a kingdom by the sea"
             .as_bytes()
@@ -975,11 +986,12 @@ pub mod test {
         }
     }
 
-    pub fn equal_after_save_load<Coordinator: CoordinatorTrait>(
+    pub fn equal_after_save_load<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         num_signers: u32,
         keys_per_signer: u32,
     ) {
-        let (coordinators, signers) = setup::<Coordinator>(num_signers, keys_per_signer);
+        let (coordinators, signers) =
+            setup::<Coordinator, SignerType>(num_signers, keys_per_signer);
 
         let loaded_coordinators = coordinators
             .iter()
@@ -990,8 +1002,8 @@ pub mod test {
 
         let loaded_signers = signers
             .iter()
-            .map(|s| Signer::load(&s.save()))
-            .collect::<Vec<Signer>>();
+            .map(|s| Signer::<SignerType>::load(&s.save()))
+            .collect::<Vec<Signer<SignerType>>>();
 
         assert_eq!(signers, loaded_signers);
     }
@@ -999,10 +1011,14 @@ pub mod test {
     /// Test if a signer will generate a new nonce after a signing round as a defense
     /// against a malicious coordinator who requests multiple signing rounds
     /// with no nonce round in between to generate a new nonce
-    pub fn gen_nonces<Coordinator: CoordinatorTrait>(num_signers: u32, keys_per_signer: u32) {
+    pub fn gen_nonces<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
+        num_signers: u32,
+        keys_per_signer: u32,
+    ) {
         let mut rng = OsRng;
 
-        let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) =
+            run_dkg::<Coordinator, SignerType>(num_signers, keys_per_signer);
 
         let msg = "It was many and many a year ago, in a kingdom by the sea"
             .as_bytes()
@@ -1072,11 +1088,12 @@ pub mod test {
         }
     }
 
-    pub fn bad_signature_share_request<Coordinator: CoordinatorTrait>(
+    pub fn bad_signature_share_request<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         num_signers: u32,
         keys_per_signer: u32,
     ) {
-        let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) =
+            run_dkg::<Coordinator, SignerType>(num_signers, keys_per_signer);
 
         let msg = "It was many and many a year ago, in a kingdom by the sea"
             .as_bytes()
@@ -1172,8 +1189,12 @@ pub mod test {
         }
     }
 
-    pub fn invalid_nonce<Coordinator: CoordinatorTrait>(num_signers: u32, keys_per_signer: u32) {
-        let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
+    pub fn invalid_nonce<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
+        num_signers: u32,
+        keys_per_signer: u32,
+    ) {
+        let (mut coordinators, mut signers) =
+            run_dkg::<Coordinator, SignerType>(num_signers, keys_per_signer);
 
         let msg = "It was many and many a year ago, in a kingdom by the sea"
             .as_bytes()
@@ -1297,11 +1318,12 @@ pub mod test {
         }
     }
 
-    pub fn empty_public_shares<Coordinator: CoordinatorTrait>(
+    pub fn empty_public_shares<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         num_signers: u32,
         keys_per_signer: u32,
     ) {
-        let (mut coordinators, mut signers) = setup::<Coordinator>(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) =
+            setup::<Coordinator, SignerType>(num_signers, keys_per_signer);
 
         // We have started a dkg round
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
@@ -1408,11 +1430,12 @@ pub mod test {
         }
     }
 
-    pub fn empty_private_shares<Coordinator: CoordinatorTrait>(
+    pub fn empty_private_shares<Coordinator: CoordinatorTrait, SignerType: SignerTrait>(
         num_signers: u32,
         keys_per_signer: u32,
     ) {
-        let (mut coordinators, mut signers) = setup::<Coordinator>(num_signers, keys_per_signer);
+        let (mut coordinators, mut signers) =
+            setup::<Coordinator, SignerType>(num_signers, keys_per_signer);
 
         // We have started a dkg round
         let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
