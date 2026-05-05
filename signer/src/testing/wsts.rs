@@ -151,7 +151,7 @@ impl Coordinator {
             .start_public_shares()
             .expect("failed to start public shares");
 
-        self.send_packet(bitcoin_chain_tip, id, outbound).await;
+        self.send_packet(bitcoin_chain_tip, id, outbound.msg).await;
 
         match self.loop_until_result(bitcoin_chain_tip, id).await {
             wsts::state_machine::OperationResult::Dkg(aggregate_key) => {
@@ -174,7 +174,7 @@ impl Coordinator {
             .start_signing_round(msg, signature_type)
             .expect("failed to start signing round");
 
-        self.send_packet(bitcoin_chain_tip, id, outbound).await;
+        self.send_packet(bitcoin_chain_tip, id, outbound.msg).await;
 
         match self.loop_until_result(bitcoin_chain_tip, id).await {
             wsts::state_machine::OperationResult::SignTaproot(signature)
@@ -196,14 +196,16 @@ impl Coordinator {
                     continue;
                 };
 
-                let (outbound_message, operation_result) = self
+                let packet = wsts::net::Packet { msg: wsts_msg.inner };
+
+                let (outbound_packet, operation_result) = self
                     .wsts_coordinator
-                    .process_message(&wsts_msg.inner)
+                    .process_message(&packet)
                     .expect("message processing failed");
 
-                if let Some(message) = outbound_message {
+                if let Some(packet) = outbound_packet {
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    self.send_packet(bitcoin_chain_tip, id, message).await;
+                    self.send_packet(bitcoin_chain_tip, id, packet.msg).await;
                 }
 
                 if let Some(result) = operation_result {

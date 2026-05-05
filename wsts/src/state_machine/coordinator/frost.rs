@@ -8,7 +8,8 @@ use crate::{
     curve::point::Point,
     net::{
         DkgBegin, DkgEnd, DkgEndBegin, DkgPrivateBegin, DkgPrivateShares, DkgPublicShares,
-        DkgStatus, Message, NonceRequest, NonceResponse, SignatureShareRequest, SignatureType,
+        DkgStatus, Message, NonceRequest, NonceResponse, Packet, SignatureShareRequest,
+        SignatureType,
     },
     state_machine::{
         coordinator::{
@@ -52,16 +53,16 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    /// Process the given message
+    /// Process the message inside the passed packet
     pub fn process_message(
         &mut self,
-        message: &Message,
-    ) -> Result<(Option<Message>, Option<OperationResult>), Error> {
+        packet: &Packet,
+    ) -> Result<(Option<Packet>, Option<OperationResult>), Error> {
         loop {
             match self.state.clone() {
                 State::Idle => {
                     // Did we receive a coordinator message?
-                    if let Message::DkgBegin(dkg_begin) = message {
+                    if let Message::DkgBegin(dkg_begin) = &packet.msg {
                         if self.current_dkg_id >= dkg_begin.dkg_id {
                             // We have already processed this DKG round
                             return Ok((None, None));
@@ -70,9 +71,9 @@ impl Coordinator {
                         // that we start the next round at the correct id. (Do this rather
                         // then overwriting afterwards to ensure logging is accurate)
                         self.current_dkg_id = dkg_begin.dkg_id.wrapping_sub(1);
-                        let message = self.start_dkg_round()?;
-                        return Ok((Some(message), None));
-                    } else if let Message::NonceRequest(nonce_request) = message {
+                        let packet = self.start_dkg_round()?;
+                        return Ok((Some(packet), None));
+                    } else if let Message::NonceRequest(nonce_request) = &packet.msg {
                         if self.current_sign_id >= nonce_request.sign_id {
                             // We have already processed this sign round
                             return Ok((None, None));
@@ -82,42 +83,42 @@ impl Coordinator {
                         // then overwriting afterwards to ensure logging is accurate)
                         self.current_sign_id = nonce_request.sign_id.wrapping_sub(1);
                         self.current_sign_iter_id = nonce_request.sign_iter_id;
-                        let message = self.start_signing_round(
+                        let packet = self.start_signing_round(
                             nonce_request.message.as_slice(),
                             nonce_request.signature_type,
                         )?;
-                        return Ok((Some(message), None));
+                        return Ok((Some(packet), None));
                     }
                     return Ok((None, None));
                 }
                 State::DkgPublicDistribute => {
-                    let message = self.start_public_shares()?;
-                    return Ok((Some(message), None));
+                    let packet = self.start_public_shares()?;
+                    return Ok((Some(packet), None));
                 }
                 State::DkgPublicGather => {
-                    self.gather_public_shares(message)?;
+                    self.gather_public_shares(packet)?;
                     if self.state == State::DkgPublicGather {
                         // We need more data
                         return Ok((None, None));
                     }
                 }
                 State::DkgPrivateDistribute => {
-                    let message = self.start_private_shares()?;
-                    return Ok((Some(message), None));
+                    let packet = self.start_private_shares()?;
+                    return Ok((Some(packet), None));
                 }
                 State::DkgPrivateGather => {
-                    self.gather_private_shares(message)?;
+                    self.gather_private_shares(packet)?;
                     if self.state == State::DkgPrivateGather {
                         // We need more data
                         return Ok((None, None));
                     }
                 }
                 State::DkgEndDistribute => {
-                    let message = self.start_dkg_end()?;
-                    return Ok((Some(message), None));
+                    let packet = self.start_dkg_end()?;
+                    return Ok((Some(packet), None));
                 }
                 State::DkgEndGather => {
-                    if let Err(error) = self.gather_dkg_end(message) {
+                    if let Err(error) = self.gather_dkg_end(packet) {
                         if let Error::DkgFailure(dkg_failures) = error {
                             return Ok((
                                 None,
@@ -144,22 +145,22 @@ impl Coordinator {
                     }
                 }
                 State::NonceRequest(signature_type) => {
-                    let message = self.request_nonces(signature_type)?;
-                    return Ok((Some(message), None));
+                    let packet = self.request_nonces(signature_type)?;
+                    return Ok((Some(packet), None));
                 }
                 State::NonceGather(signature_type) => {
-                    self.gather_nonces(message, signature_type)?;
+                    self.gather_nonces(packet, signature_type)?;
                     if self.state == State::NonceGather(signature_type) {
                         // We need more data
                         return Ok((None, None));
                     }
                 }
                 State::SigShareRequest(signature_type) => {
-                    let message = self.request_sig_shares(signature_type)?;
-                    return Ok((Some(message), None));
+                    let packet = self.request_sig_shares(signature_type)?;
+                    return Ok((Some(packet), None));
                 }
                 State::SigShareGather(signature_type) => {
-                    if let Err(e) = self.gather_sig_shares(message, signature_type) {
+                    if let Err(e) = self.gather_sig_shares(packet, signature_type) {
                         return Ok((
                             None,
                             Some(OperationResult::SignError(SignError::Coordinator(e))),
@@ -212,7 +213,7 @@ impl Coordinator {
     }
 
     /// Ask signers to send DKG public shares
-    pub fn start_public_shares(&mut self) -> Result<Message, Error> {
+    pub fn start_public_shares(&mut self) -> Result<Packet, Error> {
         self.dkg_public_shares.clear();
         self.party_polynomials.clear();
         self.ids_to_await = (0..self.config.num_signers).collect();
@@ -222,12 +223,15 @@ impl Coordinator {
         );
         let dkg_begin = DkgBegin { dkg_id: self.current_dkg_id };
 
+        let dkg_begin_packet = Packet {
+            msg: Message::DkgBegin(dkg_begin),
+        };
         self.move_to(State::DkgPublicGather)?;
-        Ok(Message::DkgBegin(dkg_begin))
+        Ok(dkg_begin_packet)
     }
 
     /// Ask signers to send DKG private shares
-    pub fn start_private_shares(&mut self) -> Result<Message, Error> {
+    pub fn start_private_shares(&mut self) -> Result<Packet, Error> {
         self.ids_to_await = (0..self.config.num_signers).collect();
         info!(
             dkg_id = %self.current_dkg_id,
@@ -238,12 +242,15 @@ impl Coordinator {
             key_ids: (1..self.config.num_keys + 1).collect(),
             signer_ids: (0..self.config.num_signers).collect(),
         };
+        let dkg_private_begin_msg = Packet {
+            msg: Message::DkgPrivateBegin(dkg_begin),
+        };
         self.move_to(State::DkgPrivateGather)?;
-        Ok(Message::DkgPrivateBegin(dkg_begin))
+        Ok(dkg_private_begin_msg)
     }
 
     /// Ask signers to compute secrets and send DKG end
-    pub fn start_dkg_end(&mut self) -> Result<Message, Error> {
+    pub fn start_dkg_end(&mut self) -> Result<Packet, Error> {
         self.ids_to_await = (0..self.config.num_signers).collect();
         info!(
             dkg_id = %self.current_dkg_id,
@@ -254,12 +261,15 @@ impl Coordinator {
             key_ids: (0..self.config.num_keys).collect(),
             signer_ids: (0..self.config.num_signers).collect(),
         };
+        let dkg_end_begin_msg = Packet {
+            msg: Message::DkgEndBegin(dkg_begin),
+        };
         self.move_to(State::DkgEndGather)?;
-        Ok(Message::DkgEndBegin(dkg_begin))
+        Ok(dkg_end_begin_msg)
     }
 
-    fn gather_public_shares(&mut self, message: &Message) -> Result<(), Error> {
-        if let Message::DkgPublicShares(dkg_public_shares) = message {
+    fn gather_public_shares(&mut self, packet: &Packet) -> Result<(), Error> {
+        if let Message::DkgPublicShares(dkg_public_shares) = &packet.msg {
             if dkg_public_shares.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(
                     dkg_public_shares.dkg_id,
@@ -295,8 +305,8 @@ impl Coordinator {
         Ok(())
     }
 
-    fn gather_private_shares(&mut self, message: &Message) -> Result<(), Error> {
-        if let Message::DkgPrivateShares(dkg_private_shares) = message {
+    fn gather_private_shares(&mut self, packet: &Packet) -> Result<(), Error> {
+        if let Message::DkgPrivateShares(dkg_private_shares) = &packet.msg {
             if dkg_private_shares.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(
                     dkg_private_shares.dkg_id,
@@ -328,13 +338,13 @@ impl Coordinator {
         Ok(())
     }
 
-    fn gather_dkg_end(&mut self, message: &Message) -> Result<(), Error> {
+    fn gather_dkg_end(&mut self, packet: &Packet) -> Result<(), Error> {
         debug!(
             dkg_id = %self.current_dkg_id,
             waiting = ?self.ids_to_await,
             "Waiting for Dkg End from signers"
         );
-        if let Message::DkgEnd(dkg_end) = message {
+        if let Message::DkgEnd(dkg_end) = &packet.msg {
             if dkg_end.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(dkg_end.dkg_id, self.current_dkg_id));
             }
@@ -396,7 +406,7 @@ impl Coordinator {
         self.move_to(State::Idle)
     }
 
-    fn request_nonces(&mut self, signature_type: SignatureType) -> Result<Message, Error> {
+    fn request_nonces(&mut self, signature_type: SignatureType) -> Result<Packet, Error> {
         self.public_nonces.clear();
         info!(
             sign_id = %self.current_sign_id,
@@ -410,17 +420,20 @@ impl Coordinator {
             message: self.message.clone(),
             signature_type,
         };
+        let nonce_request_msg = Packet {
+            msg: Message::NonceRequest(nonce_request),
+        };
         self.ids_to_await = (0..self.config.num_signers).collect();
         self.move_to(State::NonceGather(signature_type))?;
-        Ok(Message::NonceRequest(nonce_request))
+        Ok(nonce_request_msg)
     }
 
     fn gather_nonces(
         &mut self,
-        message: &Message,
+        packet: &Packet,
         signature_type: SignatureType,
     ) -> Result<(), Error> {
-        if let Message::NonceResponse(nonce_response) = message {
+        if let Message::NonceResponse(nonce_response) = &packet.msg {
             if nonce_response.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(nonce_response.dkg_id, self.current_dkg_id));
             }
@@ -496,7 +509,7 @@ impl Coordinator {
         Ok(())
     }
 
-    fn request_sig_shares(&mut self, signature_type: SignatureType) -> Result<Message, Error> {
+    fn request_sig_shares(&mut self, signature_type: SignatureType) -> Result<Packet, Error> {
         self.signature_shares.clear();
         info!(
             sign_id = %self.current_sign_id,
@@ -513,18 +526,21 @@ impl Coordinator {
             message: self.message.clone(),
             signature_type,
         };
+        let sig_share_request_msg = Packet {
+            msg: Message::SignatureShareRequest(sig_share_request),
+        };
         self.ids_to_await = (0..self.config.num_signers).collect();
         self.move_to(State::SigShareGather(signature_type))?;
 
-        Ok(Message::SignatureShareRequest(sig_share_request))
+        Ok(sig_share_request_msg)
     }
 
     fn gather_sig_shares(
         &mut self,
-        message: &Message,
+        packet: &Packet,
         signature_type: SignatureType,
     ) -> Result<(), Error> {
-        if let Message::SignatureShareResponse(sig_share_response) = message {
+        if let Message::SignatureShareResponse(sig_share_response) = &packet.msg {
             if sig_share_response.dkg_id != self.current_dkg_id {
                 return Err(Error::BadDkgId(
                     sig_share_response.dkg_id,
@@ -835,20 +851,20 @@ impl CoordinatorTrait for Coordinator {
     /// Process inbound messages
     fn process_inbound_messages(
         &mut self,
-        messages: &[Message],
-    ) -> Result<(Vec<Message>, Vec<OperationResult>), Error> {
-        let mut outbound_messages = vec![];
+        packets: &[Packet],
+    ) -> Result<(Vec<Packet>, Vec<OperationResult>), Error> {
+        let mut outbound_packets = vec![];
         let mut operation_results = vec![];
-        for message in messages {
-            let (outbound_message, operation_result) = self.process_message(message)?;
-            if let Some(outbound_message) = outbound_message {
-                outbound_messages.push(outbound_message);
+        for packet in packets {
+            let (outbound_packet, operation_result) = self.process_message(packet)?;
+            if let Some(outbound_packet) = outbound_packet {
+                outbound_packets.push(outbound_packet);
             }
             if let Some(operation_result) = operation_result {
                 operation_results.push(operation_result);
             }
         }
-        Ok((outbound_messages, operation_results))
+        Ok((outbound_packets, operation_results))
     }
 
     /// Retrieve the aggregate public key
@@ -872,7 +888,7 @@ impl CoordinatorTrait for Coordinator {
     }
 
     /// Start a DKG round
-    fn start_dkg_round(&mut self) -> Result<Message, Error> {
+    fn start_dkg_round(&mut self) -> Result<Packet, Error> {
         self.current_dkg_id = self.current_dkg_id.wrapping_add(1);
         info!("Starting DKG round {}", self.current_dkg_id);
         self.move_to(State::DkgPublicDistribute)?;
@@ -884,7 +900,7 @@ impl CoordinatorTrait for Coordinator {
         &mut self,
         message: &[u8],
         signature_type: SignatureType,
-    ) -> Result<Message, Error> {
+    ) -> Result<Packet, Error> {
         // We cannot sign if we haven't first set DKG (either manually or via DKG round).
         if self.aggregate_public_key.is_none() {
             return Err(Error::MissingAggregatePublicKey);
@@ -912,7 +928,7 @@ impl CoordinatorTrait for Coordinator {
 pub mod test {
     use crate::{
         curve::scalar::Scalar,
-        net::{DkgBegin, Message, NonceRequest, SignatureType},
+        net::{DkgBegin, Message, NonceRequest, Packet, SignatureType},
         state_machine::coordinator::{
             frost::Coordinator as FrostCoordinator,
             test::{
@@ -955,7 +971,7 @@ pub mod test {
 
         let result = coordinator.start_public_shares().unwrap();
 
-        assert!(matches!(result, Message::DkgBegin(_)));
+        assert!(matches!(result.msg, Message::DkgBegin(_)));
         assert_eq!(coordinator.get_state(), State::DkgPublicGather);
         assert_eq!(coordinator.current_dkg_id, 0);
     }
@@ -969,7 +985,7 @@ pub mod test {
         coordinator.state = State::DkgPrivateDistribute; // Must be in this state before calling start private shares
 
         let message = coordinator.start_private_shares().unwrap();
-        assert!(matches!(message, Message::DkgPrivateBegin(_)));
+        assert!(matches!(message.msg, Message::DkgPrivateBegin(_)));
         assert_eq!(coordinator.get_state(), State::DkgPrivateGather);
         assert_eq!(coordinator.current_dkg_id, 0);
     }
@@ -1018,7 +1034,9 @@ pub mod test {
         coordinator.current_sign_id = id;
         // Attempt to start an old DKG round
         let (packets, results) = coordinator
-            .process_inbound_messages(&[Message::DkgBegin(DkgBegin { dkg_id: old_id })])
+            .process_inbound_messages(&[Packet {
+                msg: Message::DkgBegin(DkgBegin { dkg_id: old_id }),
+            }])
             .unwrap();
         assert!(packets.is_empty());
         assert!(results.is_empty());
@@ -1027,7 +1045,9 @@ pub mod test {
 
         // Attempt to start the same DKG round
         let (packets, results) = coordinator
-            .process_inbound_messages(&[Message::DkgBegin(DkgBegin { dkg_id: id })])
+            .process_inbound_messages(&[Packet {
+                msg: Message::DkgBegin(DkgBegin { dkg_id: id }),
+            }])
             .unwrap();
         assert!(packets.is_empty());
         assert!(results.is_empty());
@@ -1036,13 +1056,15 @@ pub mod test {
 
         // Attempt to start an old Sign round
         let (packets, results) = coordinator
-            .process_inbound_messages(&[Message::NonceRequest(NonceRequest {
-                dkg_id: id,
-                sign_id: old_id,
-                message: vec![],
-                sign_iter_id: id,
-                signature_type: SignatureType::Frost,
-            })])
+            .process_inbound_messages(&[Packet {
+                msg: Message::NonceRequest(NonceRequest {
+                    dkg_id: id,
+                    sign_id: old_id,
+                    message: vec![],
+                    sign_iter_id: id,
+                    signature_type: SignatureType::Frost,
+                }),
+            }])
             .unwrap();
         assert!(packets.is_empty());
         assert!(results.is_empty());
@@ -1051,13 +1073,15 @@ pub mod test {
 
         // Attempt to start the same Sign round
         let (packets, results) = coordinator
-            .process_inbound_messages(&[Message::NonceRequest(NonceRequest {
-                dkg_id: id,
-                sign_id: id,
-                message: vec![],
-                sign_iter_id: id,
-                signature_type: SignatureType::Frost,
-            })])
+            .process_inbound_messages(&[Packet {
+                msg: Message::NonceRequest(NonceRequest {
+                    dkg_id: id,
+                    sign_id: id,
+                    message: vec![],
+                    sign_iter_id: id,
+                    signature_type: SignatureType::Frost,
+                }),
+            }])
             .unwrap();
         assert!(packets.is_empty());
         assert!(results.is_empty());
