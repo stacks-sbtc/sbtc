@@ -740,7 +740,7 @@ impl StacksClient {
             %contract_principal,
             %contract_name,
             %fn_name,
-            "Calling read-only function"
+            "Fetching contract data variable"
         );
 
         let instant = Instant::now();
