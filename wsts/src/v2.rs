@@ -1,7 +1,7 @@
+use hashbrown::{HashMap, HashSet};
 use num_traits::{One, Zero};
 use polynomial::Polynomial;
 use rand_core::{CryptoRng, RngCore};
-use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 use crate::{
@@ -283,7 +283,7 @@ impl Aggregator {
 
         for i in 0..poly.capacity() {
             poly.push(Point::zero());
-            for comm in comms.values() {
+            for (_, comm) in comms {
                 poly[i] += &comm.poly[i];
             }
         }
@@ -655,8 +655,8 @@ pub mod test_helpers {
     use crate::v2;
     use crate::v2::SignatureShare;
 
+    use hashbrown::HashMap;
     use rand_core::{CryptoRng, RngCore};
-    use std::collections::HashMap;
 
     /// Run a distributed key generation round
     pub fn dkg<RNG: RngCore + CryptoRng>(
@@ -725,7 +725,7 @@ pub mod test_helpers {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use hashbrown::{HashMap, HashSet};
 
     use crate::util::create_rng;
     use crate::{

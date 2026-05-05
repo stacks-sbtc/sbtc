@@ -6,7 +6,6 @@
 //! For more details, see the [`TxCoordinatorEventLoop`] documentation.
 
 use std::collections::BTreeSet;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -1805,7 +1804,7 @@ where
 
     fn authenticate_message(
         msg: &wsts::net::Message,
-        public_keys: &HashMap<u32, p256k1::point::Point>,
+        public_keys: &hashbrown::HashMap<u32, p256k1::point::Point>,
         public_key_point: p256k1::point::Point,
         sender_is_coordinator: bool,
     ) -> bool {

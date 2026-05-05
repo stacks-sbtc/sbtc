@@ -34,6 +34,7 @@ clarity.workspace = true
 config.workspace = true
 emily-client.workspace = true
 futures.workspace = true
+hashbrown.workspace = true
 hex.workspace = true
 include_dir.workspace = true
 libp2p.workspace = true
