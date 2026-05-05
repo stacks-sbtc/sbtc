@@ -325,6 +325,7 @@ pub mod test {
             DkgError, Error as StateMachineError, OperationResult, PublicKeys, SignError,
             StateMachine,
         },
+        traits::Signer as SignerTrait,
         util::create_rng,
     };
 

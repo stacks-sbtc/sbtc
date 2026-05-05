@@ -1371,6 +1371,7 @@ pub mod test {
             signer::Signer,
             DkgError, OperationResult, SignError,
         },
+        traits::Signer as _,
         util::create_rng,
     };
     use std::collections::HashMap;
