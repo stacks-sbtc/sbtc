@@ -1,7 +1,12 @@
-use core::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use core::{
+    fmt::{Debug, Display, Formatter, Result as FmtResult},
+    ops::{Add, Mul},
+};
+use hashbrown::HashMap;
+use num_traits::{One, Zero};
 use rand_core::{CryptoRng, RngCore};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 
 use crate::{
     compute::challenge,
@@ -17,8 +22,8 @@ use crate::{
 /// A merkle root is a 256 bit hash
 pub type MerkleRoot = [u8; 32];
 
-#[derive(Clone, Debug, PartialEq)]
-/// A commitment to a polynomial, with a Schnorr proof of ownership bound to the ID
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+/// A commitment to a polynonial, with a Schnorr proof of ownership bound to the ID
 pub struct PolyCommitment {
     /// The party ID with a schnorr proof
     pub id: ID,
@@ -43,50 +48,18 @@ impl Display for PolyCommitment {
     }
 }
 
-/// A private nonce value that is paired up with a NonceE value and is used
-/// for constructing a signature share.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NonceD(pub Scalar);
-
-/// A private nonce value that is paired up with a NonceD value and is used
-/// for constructing a signature share.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct NonceE(pub Scalar);
-
-/// A composite private nonce pair used as a random commitment in the
-/// signing protocol.
-///
-/// This struct maintains the invariant that the nonce values can only be
-/// returned once and that the values themselves are neither all-zero nor
-/// all-one.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+/// A composite private nonce used as a random commitment in the protocol
 pub struct Nonce {
     /// The first committed value
-    d: Scalar,
+    pub d: Scalar,
     /// The second committed value
-    e: Scalar,
+    pub e: Scalar,
 }
 
 impl Nonce {
-    /// Construct a new randomly generated nonce that is valid.
-    ///
-    /// # Notes
-    ///
-    /// If the random number generator always produces the same "special"
-    /// but unknown values, then it is possible that this function will
-    /// loop forever.
-    pub fn new<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
-        let mut nonce = Self::random(rng);
-
-        while !nonce.is_valid() {
-            nonce = Self::random(rng);
-        }
-
-        nonce
-    }
-
-    /// Construct a random nonce.
-    fn random<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
+    /// Construct a random nonce
+    pub fn random<RNG: RngCore + CryptoRng>(rng: &mut RNG) -> Self {
         Self {
             d: Self::gen(rng),
             e: Self::gen(rng),
@@ -109,22 +82,66 @@ impl Nonce {
         hash_to_scalar(&mut hasher)
     }
 
-    /// Returns (NonceD, NonceE) and consumes self so that the scalars can
-    /// only be extracted once.
-    pub fn values(self) -> (NonceD, NonceE) {
-        (NonceD(self.d), NonceE(self.e))
-    }
-
-    /// Check that the nonce is not all-zero or all-one, as these values
-    /// can lead to attacks.
+    /// Check that the nonces are not zero since that can lead to attacks
     pub fn is_valid(&self) -> bool {
-        let zero = Scalar::from(0);
-        let one = Scalar::from(1);
-        !(self.d == zero && self.e == zero || self.d == one && self.e == one)
+        !self.is_zero() && !self.is_one()
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+impl Zero for Nonce {
+    fn zero() -> Self {
+        Self {
+            d: Scalar::zero(),
+            e: Scalar::zero(),
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        self.d == Scalar::zero() && self.e == Scalar::zero()
+    }
+}
+
+impl One for Nonce {
+    fn one() -> Self {
+        Self {
+            d: Scalar::one(),
+            e: Scalar::one(),
+        }
+    }
+
+    fn set_one(&mut self) {
+        self.d = Scalar::one();
+        self.e = Scalar::one();
+    }
+
+    fn is_one(&self) -> bool {
+        self.d == Scalar::one() && self.e == Scalar::one()
+    }
+}
+
+impl Add for Nonce {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            d: self.d + other.d,
+            e: self.e + other.e,
+        }
+    }
+}
+
+impl Mul for Nonce {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        Self {
+            d: self.d * other.d,
+            e: self.e * other.e,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[allow(non_snake_case)]
 /// A commitment to the private nonce
 pub struct PublicNonce {
@@ -159,7 +176,28 @@ impl From<&Nonce> for PublicNonce {
     }
 }
 
-#[derive(Clone, PartialEq)]
+impl Add for PublicNonce {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            D: self.D + other.E,
+            E: self.E + other.E,
+        }
+    }
+}
+
+impl Zero for PublicNonce {
+    fn zero() -> Self {
+        Self::from(Nonce::zero())
+    }
+
+    fn is_zero(&self) -> bool {
+        self.D == Point::identity() && self.E == Point::identity()
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
 /// A share of the party signature with related values
 pub struct SignatureShare {
     /// The ID of the party
@@ -182,7 +220,7 @@ impl Debug for SignatureShare {
 
 #[allow(non_snake_case)]
 /// An aggregated group signature
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Signature {
     /// The sum of the public nonces with commitments to the signed message
     pub R: Point,
@@ -203,7 +241,7 @@ impl Signature {
 
 #[allow(non_snake_case)]
 /// A Chaum-Pedersen proof that (G, A=a*G, B=b*G, K=(a*b)*G) is a DH tuple
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct TupleProof {
     /// R = r*G for a random scalar r
     pub R: Point,
@@ -293,14 +331,14 @@ impl CheckPrivateShares {
         polys: HashMap<u32, PolyCommitment>,
     ) -> Self {
         let mut l: usize = 0;
-        if let Some((_id, comm)) = polys.iter().next() {
+        if let Some((_id, comm)) = (&polys).into_iter().next() {
             l = comm.poly.len();
         }
         let n: u32 = shares.len().try_into().unwrap();
         let t: u32 = l.try_into().unwrap();
         let x = id;
         let mut powers = Vec::with_capacity(l);
-        let mut pow = Scalar::from(1);
+        let mut pow = Scalar::one();
 
         for _ in 0..t {
             powers.push(pow);
@@ -431,7 +469,7 @@ pub mod test {
             .collect::<Vec<Scalar>>();
 
         let mut rng = ChaCha8Rng::seed_from_u64(2);
-        let nonce = Nonce::new(&mut rng);
+        let nonce = Nonce::random(&mut rng);
 
         for scalar in test_scalars {
             assert_ne!(scalar, nonce.d);

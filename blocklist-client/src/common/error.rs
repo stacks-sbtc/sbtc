@@ -1,9 +1,8 @@
 //! Top-level error type for the Blocklist client
 
-use reqwest::StatusCode as ReqwestStatusCode;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use warp::http::StatusCode;
 use warp::{reject::Reject, reply::Reply};
 
 /// Errors occurring from Blocklist client's API calls to risk client and request handling
@@ -12,7 +11,7 @@ pub enum Error {
     /// The request was unacceptable. This may refer to a missing or improperly formatted parameter
     /// or request body property, or non-valid JSON
     #[error("HTTP request failed with status code {0}: {1}")]
-    HttpRequest(ReqwestStatusCode, String),
+    HttpRequest(StatusCode, String),
 
     /// Network error
     #[error("Network error: {0}")]
@@ -63,9 +62,7 @@ impl Error {
     /// Provides the status code that corresponds to the error.
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Error::HttpRequest(code, _) => {
-                StatusCode::from_u16(code.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
-            }
+            Error::HttpRequest(code, _) => *code,
             Error::Network(_) => StatusCode::BAD_GATEWAY,
             Error::Serialization(_) => StatusCode::BAD_REQUEST,
             Error::InvalidApiResponse => StatusCode::BAD_REQUEST,

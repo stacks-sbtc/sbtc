@@ -21,7 +21,7 @@ install-py:
 	uv --directory emily_sidecar venv && uv --directory emily_sidecar pip sync pyproject.toml
 
 install-pnpm:
-	pnpm install --frozen-lockfile
+	pnpm --recursive install
 
 install: install-py install-pnpm
 
@@ -157,13 +157,13 @@ devenv-down:
 	docker compose -f docker/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer down -t 0 -v
 
 devenv-sbtc-up:
-	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin up --build -d
+	docker compose -f docker/docker-compose.yml --profile sbtc-signer up --build -d
 
 devenv-sbtc-down:
-	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin down
+	docker compose -f docker/docker-compose.yml --profile sbtc-signer down
 
 devenv-sbtc-build:
-	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin build
+	docker compose -f docker/docker-compose.yml --profile sbtc-signer build
 
 .PHONY: devenv-no-sbtc-up devenv-no-sbtc-down devenv-up devenv-down devenv-sbtc-up devenv-sbtc-down devenv-sbtc-build
 

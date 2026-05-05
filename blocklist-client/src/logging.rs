@@ -1,6 +1,5 @@
 //! This module sets up logging for the application using `tracing_subscriber`
 //! It provides functions to initialize logging in either JSON format or pretty format
-use std::io::IsTerminal as _;
 
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::time::UtcTime;
@@ -20,7 +19,7 @@ pub fn setup_logging(pretty: bool) {
 }
 
 fn setup_logging_json() {
-    let dirs = "info,blocklist_client=debug";
+    let dirs = "info,blocklist-client=debug";
 
     let main_layer = tracing_subscriber::fmt::layer()
         .json()
@@ -39,11 +38,10 @@ fn setup_logging_json() {
 }
 
 fn setup_logging_pretty() {
-    let dirs = "info,blocklist_client=debug";
+    let dirs = "info,signer=debug";
 
     let main_layer = tracing_subscriber::fmt::layer()
         .pretty()
-        .with_ansi(std::io::stdout().is_terminal())
         .with_timer(UtcTime::rfc_3339());
 
     tracing_subscriber::registry()

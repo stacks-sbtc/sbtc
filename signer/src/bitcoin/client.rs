@@ -15,21 +15,19 @@
 //!   JsonRpc(Rpc(RpcError { code: -5, message: "Block not found", data: None }))
 
 use bitcoin::BlockHash;
-use bitcoin::OutPoint;
 use bitcoin::Txid;
 use bitcoincore_rpc_json::GetTxOutResult;
 
 use crate::{error::Error, util::ApiFallbackClient};
 
 use super::BitcoinInteract;
+use super::TransactionLookupHint;
 use super::rpc::BitcoinBlockHeader;
 use super::rpc::BitcoinBlockInfo;
 use super::rpc::BitcoinCoreClient;
 use super::rpc::BitcoinCoreClientParams;
 use super::rpc::BitcoinTxInfo;
-#[cfg(any(test, feature = "testing"))]
 use super::rpc::GetTxResponse;
-use super::rpc::OutPointSummary;
 
 /// Implement the [`TryFrom`] trait for a Vec of [`BitcoinCoreClientParams`]s to allow for a
 /// [`ApiFallbackClient`] to be implicitly created from a vec of URLs.
@@ -62,14 +60,8 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
             .await
     }
 
-    #[cfg(any(test, feature = "testing"))]
     async fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         self.exec(|client, _| BitcoinInteract::get_tx(client, txid))
-            .await
-    }
-
-    async fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
-        self.exec(|client, _| BitcoinInteract::get_utxo_info(client, outpoint))
             .await
     }
 
@@ -82,8 +74,9 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
             .await
     }
 
-    async fn estimate_fee_rate(&self, num_blocks: u16) -> Result<f64, Error> {
-        self.exec(|client, _| BitcoinInteract::estimate_fee_rate(client, num_blocks))
+    async fn estimate_fee_rate(&self) -> Result<f64, Error> {
+        // TODO(542)
+        self.exec(|client, _| BitcoinInteract::estimate_fee_rate(client))
             .await
     }
 
@@ -117,8 +110,9 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
     async fn get_transaction_fee(
         &self,
         txid: &bitcoin::Txid,
+        lookup_hint: Option<TransactionLookupHint>,
     ) -> Result<super::GetTransactionFeeResult, Error> {
-        self.exec(|client, _| client.get_transaction_fee(txid))
+        self.exec(|client, _| client.get_transaction_fee(txid, lookup_hint))
             .await
     }
 

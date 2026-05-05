@@ -208,14 +208,14 @@ impl std::fmt::Display for StacksSignRequestId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StacksSignRequestId::CompleteDeposit(outpoint) => {
-                write!(f, "CompleteDeposit({outpoint})")
+                write!(f, "CompleteDeposit({outpoint}")
             }
             StacksSignRequestId::CompleteWithdrawal(request_id) => {
-                write!(f, "CompleteWithdrawal({request_id})")
+                write!(f, "CompleteWithdrawal({request_id}")
             }
-            StacksSignRequestId::RotateKeys(public_key) => write!(f, "RotateKeys({public_key})"),
+            StacksSignRequestId::RotateKeys(public_key) => write!(f, "RotateKeys({public_key}"),
             StacksSignRequestId::SmartContract(smart_contract) => {
-                write!(f, "SmartContract({smart_contract})")
+                write!(f, "SmartContract({smart_contract}")
             }
         }
     }
@@ -295,22 +295,8 @@ where
                 SignerSignal::Event(event) => match event {
                     SignerEvent::TxCoordinator(TxCoordinatorEvent::MessageGenerated(msg))
                     | SignerEvent::P2P(P2PEvent::MessageReceived(msg)) => {
-                        match self.handle_signer_message(&msg).await {
-                            Ok(()) => {}
-                            // These errors can occur when we receive a duplicate message that has
-                            // already been processed, resulting in a harmless rejection. It's nice
-                            // to know when it happens, but it isn't a problem that requires action,
-                            // unlike some of our other errors.
-                            Err(
-                                error @ (Error::InvalidPresignRequest(_)
-                                | Error::StacksRequestAlreadySigned(..)
-                                | Error::MissingStateMachine(_)),
-                            ) => {
-                                tracing::warn!(%error, "minor error processing signer message");
-                            }
-                            Err(error) => {
-                                tracing::error!(%error, "error processing signer message");
-                            }
+                        if let Err(error) = self.handle_signer_message(&msg).await {
+                            tracing::error!(%error, "error processing signer message");
                         }
                     }
                     _ => {}
@@ -395,11 +381,19 @@ where
         msg_sender: PublicKey,
         msg_bitcoin_chain_tip: &model::BitcoinBlockHash,
     ) -> Result<MsgChainTipReport, Error> {
+        let storage = self.context.get_storage();
+
         let chain_tip = self
             .context
             .state()
             .bitcoin_chain_tip()
             .ok_or(Error::NoChainTip)?;
+
+        let is_known = storage
+            .get_bitcoin_block(msg_bitcoin_chain_tip)
+            .await?
+            .is_some();
+        let is_canonical = msg_bitcoin_chain_tip == &chain_tip.block_hash;
 
         let signer_set = self.context.coordinator_signer_set();
         let sender_is_coordinator = crate::transaction_coordinator::given_key_is_coordinator(
@@ -408,10 +402,10 @@ where
             &signer_set,
         );
 
-        let chain_tip_status = if msg_bitcoin_chain_tip == &chain_tip.block_hash {
-            ChainTipStatus::Canonical
-        } else {
-            ChainTipStatus::NonCanonical
+        let chain_tip_status = match (is_known, is_canonical) {
+            (true, true) => ChainTipStatus::Canonical,
+            (true, false) => ChainTipStatus::Known,
+            (false, _) => ChainTipStatus::Unknown,
         };
 
         Ok(MsgChainTipReport {
@@ -1615,14 +1609,16 @@ impl MsgChainTipReport {
     }
 }
 
-/// The status of a peer's chain tip relative to our canonical chain tip.
+/// The status of a chain tip relative to the known blocks in the signer database.
 #[derive(Debug, Clone, Copy, PartialEq, strum::Display)]
 #[strum(serialize_all = "SCREAMING_SNAKE_CASE")]
 pub enum ChainTipStatus {
     /// The chain tip is the tip of the canonical fork.
     Canonical,
-    /// The chain tip of the sender does not match our canonical chain tip.
-    NonCanonical,
+    /// The chain tip is for a known block, but is not the canonical chain tip.
+    Known,
+    /// The chain tip belongs to a block that hasn't been seen yet.
+    Unknown,
 }
 
 #[cfg(test)]
@@ -1916,7 +1912,7 @@ mod tests {
         // non canonical chain tip
         let chain_tip_report = MsgChainTipReport {
             sender_is_coordinator: true,
-            chain_tip_status: ChainTipStatus::NonCanonical,
+            chain_tip_status: ChainTipStatus::Known,
             chain_tip: Faker.fake(),
         };
 
@@ -2003,7 +1999,7 @@ mod tests {
         // non canonical chain tip
         let chain_tip_report = MsgChainTipReport {
             sender_is_coordinator: true,
-            chain_tip_status: ChainTipStatus::NonCanonical,
+            chain_tip_status: ChainTipStatus::Known,
             chain_tip: Faker.fake(),
         };
 

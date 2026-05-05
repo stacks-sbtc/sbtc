@@ -1,10 +1,11 @@
 use aes_gcm::Error as AesGcmError;
 use core::num::TryFromIntError;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::curve::{point::Error as PointError, scalar::Scalar};
 
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Errors which can happen during distributed key generation
 pub enum DkgError {
     #[error("missing public shares from {0:?}")]
@@ -39,7 +40,7 @@ impl From<TryFromIntError> for DkgError {
     }
 }
 
-#[derive(Error, Debug, Clone, PartialEq)]
+#[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
 /// Errors which can happen during signature aggregation
 pub enum AggregatorError {
     #[error("bad poly commitments {0:?}")]
@@ -60,11 +61,6 @@ pub enum AggregatorError {
     #[error("integer conversion error")]
     /// An error during integer conversion operations
     TryFromInt,
-    #[error("nonce has not been set yet")]
-    /// The nonce in v2::Party has not been set with a call to gen_nonce.
-    /// This means that the signer state machine has yet to receive a nonce
-    /// request before being asked to sign a message.
-    MissingNonce,
 }
 
 impl From<TryFromIntError> for AggregatorError {
