@@ -477,13 +477,14 @@ export class EmilyStack extends cdk.Stack {
                 IS_MAINNET: props.stageName == Constants.PROD_STAGE_NAME || props.stageName == Constants.PRIVATE_MAINNET_STAGE_NAME ? "true" : "false",
                 VERSION: EmilyStackUtils.getLambdaGitIdentifier(),
                 DEPLOYER_ADDRESS: props.deployerAddress,
-                // Tell `lambda_http` not to prepend the API Gateway REST stage
-                // to the request URI, so axum sees `/health` instead of e.g.
-                // `/Prod/health` and our routes match without any nesting or
-                // prefix-stripping middleware. This is the canonical fix for
-                // axum-on-Lambda behind an API Gateway REST API; see
-                // https://docs.rs/lambda_http,
-                // https://github.com/awslabs/aws-lambda-rust-runtime/issues/782,
+                // This environment variable tells `lambda_http` to ignore
+                // the API Gateway REST stage in the request URI. This way
+                // axum sees `/health` instead of `/Prod/health`, and our
+                // routes match without any nesting or prefix-stripping
+                // middleware. This is the canonical fix for axum-on-Lambda
+                // behind an API Gateway REST API; see
+                // https://github.com/aws/aws-lambda-rust-runtime/blob/e397be4ab03645fec8474ee8a26461ff035dd051/lambda-http/README.md#integration-with-api-gateway-stages,
+                // https://github.com/aws/aws-lambda-rust-runtime/issues/782,
                 // https://github.com/aws/aws-lambda-rust-runtime/pull/784.
                 AWS_LAMBDA_HTTP_IGNORE_STAGE_IN_PATH: "true",
             },
