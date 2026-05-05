@@ -1,7 +1,7 @@
 use num_traits::{One, Zero};
 use polynomial::Polynomial;
 use rand_core::{CryptoRng, RngCore};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
 use crate::{
@@ -185,10 +185,18 @@ impl Party {
         compute::id(self.party_id)
     }
 
-    /// Sign `msg` with this party's shares of the group private key, using
-    /// the set of `party_ids`, `key_ids` and corresponding `nonces` with a
-    /// tweaked public key. The posible values for tweak are:
-    ///
+    /// Sign `msg` with this party's shares of the group private key, using the set of `party_ids`, `key_ids` and corresponding `nonces`
+    pub fn sign(
+        &self,
+        msg: &[u8],
+        party_ids: &[u32],
+        key_ids: &[u32],
+        nonces: &[PublicNonce],
+    ) -> SignatureShare {
+        self.sign_with_tweak(msg, party_ids, key_ids, nonces, None)
+    }
+
+    /// Sign `msg` with this party's shares of the group private key, using the set of `party_ids`, `key_ids` and corresponding `nonces` with a tweaked public key. The posible values for tweak are
     /// None    - standard FROST signature
     /// Some(0) - BIP-340 schnorr signature using 32-byte private key adjustments
     /// Some(t) - BIP-340 schnorr signature with BIP-341 tweaked keys, using 32-byte private key adjustments
@@ -470,9 +478,19 @@ impl Aggregator {
     }
 }
 
-impl Party {
-    /// Load a Party from a SignerState
-    pub fn load(state: &traits::SignerState) -> Self {
+impl traits::Signer for Party {
+    fn new<RNG: RngCore + CryptoRng>(
+        party_id: u32,
+        key_ids: &[u32],
+        num_signers: u32,
+        num_keys: u32,
+        threshold: u32,
+        rng: &mut RNG,
+    ) -> Self {
+        Party::new(party_id, key_ids, num_signers, num_keys, threshold, rng)
+    }
+
+    fn load(state: &traits::SignerState) -> Self {
         // v2 signer contains single party
         assert_eq!(state.parties.len(), 1);
 
@@ -495,8 +513,7 @@ impl Party {
         }
     }
 
-    /// Save the Party as a SignerState
-    pub fn save(&self) -> traits::SignerState {
+    fn save(&self) -> traits::SignerState {
         let party_state = traits::PartyState {
             polynomial: self.f.clone(),
             private_keys: self.private_keys.iter().map(|(k, v)| (*k, *v)).collect(),
@@ -513,34 +530,35 @@ impl Party {
         }
     }
 
-    /// Get the identifying number for this party of the signing set.
-    pub fn get_id(&self) -> u32 {
+    fn get_id(&self) -> u32 {
         self.party_id
     }
 
-    /// Get the IDs of the keys associated with this party member.
-    pub fn get_key_ids(&self) -> Vec<u32> {
+    fn get_key_ids(&self) -> Vec<u32> {
         self.key_ids.clone()
     }
 
-    /// Get the total number of parties in the signing set.
-    pub fn get_num_parties(&self) -> u32 {
+    fn get_num_parties(&self) -> u32 {
         self.num_parties
     }
 
-    /// Generate a new polynomial using the given random number generator.
-    pub fn reset_polys<RNG: RngCore + CryptoRng>(&mut self, rng: &mut RNG) {
+    fn get_poly_commitments<RNG: RngCore + CryptoRng>(&self, rng: &mut RNG) -> Vec<PolyCommitment> {
+        if let Some(poly) = self.get_poly_commitment(rng) {
+            vec![poly.clone()]
+        } else {
+            vec![]
+        }
+    }
+
+    fn reset_polys<RNG: RngCore + CryptoRng>(&mut self, rng: &mut RNG) {
         self.f = Some(VSS::random_poly(self.threshold - 1, rng));
     }
 
-    /// Clear the polynomial for this party.
-    pub fn clear_polys(&mut self) {
+    fn clear_polys(&mut self) {
         self.f = None;
     }
 
-    /// Get the shares for this party.
-    #[cfg(test)]
-    pub fn get_shares_wrapped(&self) -> HashMap<u32, HashMap<u32, Scalar>> {
+    fn get_shares(&self) -> HashMap<u32, HashMap<u32, Scalar>> {
         let mut shares = HashMap::new();
 
         shares.insert(self.party_id, self.get_shares());
@@ -548,9 +566,7 @@ impl Party {
         shares
     }
 
-    /// Compute this party's share of the group secret key, but first check
-    /// that the data is valid.
-    pub fn compute_secrets(
+    fn compute_secrets(
         &mut self,
         private_shares: &HashMap<u32, HashMap<u32, Scalar>>,
         polys: &HashMap<u32, PolyCommitment>,
@@ -577,28 +593,57 @@ impl Party {
         }
     }
 
-    /// Sign a message using the Schnorr signature scheme.
-    pub fn sign_schnorr(
+    fn gen_nonces<RNG: RngCore + CryptoRng>(&mut self, rng: &mut RNG) -> Vec<PublicNonce> {
+        vec![self.gen_nonce(rng)]
+    }
+
+    fn compute_intermediate(
+        msg: &[u8],
+        signer_ids: &[u32],
+        _key_ids: &[u32],
+        nonces: &[PublicNonce],
+    ) -> (Vec<Point>, Point) {
+        compute::intermediate(msg, signer_ids, nonces)
+    }
+
+    fn validate_party_id(
+        signer_id: u32,
+        party_id: u32,
+        _signer_key_ids: &HashMap<u32, HashSet<u32>>,
+    ) -> bool {
+        signer_id == party_id
+    }
+
+    fn sign(
         &self,
         msg: &[u8],
         signer_ids: &[u32],
         key_ids: &[u32],
         nonces: &[PublicNonce],
-    ) -> SignatureShare {
-        self.sign_with_tweak(msg, signer_ids, key_ids, nonces, Some(Scalar::from(0)))
+    ) -> Vec<SignatureShare> {
+        vec![self.sign(msg, signer_ids, key_ids, nonces)]
     }
 
-    /// Sign a message using the Taproot signature scheme.
-    pub fn sign_taproot(
+    fn sign_schnorr(
+        &self,
+        msg: &[u8],
+        signer_ids: &[u32],
+        key_ids: &[u32],
+        nonces: &[PublicNonce],
+    ) -> Vec<SignatureShare> {
+        vec![self.sign_with_tweak(msg, signer_ids, key_ids, nonces, Some(Scalar::from(0)))]
+    }
+
+    fn sign_taproot(
         &self,
         msg: &[u8],
         signer_ids: &[u32],
         key_ids: &[u32],
         nonces: &[PublicNonce],
         merkle_root: Option<[u8; 32]>,
-    ) -> SignatureShare {
+    ) -> Vec<SignatureShare> {
         let tweak = compute::tweak(&self.group_key, merkle_root);
-        self.sign_with_tweak(msg, signer_ids, key_ids, nonces, Some(tweak))
+        vec![self.sign_with_tweak(msg, signer_ids, key_ids, nonces, Some(tweak))]
     }
 }
 
@@ -606,6 +651,7 @@ impl Party {
 pub mod test_helpers {
     use crate::common::{PolyCommitment, PublicNonce};
     use crate::errors::DkgError;
+    use crate::traits::Signer;
     use crate::v2;
     use crate::v2::SignatureShare;
 
@@ -670,7 +716,7 @@ pub mod test_helpers {
         let nonces: Vec<PublicNonce> = signers.iter_mut().map(|s| s.gen_nonce(rng)).collect();
         let shares = signers
             .iter()
-            .map(|s| s.sign_with_tweak(msg, &party_ids, &key_ids, &nonces, None))
+            .map(|s| s.sign(msg, &party_ids, &key_ids, &nonces))
             .collect();
 
         (nonces, shares, key_ids)
@@ -679,9 +725,11 @@ pub mod test_helpers {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
+
     use crate::util::create_rng;
     use crate::{
-        traits::{self, test_helpers::run_compute_secrets_missing_private_shares},
+        traits::{self, test_helpers::run_compute_secrets_missing_private_shares, Signer},
         v2,
     };
 
@@ -709,12 +757,12 @@ mod tests {
 
         let mut signer = v2::Party::new(0, &key_ids, 1, n, t, &mut rng);
 
-        assert!(signer.get_poly_commitment(&mut rng).is_some());
+        assert_eq!(signer.get_poly_commitments(&mut rng).len(), 1);
         assert_eq!(signer.get_shares().len(), usize::try_from(n).unwrap());
 
         signer.clear_polys();
 
-        assert!(signer.get_poly_commitment(&mut rng).is_none());
+        assert_eq!(signer.get_poly_commitments(&mut rng).len(), 0);
         assert_eq!(signer.get_shares().len(), 0);
     }
 
@@ -764,7 +812,7 @@ mod tests {
     #[test]
     /// Run a distributed key generation round with not enough shares
     pub fn run_compute_secrets_missing_shares() {
-        run_compute_secrets_missing_private_shares()
+        run_compute_secrets_missing_private_shares::<v2::Party>()
     }
 
     #[test]
@@ -772,13 +820,26 @@ mod tests {
     pub fn bad_polynomial_length() {
         let gt = |t| t + 1;
         let lt = |t| t - 1;
-        traits::test_helpers::bad_polynomial_length(gt);
-        traits::test_helpers::bad_polynomial_length(lt);
+        traits::test_helpers::bad_polynomial_length::<v2::Party, _>(gt);
+        traits::test_helpers::bad_polynomial_length::<v2::Party, _>(lt);
     }
 
     #[test]
     /// Run DKG and aggregator init with a bad polynomial commitment
     pub fn bad_polynomial_commitment() {
-        traits::test_helpers::bad_polynomial_commitment();
+        traits::test_helpers::bad_polynomial_commitment::<v2::Party>();
+    }
+
+    #[test]
+    /// Check that party_ids can be properly validated
+    fn validate_party_id() {
+        let mut signer_key_ids = HashMap::new();
+        let mut key_ids = HashSet::new();
+
+        key_ids.insert(1);
+        signer_key_ids.insert(0, key_ids);
+
+        assert!(v2::Party::validate_party_id(0, 0, &signer_key_ids));
+        assert!(!v2::Party::validate_party_id(0, 1, &signer_key_ids));
     }
 }
