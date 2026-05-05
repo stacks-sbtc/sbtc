@@ -17,7 +17,7 @@ use crate::{
     errors::{DkgError, EncryptionError},
     net::{
         BadPrivateShare, DkgBegin, DkgEnd, DkgEndBegin, DkgFailure, DkgPrivateBegin,
-        DkgPrivateShares, DkgPublicShares, DkgStatus, Message, NonceRequest, NonceResponse,
+        DkgPrivateShares, DkgPublicShares, DkgStatus, Message, NonceRequest, NonceResponse, Packet,
         SignatureShareRequest, SignatureShareResponse, SignatureType,
     },
     state_machine::{PublicKeys, StateMachine},
@@ -348,15 +348,19 @@ impl Signer {
         self.state = State::Idle;
     }
 
-    /// Process the slice of messages
+    /// Process the slice of packets
     pub fn process_inbound_messages<R: RngCore + CryptoRng>(
         &mut self,
-        messages: &[Message],
+        messages: &[Packet],
         rng: &mut R,
-    ) -> Result<Vec<Message>, Error> {
-        let mut responses = Vec::new();
+    ) -> Result<Vec<Packet>, Error> {
+        let mut responses = vec![];
         for message in messages {
-            responses.append(&mut self.process(message, rng)?);
+            let outbounds = self.process(&message.msg, rng)?;
+            for out in outbounds {
+                let msg = Packet { msg: out };
+                responses.push(msg);
+            }
         }
         Ok(responses)
     }

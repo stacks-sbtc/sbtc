@@ -2,7 +2,7 @@ use crate::{
     common::{PolyCommitment, Signature, SignatureShare},
     curve::{point::Point, scalar::Scalar},
     errors::AggregatorError,
-    net::{DkgEnd, DkgPrivateShares, DkgPublicShares, Message, NonceResponse, SignatureType},
+    net::{DkgEnd, DkgPrivateShares, DkgPublicShares, NonceResponse, Packet, SignatureType},
     state_machine::{DkgFailure, OperationResult, StateMachine},
     taproot::SchnorrProof,
 };
@@ -271,8 +271,8 @@ pub trait Coordinator: Clone + Debug + PartialEq + StateMachine<State, Error> {
     /// Process inbound messages
     fn process_inbound_messages(
         &mut self,
-        messages: &[Message],
-    ) -> Result<(Vec<Message>, Vec<OperationResult>), Error>;
+        packets: &[Packet],
+    ) -> Result<(Vec<Packet>, Vec<OperationResult>), Error>;
 
     /// Retrieve the aggregate public key
     fn get_aggregate_public_key(&self) -> Option<Point>;
@@ -287,14 +287,14 @@ pub trait Coordinator: Clone + Debug + PartialEq + StateMachine<State, Error> {
     fn get_state(&self) -> State;
 
     /// Trigger a DKG round
-    fn start_dkg_round(&mut self) -> Result<Message, Error>;
+    fn start_dkg_round(&mut self) -> Result<Packet, Error>;
 
     /// Trigger a signing round
     fn start_signing_round(
         &mut self,
         message: &[u8],
         signature_type: SignatureType,
-    ) -> Result<Message, Error>;
+    ) -> Result<Packet, Error>;
 
     /// Reset internal state
     fn reset(&mut self);
@@ -318,7 +318,7 @@ pub mod test {
         compute,
         curve::{ecdsa, point::Point, point::G, scalar::Scalar},
         errors::AggregatorError,
-        net::{DkgFailure, Message, SignatureShareResponse, SignatureType},
+        net::{DkgFailure, Message, Packet, SignatureShareResponse, SignatureType},
         state_machine::{
             coordinator::{Config, Coordinator as CoordinatorTrait, Error, State},
             signer::{Error as SignerError, Signer},
@@ -425,7 +425,7 @@ pub mod test {
         let result = coordinator.start_dkg_round();
 
         assert!(result.is_ok());
-        if let Message::DkgBegin(dkg_begin) = result.unwrap() {
+        if let Message::DkgBegin(dkg_begin) = result.unwrap().msg {
             assert_eq!(dkg_begin.dkg_id, 1);
         } else {
             panic!("Bad dkg_id");
@@ -546,8 +546,8 @@ pub mod test {
     pub fn feedback_messages<Coordinator: CoordinatorTrait>(
         coordinators: &mut [Coordinator],
         signers: &mut [Signer],
-        messages: &[Message],
-    ) -> (Vec<Message>, Vec<OperationResult>) {
+        messages: &[Packet],
+    ) -> (Vec<Packet>, Vec<OperationResult>) {
         feedback_mutated_messages(coordinators, signers, messages, |_signer, msgs| msgs)
     }
 
@@ -555,11 +555,11 @@ pub mod test {
     pub fn feedback_mutated_messages<C, F>(
         coordinators: &mut [C],
         signers: &mut [Signer],
-        messages: &[Message],
+        messages: &[Packet],
         signer_mutator: F,
-    ) -> (Vec<Message>, Vec<OperationResult>)
+    ) -> (Vec<Packet>, Vec<OperationResult>)
     where
-        F: Fn(&Signer, Vec<Message>) -> Vec<Message>,
+        F: Fn(&Signer, Vec<Packet>) -> Vec<Packet>,
         C: CoordinatorTrait,
     {
         feedback_mutated_messages_with_errors(coordinators, signers, messages, signer_mutator)
@@ -570,8 +570,8 @@ pub mod test {
     pub fn feedback_messages_with_errors<Coordinator: CoordinatorTrait>(
         coordinators: &mut [Coordinator],
         signers: &mut [Signer],
-        messages: &[Message],
-    ) -> Result<(Vec<Message>, Vec<OperationResult>), StateMachineError> {
+        messages: &[Packet],
+    ) -> Result<(Vec<Packet>, Vec<OperationResult>), StateMachineError> {
         feedback_mutated_messages_with_errors(coordinators, signers, messages, |_signer, msgs| msgs)
     }
 
@@ -579,11 +579,11 @@ pub mod test {
     pub fn feedback_mutated_messages_with_errors<C, F>(
         coordinators: &mut [C],
         signers: &mut [Signer],
-        messages: &[Message],
+        messages: &[Packet],
         signer_mutator: F,
-    ) -> Result<(Vec<Message>, Vec<OperationResult>), StateMachineError>
+    ) -> Result<(Vec<Packet>, Vec<OperationResult>), StateMachineError>
     where
-        F: Fn(&Signer, Vec<Message>) -> Vec<Message>,
+        F: Fn(&Signer, Vec<Packet>) -> Vec<Packet>,
         C: CoordinatorTrait,
     {
         let mut inbound_messages = vec![];
@@ -645,7 +645,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::DkgPrivateBegin(_) => {}
             _ => {
                 panic!("Expected DkgPrivateBegin message");
@@ -676,7 +676,7 @@ pub mod test {
             feedback_messages(&mut coordinators, &mut signers, &outbound_messages);
         assert_eq!(operation_results.len(), 0);
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::DkgEndBegin(_) => {}
             _ => {
                 panic!("Expected DkgEndBegin message");
@@ -772,7 +772,7 @@ pub mod test {
         );
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::SignatureShareRequest(_) => {}
             _ => {
                 panic!("Expected SignatureShareRequest message");
@@ -907,7 +907,7 @@ pub mod test {
         );
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::SignatureShareRequest(_) => {}
             _ => {
                 panic!("Expected SignatureShareRequest message");
@@ -919,12 +919,12 @@ pub mod test {
             &mut coordinators,
             &mut signers,
             &outbound_messages,
-            |signer, messages| {
+            |signer, packets| {
                 if signer.signer_id == 0 {
-                    messages
+                    packets
                         .iter()
-                        .map(|message| {
-                            if let Message::SignatureShareResponse(response) = message {
+                        .map(|packet| {
+                            if let Message::SignatureShareResponse(response) = &packet.msg {
                                 // mutate one of the shares
                                 let sshares: Vec<SignatureShare> = response
                                     .signature_shares
@@ -935,20 +935,22 @@ pub mod test {
                                         z_i: share.z_i + Scalar::from(1),
                                     })
                                     .collect();
-                                Message::SignatureShareResponse(SignatureShareResponse {
-                                    dkg_id: response.dkg_id,
-                                    sign_id: response.sign_id,
-                                    sign_iter_id: response.sign_iter_id,
-                                    signer_id: response.signer_id,
-                                    signature_shares: sshares,
-                                })
+                                Packet {
+                                    msg: Message::SignatureShareResponse(SignatureShareResponse {
+                                        dkg_id: response.dkg_id,
+                                        sign_id: response.sign_id,
+                                        sign_iter_id: response.sign_iter_id,
+                                        signer_id: response.signer_id,
+                                        signature_shares: sshares,
+                                    }),
+                                }
                             } else {
-                                message.clone()
+                                packet.clone()
                             }
                         })
                         .collect()
                 } else {
-                    messages.clone()
+                    packets.clone()
                 }
             },
         );
@@ -1040,7 +1042,7 @@ pub mod test {
         // Once the coordinator has received sufficient NonceResponses,
         // it should send out a SignatureShareRequest
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::SignatureShareRequest(_) => {}
             _ => {
                 panic!("Expected SignatureShareRequest message");
@@ -1054,13 +1056,15 @@ pub mod test {
         // need to modify the message a little.
         signers.iter_mut().skip(threshold).for_each(|signer| {
             let mut outbound_messages = outbound_messages.clone();
-            if let Message::SignatureShareRequest(ref mut request) = outbound_messages[0] {
+            if let Message::SignatureShareRequest(ref mut request) = outbound_messages[0].msg {
                 request.nonce_responses[0].signer_id = signer.signer_id;
             } else {
                 panic!("failed to match message");
             }
 
-            let response = signer.process(&outbound_messages[0], &mut rng).unwrap_err();
+            let response = signer
+                .process(&outbound_messages[0].msg, &mut rng)
+                .unwrap_err();
 
             assert!(matches!(
                 response,
@@ -1075,7 +1079,7 @@ pub mod test {
             .iter_mut()
             .take(threshold)
             .map(|signer| {
-                let response = signer.process(&outbound_messages[0], &mut rng).unwrap();
+                let response = signer.process(&outbound_messages[0].msg, &mut rng).unwrap();
 
                 assert_eq!(response.len(), 1);
 
@@ -1093,7 +1097,9 @@ pub mod test {
         // Now if these signers get another signature share request, they
         // should return an error.
         signers.iter_mut().take(threshold).for_each(|signer| {
-            let response = signer.process(&outbound_messages[0], &mut rng).unwrap_err();
+            let response = signer
+                .process(&outbound_messages[0].msg, &mut rng)
+                .unwrap_err();
 
             assert!(matches!(
                 response,
@@ -1134,7 +1140,7 @@ pub mod test {
         );
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::SignatureShareRequest(_) => {}
             _ => {
                 panic!("Expected SignatureShareRequest message");
@@ -1147,7 +1153,7 @@ pub mod test {
 
         // test request with no NonceResponses
         let mut packet = outbound_messages[0].clone();
-        if let Message::SignatureShareRequest(ref mut request) = packet {
+        if let Message::SignatureShareRequest(ref mut request) = packet.msg {
             request.nonce_responses.clear();
         } else {
             panic!("failed to match message");
@@ -1165,7 +1171,7 @@ pub mod test {
 
         // test request with a duplicate NonceResponse
         let mut packet = outbound_messages[0].clone();
-        if let Message::SignatureShareRequest(ref mut request) = packet {
+        if let Message::SignatureShareRequest(ref mut request) = packet.msg {
             request
                 .nonce_responses
                 .push(request.nonce_responses[0].clone());
@@ -1185,7 +1191,7 @@ pub mod test {
 
         // test request with an out of range signer_id
         let mut packet = outbound_messages[0].clone();
-        if let Message::SignatureShareRequest(ref mut request) = packet {
+        if let Message::SignatureShareRequest(ref mut request) = packet.msg {
             request.nonce_responses[0].signer_id = num_signers;
         } else {
             panic!("failed to match message");
@@ -1231,7 +1237,7 @@ pub mod test {
         );
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::SignatureShareRequest(_) => {}
             _ => {
                 panic!("Expected SignatureShareRequest message");
@@ -1244,7 +1250,7 @@ pub mod test {
 
         // test request with NonceResponse having zero nonce
         let mut packet = outbound_messages[0].clone();
-        if let Message::SignatureShareRequest(ref mut request) = packet {
+        if let Message::SignatureShareRequest(ref mut request) = packet.msg {
             for nonce_response in &mut request.nonce_responses {
                 for nonce in &mut nonce_response.nonces {
                     nonce.D = Point::new();
@@ -1267,7 +1273,7 @@ pub mod test {
 
         // test request with NonceResponse having generator nonce
         let mut packet = outbound_messages[0].clone();
-        if let Message::SignatureShareRequest(ref mut request) = packet {
+        if let Message::SignatureShareRequest(ref mut request) = packet.msg {
             for nonce_response in &mut request.nonce_responses {
                 for nonce in &mut nonce_response.nonces {
                     nonce.D = G;
@@ -1290,7 +1296,7 @@ pub mod test {
 
         // test request with a duplicate NonceResponse
         let mut packet = outbound_messages[0].clone();
-        if let Message::SignatureShareRequest(ref mut request) = packet {
+        if let Message::SignatureShareRequest(ref mut request) = packet.msg {
             request
                 .nonce_responses
                 .push(request.nonce_responses[0].clone());
@@ -1310,7 +1316,7 @@ pub mod test {
 
         // test request with an out of range signer_id
         let mut packet = outbound_messages[0].clone();
-        if let Message::SignatureShareRequest(ref mut request) = packet {
+        if let Message::SignatureShareRequest(ref mut request) = packet.msg {
             request.nonce_responses[0].signer_id = num_signers;
         } else {
             panic!("failed to match message");
@@ -1355,13 +1361,15 @@ pub mod test {
                     packets
                         .iter()
                         .map(|packet| {
-                            if let Message::DkgPublicShares(shares) = &packet {
+                            if let Message::DkgPublicShares(shares) = &packet.msg {
                                 let public_shares = crate::net::DkgPublicShares {
                                     dkg_id: shares.dkg_id,
                                     signer_id: shares.signer_id,
                                     comms: vec![],
                                 };
-                                Message::DkgPublicShares(public_shares)
+                                Packet {
+                                    msg: Message::DkgPublicShares(public_shares),
+                                }
                             } else {
                                 packet.clone()
                             }
@@ -1378,7 +1386,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::DkgPrivateBegin(_) => {}
             _ => {
                 panic!("Expected DkgPrivateBegin message")
@@ -1390,7 +1398,7 @@ pub mod test {
             feedback_messages(&mut coordinators, &mut signers, &outbound_messages);
         assert_eq!(operation_results.len(), 0);
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::DkgEndBegin(_) => {}
             _ => {
                 panic!("Expected DkgEndBegin message");
@@ -1462,7 +1470,7 @@ pub mod test {
         }
 
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::DkgPrivateBegin(_) => {}
             _ => {
                 panic!("Expected DkgPrivateBegin message");
@@ -1479,13 +1487,15 @@ pub mod test {
                     packets
                         .iter()
                         .map(|packet| {
-                            if let Message::DkgPrivateShares(shares) = &packet {
+                            if let Message::DkgPrivateShares(shares) = &packet.msg {
                                 let private_shares = crate::net::DkgPrivateShares {
                                     dkg_id: shares.dkg_id,
                                     signer_id: shares.signer_id,
                                     shares: vec![],
                                 };
-                                Message::DkgPrivateShares(private_shares)
+                                Packet {
+                                    msg: Message::DkgPrivateShares(private_shares),
+                                }
                             } else {
                                 packet.clone()
                             }
@@ -1498,7 +1508,7 @@ pub mod test {
         );
         assert_eq!(operation_results.len(), 0);
         assert_eq!(outbound_messages.len(), 1);
-        match &outbound_messages[0] {
+        match &outbound_messages[0].msg {
             Message::DkgEndBegin(_) => {}
             _ => {
                 panic!("Expected DkgEndBegin message");
