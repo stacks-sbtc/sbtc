@@ -820,6 +820,7 @@ async fn calculate_sbtc_left_for_withdrawals(
         // Note that we validate in set_limits that these values are both Some or both None
         return Ok(None);
     };
+    tracing::debug!("fetching the chainstate from the database");
     let chaintip = get_api_state(context).await?.chaintip();
     tracing::info!("chainstate retrieved successfully");
     let bitcoin_tip = chaintip.bitcoin_height.ok_or(Error::NotFound)?;
@@ -858,9 +859,11 @@ async fn calculate_sbtc_left_for_withdrawals(
 /// return type that is within the table as an entry.
 pub async fn get_limits(context: &EmilyContext) -> Result<Limits, Error> {
     // Get all the entries of the limit table. This table shouldn't be too large.
+    tracing::debug!("fetching all the entries of the limit table");
     let all_entries =
         LimitTablePrimaryIndex::get_all_entries(&context.dynamodb_client, &context.settings)
             .await?;
+    tracing::debug!("all the entries of the limit table fetched successfully");
     // Create the default global cap.
     let default_global_cap = context.settings.default_limits.clone();
     let mut global_cap = LimitEntry {
