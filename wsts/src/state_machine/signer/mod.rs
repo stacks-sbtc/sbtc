@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, info, trace, warn};
 
-use crate::errors::AggregatorError;
 use crate::{
     common::{
         check_public_shares, validate_key_id, validate_signer_id, PolyCommitment, PublicNonce,
@@ -90,9 +89,6 @@ pub enum Error {
     #[error("integer conversion error")]
     /// An error during integer conversion operations
     TryFromInt,
-    /// An aggregator error occurred
-    #[error("Aggregator error: {0}")]
-    Aggregator(#[from] AggregatorError),
 }
 
 impl From<TryFromIntError> for Error {
@@ -387,7 +383,7 @@ impl Signer {
                 self.dkg_private_shares(dkg_private_shares, rng)
             }
             Message::SignatureShareRequest(sign_share_request) => {
-                self.sign_share_request(sign_share_request)
+                self.sign_share_request(sign_share_request, rng)
             }
             Message::NonceRequest(nonce_request) => self.nonce_request(nonce_request, rng),
             _ => Ok(vec![]), // TODO
@@ -665,9 +661,10 @@ impl Signer {
         Ok(msgs)
     }
 
-    fn sign_share_request(
+    fn sign_share_request<R: RngCore + CryptoRng>(
         &mut self,
         sign_request: &SignatureShareRequest,
+        rng: &mut R,
     ) -> Result<Vec<Message>, Error> {
         let signer_id_set = sign_request
             .nonce_responses
@@ -718,17 +715,19 @@ impl Signer {
             let signature_shares = match sign_request.signature_type {
                 SignatureType::Taproot(merkle_root) => {
                     self.signer
-                        .sign_taproot(msg, &signer_ids, &key_ids, &nonces, merkle_root)?
+                        .sign_taproot(msg, &signer_ids, &key_ids, &nonces, merkle_root)
                 }
                 SignatureType::Schnorr => {
                     self.signer
-                        .sign_schnorr(msg, &signer_ids, &key_ids, &nonces)?
+                        .sign_schnorr(msg, &signer_ids, &key_ids, &nonces)
                 }
                 SignatureType::Frost => {
                     self.signer
-                        .sign_with_tweak(msg, &signer_ids, &key_ids, &nonces, None)?
+                        .sign_with_tweak(msg, &signer_ids, &key_ids, &nonces, None)
                 }
             };
+
+            self.signer.gen_nonce(rng);
 
             let response = SignatureShareResponse {
                 dkg_id: sign_request.dkg_id,
