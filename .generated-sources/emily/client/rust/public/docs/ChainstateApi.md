@@ -1,6 +1,6 @@
 # \ChainstateApi
 
-All URIs are relative to *http://localhost:3031*
+All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------

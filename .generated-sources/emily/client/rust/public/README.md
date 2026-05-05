@@ -22,7 +22,7 @@ emily-client = { path = "./emily-client" }
 
 ## Documentation for API Endpoints
 
-All URIs are relative to *http://localhost:3031*
+All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------

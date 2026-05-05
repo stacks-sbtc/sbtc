@@ -294,7 +294,7 @@ async fn wait_for_signers<S>(
 
     // It's not entirely clear why this sleep is helpful, but it appears to
     // be necessary in CI.
-    Sleep::for_secs(2).await;
+    Sleep::for_secs(1).await;
 }
 
 fn mock_deploy_all_contracts() -> Box<dyn FnOnce(&mut MockStacksInteract)> {
