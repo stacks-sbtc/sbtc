@@ -1,7 +1,3 @@
 target
 docker
 !docker/sbtc/emily-aws-setup/initialize.py
-.git
-.gitmodules
-.gitworktrees
-node_modules
