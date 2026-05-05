@@ -81,7 +81,7 @@ impl DepositRequestValidator for CreateDepositRequest {
     where
         C: BitcoinInteract,
     {
-        // Fetch the UTXO info for a confirmed outpoint
+        // Fetch the transaction from either a block or from the mempool
         let Some(response) = client.get_utxo_info(&self.outpoint).await? else {
             return Ok(None);
         };
@@ -146,9 +146,8 @@ where
     }
 
     /// Run the block observer
-    #[tracing::instrument(skip_all, name = "block-observer", fields(bitcoin_tip_hash = tracing::field::Empty))]
+    #[tracing::instrument(skip_all, name = "block-observer")]
     pub async fn run(self) -> Result<(), Error> {
-        let span = tracing::Span::current();
         let term = self.context.get_termination_handle();
         let mut bitcoin_blocks = self.bitcoin_block_source.get_block_hash_stream();
 
@@ -166,9 +165,7 @@ where
 
             match poll.await {
                 Ok(Some(Ok(block_hash))) => {
-                    span.record("bitcoin_tip_hash", tracing::field::display(block_hash));
-
-                    tracing::info!("observed new bitcoin block from stream");
+                    tracing::info!(%block_hash, "observed new bitcoin block from stream");
                     metrics::counter!(
                         Metrics::BlocksObservedTotal,
                         "blockchain" => BITCOIN_BLOCKCHAIN,
@@ -176,15 +173,15 @@ where
                     .increment(1);
 
                     if let Err(error) = self.process_bitcoin_chain_tip(block_hash).await {
-                        tracing::error!(%error, "could not process bitcoin blocks");
+                        tracing::warn!(%error, %block_hash, "could not process bitcoin blocks");
                     }
 
                     if let Err(error) = self.process_stacks_blocks().await {
-                        tracing::error!(%error, "could not process stacks blocks");
+                        tracing::warn!(%error, "could not process stacks blocks");
                     }
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
-                        tracing::error!(%error, "could not check pending dkg shares");
+                        tracing::warn!(%error, "could not check pending dkg shares");
                         continue;
                     }
 
@@ -192,21 +189,21 @@ where
                     let chain_tip = match self.update_signer_state(block_hash).await {
                         Ok(chain_tip) => chain_tip,
                         Err(error) => {
-                            tracing::error!(%error, "could not update the signer state");
+                            tracing::warn!(%error, "could not update the signer state");
                             continue;
                         }
                     };
 
                     tracing::info!("loading latest deposit requests from Emily");
                     if let Err(error) = self.load_latest_deposit_requests().await {
-                        tracing::error!(%error, "could not load latest deposit requests from Emily");
+                        tracing::warn!(%error, "could not load latest deposit requests from Emily");
                     }
 
                     self.context
                         .signal(SignerEvent::BitcoinBlockObserved(chain_tip).into())?;
                 }
                 Ok(Some(Err(error))) => {
-                    tracing::error!(%error, "error decoding new bitcoin block hash from stream");
+                    tracing::warn!(%error, "error decoding new bitcoin block hash from stream");
                     continue;
                 }
                 _ => continue,
@@ -363,7 +360,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This function must only be called with the bitcoin chain tip since
     /// it updates all blocks that are reachable from the given block hash
     /// as canonical and may update blocks not reachable as non-canonical.
-    #[tracing::instrument(skip_all)]
+    #[tracing::instrument(skip_all, fields(%chain_tip))]
     async fn process_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
         self.process_bitcoin_blocks_until(chain_tip).await?;
 
