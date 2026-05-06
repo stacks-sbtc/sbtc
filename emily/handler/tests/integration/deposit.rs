@@ -449,15 +449,16 @@ async fn get_deposits() {
     clean_test_setup(tables).await;
 }
 
-/// Test that deposit requests where the max fee is greater than i64::MAX
-/// are not returned in get_deposits API calls.
+/// Test that deposit requests with arbitrarily large max fees are returned
+/// in get_deposits API calls.
 #[tokio::test]
 async fn get_deposits_large_max_fee() {
     let (configuration, tables) = new_test_setup().await;
 
     // Arrange.
     // --------
-    let max_fees: [u64; 3] = [1000, i64::MAX as u64 + 1, i64::MAX as u64];
+    let max_fees = [1000, i64::MAX as u64 + 1, i64::MAX as u64, u64::MAX];
+
     // Setup test deposit transactions and the Emily request.
     let create_requests = max_fees
         .into_iter()
@@ -482,16 +483,22 @@ async fn get_deposits_large_max_fee() {
         .await
         .expect("Received an error after making a valid get deposits api call.");
 
+    // The fees are all unique so this should be fine.
+    let mut expected_max_fees: std::collections::BTreeSet<u64> = max_fees.into_iter().collect();
+    assert_eq!(expected_max_fees.len(), max_fees.len());
     // Assert.
     // -------
-    // One of the deposits have a max fee that exceeds i64::MAX, so it
-    // should not be returned.
-    assert_eq!(response.deposits.len(), 2);
+    assert_eq!(response.deposits.len(), expected_max_fees.len());
     for deposit_info in response.deposits.iter() {
         let deposit_script = ScriptBuf::from_hex(&deposit_info.deposit_script).unwrap();
         let deposit_script_inputs = DepositScriptInputs::parse(&deposit_script).unwrap();
-        assert!(deposit_script_inputs.max_fee <= i64::MAX as u64);
+        // BTreeSet::remove returns whether the element was actually
+        // present in the set.
+        assert!(expected_max_fees.remove(&deposit_script_inputs.max_fee));
     }
+    // Not strictly necessary, since we have the length check and the
+    // assert! on remove above, but it's a good sanity check.
+    assert!(expected_max_fees.is_empty());
 
     clean_test_setup(tables).await;
 }
