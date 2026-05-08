@@ -162,7 +162,7 @@ pub trait BitcoinInteract: Sync + Send {
     fn get_best_block_hash(&self) -> impl Future<Output = Result<BlockHash, Error>> + Send;
 
     /// Prune the connected bitcoin-core node up to the given input height.
-    /// 
+    ///
     /// # Notes
     ///
     /// This method requires bitcoin-core to be configured to allow

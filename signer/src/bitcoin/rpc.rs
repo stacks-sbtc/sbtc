@@ -724,7 +724,10 @@ impl BitcoinCoreClient {
     /// enough to prune, then this RPC will return `Ok(None)`. The
     /// documentation for the `pruneblockchain` RPC call can be found here:
     /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/pruneblockchain/>
-    pub fn prune_blockchain(&self, height: BitcoinBlockHeight) -> Result<Option<BitcoinBlockHeight>, Error> {
+    pub fn prune_blockchain(
+        &self,
+        height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
         let args = [serde_json::to_value(height).map_err(Error::JsonSerialize)?];
 
         match self.inner.call::<i64>("pruneblockchain", &args) {
