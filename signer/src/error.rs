@@ -277,9 +277,15 @@ pub enum Error {
     #[error("the change amounts for the transaction is negative: {0}")]
     InvalidAmount(i64),
 
-    /// Old fee estimate
-    #[error("got an old fee estimate")]
-    OldFeeEstimate,
+    /// Getting this error means a programming error or an error in
+    /// bitcoin-core.
+    #[error("the Fees object was invalid: total: {total}, vsize: {vsize}")]
+    InvalidLastFee {
+        /// The total fees passed into Fees::new.
+        total: u64,
+        /// The vsize passed into Fees::new.
+        vsize: u64,
+    },
 
     /// No good fee estimate
     #[error("failed to get fee estimates from all fee estimate sources")]
@@ -763,8 +769,9 @@ pub enum Error {
     BitcoinNoRequests,
 
     /// Indicates that the BitcoinPreSignRequest object contains a fee rate
-    /// that is less than or equal to zero.
-    #[error("the fee rate in the BitcoinPreSignRequest object is not greater than zero: {0}")]
+    /// that is outside of the allowed range defined as the range between
+    /// `MIN_BITCOIN_FEE_RATE` and `MAX_BITCOIN_FEE_RATE`.
+    #[error("the fee rate in the BitcoinPreSignRequest object is out of bounds: {0}")]
     PreSignInvalidFeeRate(f64),
 
     /// Error when deposit requests would exceed sBTC supply cap
@@ -808,6 +815,18 @@ pub enum Error {
     #[cfg(any(test, feature = "testing"))]
     #[error("Test utility error: {0}")]
     TestUtility(crate::testing::TestUtilityError),
+
+    /// We do not use it in production code so getting this error probably
+    /// means a programming error when converting a protobuf Fees object
+    /// into its local counterpart.
+    #[cfg(any(test, feature = "testing"))]
+    #[error("the Fees object received from the network was invalid: total: {total}, rate: {rate}")]
+    InvalidProtobufLastFee {
+        /// The total fees passed into Fees::new.
+        total: u64,
+        /// The fee rate sent over the network.
+        rate: f64,
+    },
 }
 
 impl From<std::convert::Infallible> for Error {

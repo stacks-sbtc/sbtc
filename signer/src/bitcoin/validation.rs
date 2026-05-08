@@ -9,9 +9,11 @@ use bitcoin::ScriptBuf;
 use bitcoin::XOnlyPublicKey;
 use bitcoin::relative::LockTime;
 
+use crate::BITCOIN_FEE_RATE_RANGE;
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
+use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo::FeeAssessment;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::context::Context;
@@ -146,7 +148,7 @@ impl BitcoinPreSignRequest {
             return Err(Error::DuplicateRequests);
         }
 
-        if self.fee_rate <= 0.0 {
+        if !BITCOIN_FEE_RATE_RANGE.contains(&self.fee_rate) {
             return Err(Error::PreSignInvalidFeeRate(self.fee_rate));
         }
 
@@ -291,11 +293,15 @@ impl BitcoinPreSignRequest {
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
 
+        let bitcoin_client = ctx.get_bitcoin_client();
+        let last_fees =
+            assess_mempool_sweep_transaction_fees(&bitcoin_client, &signer_utxo).await?;
+
         let mut signer_state = SignerBtcState {
             fee_rate: self.fee_rate,
             utxo: signer_utxo,
             public_key: bitcoin::XOnlyPublicKey::from(btc_ctx.aggregate_key),
-            last_fees: self.last_fees,
+            last_fees,
             magic_bytes: [b'T', b'3'], //TODO(#472): Use the correct magic bytes.
         };
         let mut outputs = Vec::new();
@@ -1062,6 +1068,8 @@ mod tests {
     use secp256k1::SECP256K1;
     use test_case::test_case;
 
+    use crate::MAX_BITCOIN_FEE_RATE;
+    use crate::MIN_BITCOIN_FEE_RATE;
     use crate::context::RollingWithdrawalLimits;
     use crate::context::SbtcLimits;
     use crate::storage::model::BitcoinBlockHeight;
@@ -2005,6 +2013,69 @@ mod tests {
             fee_rate: 1.0,
             last_fees: None,
         }, false; "contains-empty-tx-requests")]
+    #[test_case(
+        BitcoinPreSignRequest {
+            request_package: vec![TxRequestIds {
+                deposits: vec![OutPoint::null()],
+                withdrawals: Vec::new(),
+            }],
+            fee_rate: MAX_BITCOIN_FEE_RATE,
+            last_fees: None,
+        }, true; "max-fee-rate-request")]
+    #[test_case(
+        BitcoinPreSignRequest {
+            request_package: vec![TxRequestIds {
+                deposits: vec![OutPoint::null()],
+                withdrawals: Vec::new(),
+            }],
+            fee_rate: MAX_BITCOIN_FEE_RATE * (1.0 + f64::EPSILON * 2.0),
+            last_fees: None,
+        }, false; "max-fee-rate-request-plus-epsilon")]
+    #[test_case(
+        BitcoinPreSignRequest {
+            request_package: vec![TxRequestIds {
+                deposits: vec![OutPoint::null()],
+                withdrawals: Vec::new(),
+            }],
+            fee_rate: MIN_BITCOIN_FEE_RATE,
+            last_fees: None,
+        }, true; "min-fee-rate-request")]
+    #[test_case(
+        BitcoinPreSignRequest {
+            request_package: vec![TxRequestIds {
+                deposits: vec![OutPoint::null()],
+                withdrawals: Vec::new(),
+            }],
+            fee_rate: MIN_BITCOIN_FEE_RATE - f64::EPSILON,
+            last_fees: None,
+        }, false; "min-fee-rate-request-minus-epsilon")]
+    #[test_case(
+        BitcoinPreSignRequest {
+            request_package: vec![TxRequestIds {
+                deposits: vec![OutPoint::null()],
+                withdrawals: Vec::new(),
+            }],
+            fee_rate: f64::NAN,
+            last_fees: None,
+        }, false; "unique-requests-nan-fee-rate")]
+    #[test_case(
+        BitcoinPreSignRequest {
+            request_package: vec![TxRequestIds {
+                deposits: vec![OutPoint::null()],
+                withdrawals: Vec::new(),
+            }],
+            fee_rate: f64::NEG_INFINITY,
+            last_fees: None,
+        }, false; "unique-requests-negative-infinity-fee-rate")]
+    #[test_case(
+        BitcoinPreSignRequest {
+            request_package: vec![TxRequestIds {
+                deposits: vec![OutPoint::null()],
+                withdrawals: Vec::new(),
+            }],
+            fee_rate: f64::INFINITY,
+            last_fees: None,
+        }, false; "unique-requests-positive-infinity-fee-rate")]
     fn test_pre_validation(requests: BitcoinPreSignRequest, result: bool) {
         assert_eq!(requests.pre_validation().is_ok(), result);
     }

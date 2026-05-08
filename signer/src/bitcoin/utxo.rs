@@ -1,6 +1,7 @@
 //! Utxo management and transaction construction
 
 use std::collections::HashSet;
+use std::num::NonZeroU64;
 use std::sync::LazyLock;
 
 use bitcoin::Amount;
@@ -42,6 +43,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::DEPOSIT_DUST_LIMIT;
+use crate::MAX_BITCOIN_BLOCK_VSIZE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::bitcoin::packaging::Weighted;
 use crate::bitcoin::packaging::compute_optimal_packages;
@@ -121,18 +123,49 @@ static DUMMY_SIGNATURE: LazyLock<Signature> = LazyLock::new(|| Signature {
     sighash_type: TapSighashType::All,
 });
 
-/// Describes the fees for a transaction.
+/// Describes the fees for a transaction package.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Fees {
-    /// The total fee paid in sats for the transaction.
+    /// The total fee paid in sats for the transaction package.
     pub total: u64,
-    /// The fee rate paid in sats per virtual byte.
-    pub rate: f64,
+    /// The size of the transaction package in virtual bytes.
+    vsize: NonZeroU64,
 }
 
 impl Fees {
-    /// A zero-fee [`Fees`] instance.
-    pub const ZERO: Self = Self { total: 0, rate: 0.0 };
+    /// Create a new [`Fees`] instance.
+    ///
+    /// This function will return an error if the total fees are greater
+    /// than the maximum amount of bitcoin, or if the vsize is greater than
+    /// the maximum bitcoin block vsize. We strongly suspect that something
+    /// has gone wrong if these limits are exceeded.
+    pub fn new(total: u64, vsize: u64) -> Result<Self, Error> {
+        if total > Amount::MAX_MONEY.to_sat() {
+            return Err(Error::InvalidLastFee { total, vsize });
+        }
+
+        let Some(vsize) = NonZeroU64::new(vsize) else {
+            return Err(Error::InvalidLastFee { total, vsize });
+        };
+
+        if vsize.get() > MAX_BITCOIN_BLOCK_VSIZE {
+            return Err(Error::InvalidLastFee { total, vsize: vsize.get() });
+        }
+
+        Ok(Self { total, vsize })
+    }
+
+    /// Create a new [`Fees`] instance.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_unchecked(total: u64, vsize: u64) -> Self {
+        let vsize = NonZeroU64::new(vsize).unwrap();
+        Self { total, vsize }
+    }
+
+    /// Compute the fee rate, in sats per vbyte.
+    pub fn rate(&self) -> f64 {
+        self.total as f64 / self.vsize.get() as f64
+    }
 }
 
 /// A trait for getting the fees for a given instance.
@@ -397,12 +430,13 @@ impl SbtcRequests {
 /// BIP-125: https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#implementation-details
 fn compute_transaction_fee(tx_vsize: f64, fee_rate: f64, last_fees: Option<Fees>) -> u64 {
     match last_fees {
-        Some(Fees { total, rate }) => {
+        Some(fees) => {
             // The requirement for an RBF transaction is that the new fee
             // amount be greater than the old fee amount.
+            let rate = fees.rate();
             let minimum_fee_rate = fee_rate.max(rate + rate * SATS_PER_VBYTE_INCREMENT);
             let fee_increment = tx_vsize * DEFAULT_INCREMENTAL_RELAY_FEE_RATE;
-            (total as f64 + fee_increment)
+            (fees.total as f64 + fee_increment)
                 .max(tx_vsize * minimum_fee_rate)
                 .ceil() as u64
         }
@@ -2610,7 +2644,7 @@ mod tests {
         // In the below code, we need to make sure that we take the _first_
         // transaction in each package as that is the one that will be RBF'd.
 
-        let (old_fee_total, old_fee_rate) = {
+        let (old_fee_total, old_vsize) = {
             let transactions = requests.construct_transactions().unwrap();
             let utx = transactions.first().unwrap();
 
@@ -2619,14 +2653,10 @@ mod tests {
 
             more_asserts::assert_gt!(input_amounts, output_amounts);
             let fee_total = input_amounts - output_amounts;
-            let fee_rate = fee_total as f64 / utx.tx.vsize() as f64;
-            (fee_total, fee_rate)
+            (fee_total, utx.tx.vsize() as u64)
         };
 
-        requests.signer_state.last_fees = Some(Fees {
-            total: old_fee_total,
-            rate: old_fee_rate,
-        });
+        requests.signer_state.last_fees = Some(Fees::new(old_fee_total, old_vsize).unwrap());
 
         let transactions = requests.construct_transactions().unwrap();
         let utx = transactions.first().unwrap();
@@ -3232,6 +3262,20 @@ mod tests {
             .sum::<u32>();
 
         assert_eq!(package_vsize, total_vsize);
+    }
+
+    #[test_case(0, 1, true; "total is zero")]
+    #[test_case(100, 1, true; "total is one hundred")]
+    #[test_case(f64::exp2(f64::MANTISSA_DIGITS as f64) as u64, 1, false; "total is max f64 lossless integer")]
+    #[test_case(Amount::MAX_MONEY.to_sat() + 1, 1, false; "total is over max money")]
+    #[test_case(Amount::MAX_MONEY.to_sat(), 1, true; "total is max money")]
+    #[test_case(Amount::MAX_MONEY.to_sat() - 1, 1, true; "total is just below max money")]
+    #[test_case(100, MAX_BITCOIN_BLOCK_VSIZE, true; "max bitcoin block vsize")]
+    #[test_case(100, 0, false; "vsize is zero")]
+    #[test_case(100, MAX_BITCOIN_BLOCK_VSIZE + 1, false; "vsize is over max bitcoin block vsize")]
+    fn test_fees_creation(total: u64, vsize: u64, is_ok: bool) {
+        let fees = Fees::new(total, vsize);
+        assert_eq!(fees.is_ok(), is_ok);
     }
 
     #[test_case(

@@ -52,6 +52,8 @@ use sbtc::testing::regtest::Recipient;
 use sbtc::testing::regtest::p2wpkh_sign_transaction;
 use secp256k1::Keypair;
 use secp256k1::SECP256K1;
+use signer::MAX_BITCOIN_FEE_RATE;
+use signer::MIN_BITCOIN_FEE_RATE;
 use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
@@ -3941,6 +3943,16 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
                 .expect_estimate_fee_rate()
                 .times(1)
                 .returning(|_| Box::pin(async { Ok(1.3) }));
+
+            client
+                .expect_estimate_fee_rate()
+                .times(1)
+                .returning(|_| Box::pin(async { Ok(MAX_BITCOIN_FEE_RATE + 1.0) }));
+
+            client
+                .expect_estimate_fee_rate()
+                .times(1)
+                .returning(|_| Box::pin(async { Ok(-6.125) }));
         })
         .await;
 
@@ -4038,6 +4050,24 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     assert_eq!(btc_state.fee_rate, 1.3);
     assert_eq!(btc_state.last_fees, None);
     assert_eq!(btc_state.magic_bytes, [b'T', b'3']);
+
+    // Let's grab the state again, this time we expect fees from
+    // "bitcoin-core" that are too high.
+    let btc_state = coord
+        .get_btc_state(&chain_tip, aggregate_key)
+        .await
+        .unwrap();
+
+    assert_eq!(btc_state.fee_rate, MAX_BITCOIN_FEE_RATE);
+
+    // Let's grab the state one last time, where this time we expect fees
+    // from "bitcoin-core" that are too low.
+    let btc_state = coord
+        .get_btc_state(&chain_tip, aggregate_key)
+        .await
+        .unwrap();
+
+    assert_eq!(btc_state.fee_rate, MIN_BITCOIN_FEE_RATE);
 
     testing::storage::drop_db(db).await;
 }
@@ -4175,10 +4205,7 @@ mod serial {
             .await
             .unwrap();
 
-        let expected_fees = Fees {
-            total: 1_000,
-            rate: 1_000_f64 / tx1.vsize() as f64,
-        };
+        let expected_fees = Fees::new_unchecked(1_000, tx1.vsize() as u64);
 
         // Assert that everything's as expected.
         assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid);
@@ -4213,10 +4240,7 @@ mod serial {
             .await
             .unwrap();
 
-        let expected_fees = Fees {
-            total: 2_000,
-            rate: 2_000f64 / tx2.vsize() as f64,
-        };
+        let expected_fees = Fees::new_unchecked(2_000, tx2.vsize() as u64);
 
         // Assert that everything's as expected.
         assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid);

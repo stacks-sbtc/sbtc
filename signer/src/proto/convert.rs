@@ -1205,20 +1205,25 @@ impl TryFrom<proto::TxRequestIds> for TxRequestIds {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl TryFrom<proto::Fees> for Fees {
+    type Error = Error;
+    fn try_from(proto::Fees { total, rate }: proto::Fees) -> Result<Self, Self::Error> {
+        let vsize = (total as f64 / rate).round();
+
+        if vsize <= 0.0 || vsize > crate::MAX_BITCOIN_BLOCK_VSIZE as f64 || vsize.is_nan() {
+            return Err(Error::InvalidProtobufLastFee { total, rate });
+        }
+
+        Fees::new(total, vsize as u64)
+    }
+}
+
 impl From<Fees> for proto::Fees {
     fn from(value: Fees) -> Self {
         proto::Fees {
             total: value.total,
-            rate: value.rate,
-        }
-    }
-}
-
-impl From<proto::Fees> for Fees {
-    fn from(value: proto::Fees) -> Self {
-        Fees {
-            total: value.total,
-            rate: value.rate,
+            rate: value.rate(),
         }
     }
 }
@@ -1232,7 +1237,9 @@ impl From<BitcoinPreSignRequest> for proto::BitcoinPreSignRequest {
                 .map(|v| v.into())
                 .collect(),
             fee_rate: value.fee_rate,
-            last_fees: value.last_fees.map(|v| v.into()),
+            // We compute the last fees ourselves. In the next release,
+            // there will be no need to require the sender include them.
+            last_fees: value.last_fees,
         }
     }
 }
@@ -1247,7 +1254,10 @@ impl TryFrom<proto::BitcoinPreSignRequest> for BitcoinPreSignRequest {
                 .map(|v| v.try_into())
                 .collect::<Result<Vec<_>, _>>()?,
             fee_rate: value.fee_rate,
-            last_fees: value.last_fees.map(|v| v.into()),
+            // We compute the last fees ourselves. In the next release,
+            // there will be no need to require the sender include them,
+            // and we can then remove this field.
+            last_fees: value.last_fees,
         })
     }
 }
