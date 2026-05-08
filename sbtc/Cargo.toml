@@ -44,6 +44,11 @@ tokio = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Add ourself as a dev-dependency with the "testing" feature enabled to
+# automatically include testing functionality for debug builds (i.e. dev/test).
+# This also ensures that your IDE will recognize feature-gated code as active.
+sbtc = { path = ".", features = ["testing"] }
+
 hex.workspace = true 
 assert_matches.workspace = true
 bitcoincore-rpc.workspace = true

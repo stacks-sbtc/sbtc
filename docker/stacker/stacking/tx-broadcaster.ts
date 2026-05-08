@@ -1,31 +1,30 @@
-import { StacksTestnet } from '@stacks/network';
+import { STACKS_TESTNET, StacksNetwork } from '@stacks/network';
 import { StackingClient } from '@stacks/stacking';
 import {
-  TransactionVersion,
   getAddressFromPrivateKey,
-  getNonce,
+  fetchNonce,
   makeSTXTokenTransfer,
   broadcastTransaction,
-  StacksTransaction,
+  StacksTransactionWire,
 } from '@stacks/transactions';
 import { logger } from './common';
 
 const broadcastInterval = parseInt(process.env.NAKAMOTO_BLOCK_INTERVAL ?? '2');
 const url = `http://${process.env.STACKS_CORE_RPC_HOST}:${process.env.STACKS_CORE_RPC_PORT}`;
-const network = new StacksTestnet({ url });
+const network: StacksNetwork = { ...STACKS_TESTNET, client: { baseUrl: url } };
 const EPOCH_30_START = parseInt(process.env.STACKS_30_HEIGHT ?? '0');
 
 const accounts = process.env.ACCOUNT_KEYS!.split(',').map(privKey => ({
   privKey,
-  stxAddress: getAddressFromPrivateKey(privKey, TransactionVersion.Testnet),
+  stxAddress: getAddressFromPrivateKey(privKey, STACKS_TESTNET),
 }));
 
-const client = new StackingClient(accounts[0].stxAddress, network);
+const client = new StackingClient({ address: accounts[0].stxAddress, network });
 
 async function run() {
   const accountNonces = await Promise.all(
     accounts.map(async account => {
-      const nonce = await getNonce(account.stxAddress, network);
+      const nonce = await fetchNonce({ address: account.stxAddress, network });
       return { ...account, nonce };
     })
   );
@@ -46,20 +45,18 @@ async function run() {
     network,
     nonce: sender.nonce,
     fee: 300,
-    anchorMode: 'any',
   });
   await broadcast(tx, sender.stxAddress);
 }
 
-async function broadcast(tx: StacksTransaction, sender?: string) {
+async function broadcast(tx: StacksTransactionWire, sender?: string) {
   const txType = tx.payload.payloadType;
   const label = sender ? accountLabel(sender) : 'Unknown';
-  const broadcastResult = await broadcastTransaction(tx, network);
-  if (broadcastResult.error) {
+  const broadcastResult = await broadcastTransaction({ transaction: tx, network });
+  if ('error' in broadcastResult) {
     logger.error({ ...broadcastResult, account: label }, `Error broadcasting ${txType}`);
     return false;
   } else {
-    if (label.includes('Flooder')) return true;
     logger.debug(`Broadcast ${txType} from ${label} tx=${broadcastResult.txid}`);
     return true;
   }
@@ -80,10 +77,11 @@ async function waitForNakamoto() {
         break;
       }
     } catch (error) {
-      if (/(ECONNREFUSED|ENOTFOUND|SyntaxError)/.test(error.cause?.message)) {
+      const cause = (error as { cause?: { message?: string } })?.cause?.message;
+      if (cause && /(ECONNREFUSED|ENOTFOUND|SyntaxError)/.test(cause)) {
         logger.info(`Stacks node not ready, waiting...`);
       } else {
-        logger.error('Error getting pox info:', error);
+        logger.error({ err: error }, 'Error getting pox info');
       }
     }
     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -104,7 +102,7 @@ async function loop() {
     try {
       await run();
     } catch (e) {
-      logger.error('Error submitting stx-transfer tx:', e);
+      logger.error({ err: e }, 'Error submitting stx-transfer tx');
     }
     await new Promise(resolve => setTimeout(resolve, broadcastInterval * 1000));
   }
