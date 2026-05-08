@@ -1,7 +1,7 @@
 //! Handlers for the blocklist client API
 
 use crate::client::{risk_client, sanctions};
-use crate::common::error::ErrorResponse;
+use crate::common::error::{Error, ErrorResponse};
 use crate::config::{AssessmentMethod, Settings};
 use reqwest::Client;
 use std::convert::Infallible;
@@ -34,13 +34,21 @@ pub async fn check_address_handler(
     config: Settings,
 ) -> impl Reply {
     let result = (async {
-        match config.assessment.assessment_method {
-            AssessmentMethod::Sanctions => {
-                sanctions::check_address(&client, &config.risk_analysis, &address).await
+        if let Some(risk_analysis) = &config.risk_analysis {
+            match risk_analysis.assessment_method {
+                AssessmentMethod::Sanctions => {
+                    sanctions::check_address(&client, risk_analysis, &address).await
+                }
+                AssessmentMethod::RiskAnalysis => {
+                    risk_client::check_address(&client, risk_analysis, &address).await
+                }
             }
-            AssessmentMethod::RiskAnalysis => {
-                risk_client::check_address(&client, &config.risk_analysis, &address).await
-            }
+        } else if config.sanctions.is_some() {
+            // TODO: implement this
+            Err(Error::InternalServer)
+        } else {
+            // This shouldn't happen since we validate the config
+            Err(Error::InternalServer)
         }
     })
     .await

@@ -19,9 +19,10 @@ You can run the blocklist client by providing the required environment variables
 
 - BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL=`<provider-url>`
 - BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY=`<your_api_key>`
+- BLOCKLIST_CLIENT_RISK_ANALYSIS__ASSESSMENT_METHOD=`<sanctions|risk_analysis>`
 
    ```bash
-    BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL=https://your-risk-provider-api.com/ BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY=your_api_key ../target/release/blocklist-client
+    BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL=https://your-risk-provider-api.com/ BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY=your_api_key BLOCKLIST_CLIENT_RISK_ANALYSIS__ASSESSMENT_METHOD=sanctions ../target/release/blocklist-client
    ```
 
 ### Optional Environment Variables
@@ -30,10 +31,9 @@ If not specified, the default values from `./src/config/default.toml` will be us
 
 - BLOCKLIST_CLIENT_SERVER__HOST=`<server-hostname-or-ip>`
 - BLOCKLIST_CLIENT_SERVER__PORT=`<server-port>`
-- BLOCKLIST_CLIENT_ASSESSMENT__ASSESSMENT_METHOD=`<sanctions|risk_analysis>`
 
    ```bash
-    BLOCKLIST_CLIENT_SERVER__HOST=127.0.0.1 BLOCKLIST_CLIENT_SERVER__PORT=8080 BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL=https://your-risk-provider-api.com/ BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY=your_api_key BLOCKLIST_CLIENT_ASSESSMENT__ASSESSMENT_METHOD=risk_analysis  ../target/release/blocklist-client
+    BLOCKLIST_CLIENT_SERVER__HOST=127.0.0.1 BLOCKLIST_CLIENT_SERVER__PORT=8080 BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL=https://your-risk-provider-api.com/ BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY=your_api_key BLOCKLIST_CLIENT_RISK_ANALYSIS__ASSESSMENT_METHOD=sanctions  ../target/release/blocklist-client
    ```
 
 ## Accessing the API
