@@ -147,12 +147,6 @@ pub const MAX_SIGNER_STATE_MACHINES: u64 = MAX_MEMPOOL_PACKAGE_SIZE
 /// bitcoin.
 pub const MIN_BITCOIN_INPUT_VSIZE: u64 = 58;
 
-/// This is the number of blocks that are kept on bitcoin core at all
-/// times. We keep this many blocks because the signer will not sweep funds
-/// if they have been locked for more than this many blocks, because they
-/// will necessarily be spendable by the user.
-pub const PRUNE_BLOCK_COUNT: u64 = u16::MAX as u64;
-
 /// The `max_transmit_size` configured on our libp2p-gossipsub behaviour.
 /// This is the value passed to
 /// [`gossipsub::ConfigBuilder::max_transmit_size`], and it controls the
