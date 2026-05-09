@@ -148,7 +148,7 @@ pub struct BitcoinConfig {
 
     /// Whether to manually prune old bitcoin blocks from bitcoin-core if
     /// it is configured to allow for manual pruning.
-    pub prune: Option<bool>,
+    pub prune: bool,
 
     /// A test-only optional fallback fee rate in sats/vbyte to use when the
     /// initial fee rate is too high to construct any transaction package.
@@ -615,6 +615,7 @@ impl Settings {
         cfg_builder = cfg_builder.set_default("signer.dkg_verification_window", 10)?;
         cfg_builder = cfg_builder.set_default("signer.stacks_fees_max_ustx", 1_500_000)?;
         cfg_builder = cfg_builder.set_default("bitcoin.chain_tip_polling_interval", 5)?;
+        cfg_builder = cfg_builder.set_default("bitcoin.prune", false)?;
         cfg_builder = cfg_builder.set_default("bitcoin.timeout", 10)?;
 
         if let Some(path) = config_path {

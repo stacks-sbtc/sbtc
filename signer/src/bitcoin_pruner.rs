@@ -227,7 +227,7 @@ impl<C: Context> BitcoinPrunerEventLoop<C> {
         // This indicates whether the signer is configured to prune blocks
         // manually. If it is not configured, it defaults to not pruning
         // bitcoin-core.
-        if !self.context.config().bitcoin.prune.unwrap_or(false) {
+        if !self.context.config().bitcoin.prune {
             return Ok(PruneOutcome::SignerPruningDisabled);
         }
 
