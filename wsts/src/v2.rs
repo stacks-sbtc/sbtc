@@ -853,9 +853,10 @@ mod tests {
         let mut comms3 = comms.clone();
         comms3.insert(0, comm);
         let error = sig_agg.init(&comms3).unwrap_err();
-        assert!(
-            matches!(error, AggregatorError::BadPolynomialDegree { expected, received } 
-                    if expected == t as usize && received == t as usize - 1)
+        assert_matches::assert_matches!(
+            error,
+            AggregatorError::BadPolynomialDegree { expected, received }
+            if expected == t as usize && received == t as usize - 1
         );
     }
 

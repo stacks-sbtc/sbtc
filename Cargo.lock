@@ -8186,6 +8186,7 @@ name = "wsts"
 version = "14.0.0"
 dependencies = [
  "aes-gcm",
+ "assert_matches",
  "hex",
  "num-traits",
  "p256k1",
