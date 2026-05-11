@@ -39,11 +39,10 @@ const KEEP_BLOCKS_MAINNET: u64 = u16::MAX as u64;
 /// small history is sufficient.
 const KEEP_BLOCKS_NON_MAINNET: u64 = 100;
 
-/// The minimum number of additional blocks beyond the last pruned height
-/// that must be eligible for pruning before we will trigger another prune
-/// while bitcoin-core is still catching up to the chain tip. It
-/// corresponds to 180 days worth of blocks. This interval is not used once
-/// bitcoin-core has finished its initial block download.
+/// While bitcoin-core is in initial block download we only trigger a prune
+/// once at least this many blocks past the last pruned height are
+/// eligible. Represents 180 days for ~10 minutes blocks. This is not used
+/// once the initial block download has finished.
 const CATCHUP_PRUNE_INTERVAL: u64 = 6 * 24 * 180;
 
 /// Returns the number of bitcoin blocks we want bitcoin-core to keep
@@ -107,7 +106,7 @@ pub enum PruneResult {
     StacksNodeBehind {
         /// The target prune height.
         target_height: BitcoinBlockHeight,
-        /// The first unpruned block height that bitcoin-core has.
+        /// Bitcoin block height the stacks node has processed up to.
         node_bitcoin_height: BitcoinBlockHeight,
     },
 }
@@ -169,10 +168,9 @@ impl PruneResult {
     }
 }
 
-/// Snapshot of the state used to decide whether (and where) to prune
-/// bitcoin-core on a given tenure. Caller must already have established
-/// signer pruning is enabled; do not build this when the signer's
-/// `bitcoin.prune` config flag is false (exit early instead).
+/// Snapshot of the state used to decide whether to prune bitcoin-core. Do
+/// not build this when the signer's `bitcoin.prune` config flag is false,
+/// exit early instead.
 ///
 /// The `pruned`, `automatic_pruning`, `prune_height`,
 /// `initial_block_download`, `validated_blocks`, and `chain` fields are
@@ -183,14 +181,13 @@ pub struct PruneSnapshot {
     pub chain_tip_height: BitcoinBlockHeight,
     /// Whether bitcoin-core has pruning enabled.
     pub pruned: bool,
-    /// Whether bitcoin-core is pruning automatically. Some(false)
-    /// indicates manual pruning, and this is None when bitcoin-core did
-    /// not return the field in a `getblockchaininfo` response, which
-    /// indicates that pruning is disabled.
+    /// Whether bitcoin-core is pruning automatically. `Some(false)`
+    /// indicates manual pruning; `None` means bitcoin-core omitted the
+    /// field, which it only does when pruning is disabled.
     pub automatic_pruning: Option<bool>,
-    /// First non-pruned block height — in other words, the lowest height
-    /// bitcoin-core still has on disk. This is None when bitcoin-core did
-    /// not return the field in a `getblockchaininfo` response.
+    /// Lowest block height bitcoin-core still has on disk. `None` means
+    /// bitcoin-core omitted the field, which it only does when pruning
+    /// is disabled.
     pub prune_height: Option<u64>,
     /// Whether bitcoin-core is still in its initial block download.
     pub initial_block_download: bool,
@@ -204,15 +201,12 @@ pub struct PruneSnapshot {
 }
 
 impl PruneSnapshot {
-    /// Validate the snapshot and, if pruning should proceed, return the
-    /// height to pass to `pruneblockchain`.
+    /// Validate the snapshot. Returns the target height to pass to
+    /// `pruneblockchain` on `Ok`, or a terminal [`PruneResult`] indicating
+    /// that no prune RPC will be attempted this round.
     ///
-    /// - [`Ok`] is the height to pass to `pruneblockchain`.
-    /// - [`Err`] is a terminal outcome (no prune RPC this round).
-    ///
-    /// When the signer is not configured to prune, callers should return
-    /// [`PruneResult::SignerPruningDisabled`] before building a
-    /// [`PruneSnapshot`]; this function does not represent that case.
+    /// [`PruneResult::SignerPruningDisabled`] is the caller's
+    /// responsibility — handle that before building a [`PruneSnapshot`].
     fn target_height(&self) -> Result<BitcoinBlockHeight, PruneResult> {
         if !self.pruned {
             return Err(PruneResult::BitcoinPruningDisabled);
@@ -306,12 +300,8 @@ impl<C: Context> BitcoinPrunerEventLoop<C> {
         Ok(())
     }
 
-    /// Prune blocks from bitcoin-core.
-    ///
-    /// On success, returns a [`PruneResult`] describing what happened
-    /// (including cases where pruning was skipped). The caller should
-    /// invoke [`PruneResult::log`] if tracing output is desired. RPC and
-    /// transport failures are returned as [`Err`](Result::Err).
+    /// Drive one prune round against bitcoin-core. Returns a
+    /// [`PruneResult`] indicating what happened.
     #[tracing::instrument(skip_all)]
     async fn prune_blocks(&self, block_height: BitcoinBlockHeight) -> Result<PruneResult, Error> {
         if !self.context.config().bitcoin.prune {
@@ -375,8 +365,7 @@ mod tests {
         stacks_bitcoin_block_height: BitcoinBlockHeight::new(2_000),
     };
 
-    /// Build a happy-path `GetBlockchainInfoResult` matching the defaults
-    /// used by [`snapshot`].
+    /// Build a happy-path `GetBlockchainInfoResult` matching [`SNAPSHOT`].
     fn blockchain_info() -> GetBlockchainInfoResult {
         GetBlockchainInfoResult {
             chain: bitcoin::Network::Regtest,
