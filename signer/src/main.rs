@@ -15,6 +15,7 @@ use signer::api;
 use signer::api::ApiState;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
+use signer::bitcoin_pruner::BitcoinPrunerEventLoop;
 use signer::block_observer;
 use signer::blocklist_client::BlocklistClient;
 use signer::config::Settings;
@@ -168,6 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_checked(run_request_decider, &context),
         run_checked(run_transaction_coordinator, &context),
         run_checked(run_transaction_signer, &context),
+        run_checked(run_bitcoin_pruner, &context),
         // Signer info logger intentionally runned in unchecked mode,
         // since it is not necessary for signer to be operational.
         run_signer_info_logger(context.clone()),
@@ -456,6 +458,11 @@ async fn run_transaction_coordinator(ctx: impl Context) -> Result<(), Error> {
     };
 
     coord.run().await
+}
+
+/// Run the bitcoin pruner event-loop.
+async fn run_bitcoin_pruner(ctx: impl Context) -> Result<(), Error> {
+    BitcoinPrunerEventLoop::new(ctx).run().await
 }
 
 /// Run the request decider event-loop.
