@@ -1,5 +1,6 @@
 //! Handlers for the blocklist client API
 
+use crate::client::sanctions_file::SanctionsState;
 use crate::client::{risk_client, sanctions};
 use crate::common::error::{Error, ErrorResponse};
 use crate::config::{AssessmentMethod, Settings};
@@ -32,6 +33,7 @@ pub async fn check_address_handler(
     address: String,
     client: Client,
     config: Settings,
+    sanctions_state: SanctionsState,
 ) -> impl Reply {
     let result = (async {
         if let Some(risk_analysis) = &config.risk_analysis {
@@ -44,8 +46,11 @@ pub async fn check_address_handler(
                 }
             }
         } else if config.sanctions.is_some() {
-            // TODO: implement this
-            Err(Error::InternalServer)
+            if !sanctions_state.is_loaded() {
+                Err(Error::ServiceUnavailable)
+            } else {
+                Ok(sanctions_state.check_address(&address))
+            }
         } else {
             // This shouldn't happen since we validate the config
             Err(Error::InternalServer)
