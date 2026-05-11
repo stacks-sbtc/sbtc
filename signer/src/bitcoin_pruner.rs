@@ -6,6 +6,7 @@
 //!
 
 use futures::StreamExt;
+use tokio::sync::watch;
 
 use crate::bitcoin::BitcoinInteract;
 use crate::context::BitcoinPrunerEvent;
@@ -17,6 +18,7 @@ use crate::context::TxCoordinatorEvent;
 use crate::error::Error;
 use crate::stacks::api::StacksInteract;
 use crate::storage::model::BitcoinBlockHeight;
+use crate::storage::model::BitcoinBlockRef;
 
 /// The bitcoin pruner event loop.
 #[derive(Debug)]
@@ -268,16 +270,27 @@ impl<C: Context> BitcoinPrunerEventLoop<C> {
     }
 
     /// Run the bitcoin pruner event loop.
-    #[tracing::instrument(skip_all, name = "bitcoin-pruner", fields(
-        bitcoin_tip_hash = tracing::field::Empty,
-        bitcoin_tip_height = tracing::field::Empty,
-    ))]
-    pub async fn run(self) -> Result<(), Error> {
+    ///
+    /// The loop reads tenure events from the signer's broadcast channel
+    /// and forwards the latest chain tip to a worker task via a `watch`
+    /// channel. The actual prune work happens on the worker so that a
+    /// slow `pruneblockchain` RPC does not stop us from draining the
+    /// broadcast stream (which would otherwise lag other subscribers).
+    /// If multiple tenures arrive while a prune is in flight, only the
+    /// most recent one is processed when the worker next polls.
+    #[tracing::instrument(skip_all, name = "bitcoin-pruner")]
+    pub async fn run(self) -> Result<(), Error>
+    where
+        C: 'static,
+    {
         let start_message = BitcoinPrunerEvent::EventLoopStarted.into();
         if let Err(error) = self.context.signal(start_message) {
             tracing::error!(%error, "error signaling event loop start");
             return Err(error);
         };
+
+        let (tip_tx, tip_rx) = watch::channel::<Option<BitcoinBlockRef>>(None);
+        let worker = tokio::spawn(prune_worker(self.context.clone(), tip_rx));
 
         let mut signal_stream = self.context.as_signal_stream(run_loop_message_filter);
 
@@ -291,64 +304,103 @@ impl<C: Context> BitcoinPrunerEventLoop<C> {
                     let tracing_chain_tip = tracing::field::display(block_ref.block_hash);
                     span.record("bitcoin_tip_hash", tracing_chain_tip);
                     span.record("bitcoin_tip_height", *block_ref.block_height);
-
                     tracing::info!(
-                        "bitcoin pruner received tenure completed signal; pruning blocks"
+                        bitcoin_tip_hash = %block_ref.block_hash,
+                        bitcoin_tip_height = *block_ref.block_height,
+                        "bitcoin pruner received tenure completed signal; queuing prune"
                     );
-                    match self.prune_blocks(block_ref.block_height).await {
-                        Ok(outcome) => {
-                            if let PruneResult::Pruned(height) = &outcome {
-                                let event = BitcoinPrunerEvent::BlockPruned(*height);
-                                if let Err(error) = self.context.signal(event.into()) {
-                                    tracing::error!(%error, "error signaling block pruned event");
-                                }
-                            }
-                            outcome.log();
-                        }
-                        Err(error) => {
-                            tracing::error!(%error, "error pruning blocks; skipping this round");
-                        }
+                    // `watch::send` overwrites any pending value, so a
+                    // slow prune just means we skip ahead to the latest
+                    // tenure on the next worker iteration.
+                    if let Err(error) = tip_tx.send(Some(block_ref)) {
+                        tracing::error!(%error, "error sending chain tip to prune worker");
+                        break;
                     }
                 }
                 _ => {}
             }
         }
 
+        // Closing the sender lets the worker finish any in-flight prune
+        // and then exit.
+        drop(tip_tx);
+        if let Err(error) = worker.await {
+            tracing::error!(%error, "prune worker task did not shut down cleanly");
+        }
+
         tracing::info!("bitcoin pruner event loop has been stopped");
         Ok(())
     }
+}
 
-    /// Drive one prune round against bitcoin-core. Returns a
-    /// [`PruneResult`] indicating what happened.
-    #[tracing::instrument(skip_all)]
-    async fn prune_blocks(&self, block_height: BitcoinBlockHeight) -> Result<PruneResult, Error> {
-        if !self.context.config().bitcoin.prune {
-            return Ok(PruneResult::SignerPruningDisabled);
-        }
-
-        let bitcoin_client = self.context.get_bitcoin_client();
-        let blockchain_info = bitcoin_client.get_blockchain_info().await?;
-
-        let stacks_client = self.context.get_stacks_client();
-
-        let snapshot = PruneSnapshot {
-            chain_tip_height: block_height,
-            pruned: blockchain_info.pruned,
-            automatic_pruning: blockchain_info.automatic_pruning,
-            prune_height: blockchain_info.prune_height,
-            initial_block_download: blockchain_info.initial_block_download,
-            validated_blocks: blockchain_info.blocks,
-            chain: blockchain_info.chain,
-            stacks_bitcoin_block_height: stacks_client.get_node_info().await?.burn_block_height,
+/// Worker that drives one prune at a time. Sleeps in `tip_rx.changed()`
+/// between rounds; wakes when the main loop publishes a new tenure.
+#[tracing::instrument(skip_all, name = "bitcoin-pruner-worker", fields(
+    bitcoin_tip_hash = tracing::field::Empty,
+    bitcoin_tip_height = tracing::field::Empty,
+))]
+async fn prune_worker<C: Context>(ctx: C, mut tip_rx: watch::Receiver<Option<BitcoinBlockRef>>) {
+    while tip_rx.changed().await.is_ok() {
+        let block_ref = match *tip_rx.borrow_and_update() {
+            Some(b) => b,
+            None => continue,
         };
 
-        match snapshot.target_height() {
-            Err(outcome) => Ok(outcome),
-            Ok(target_height) => match bitcoin_client.prune_blockchain(target_height).await? {
-                Some(pruned_height) => Ok(PruneResult::Pruned(pruned_height)),
-                None => Ok(PruneResult::PruneRpcNoOp),
-            },
+        let span = tracing::Span::current();
+        let tracing_chain_tip = tracing::field::display(block_ref.block_hash);
+        span.record("bitcoin_tip_hash", tracing_chain_tip);
+        span.record("bitcoin_tip_height", *block_ref.block_height);
+
+        match prune_blocks(&ctx, block_ref.block_height).await {
+            Ok(outcome) => {
+                if let PruneResult::Pruned(height) = &outcome {
+                    let event = BitcoinPrunerEvent::BlockPruned(*height);
+                    if let Err(error) = ctx.signal(event.into()) {
+                        tracing::error!(%error, "error signaling block pruned event");
+                    }
+                }
+                outcome.log();
+            }
+            Err(error) => {
+                tracing::error!(%error, "error pruning blocks; skipping this round");
+            }
         }
+    }
+}
+
+/// Drive one prune round against bitcoin-core. Returns a [`PruneResult`]
+/// describing what happened (including skips). RPC and transport
+/// failures are returned as [`Err`](Result::Err).
+async fn prune_blocks<C>(ctx: &C, block_height: BitcoinBlockHeight) -> Result<PruneResult, Error>
+where
+    C: Context,
+{
+    if !ctx.config().bitcoin.prune {
+        return Ok(PruneResult::SignerPruningDisabled);
+    }
+
+    let bitcoin_client = ctx.get_bitcoin_client();
+    let blockchain_info = bitcoin_client.get_blockchain_info().await?;
+
+    let stacks_client = ctx.get_stacks_client();
+
+    let snapshot = PruneSnapshot {
+        chain_tip_height: block_height,
+        pruned: blockchain_info.pruned,
+        automatic_pruning: blockchain_info.automatic_pruning,
+        prune_height: blockchain_info.prune_height,
+        initial_block_download: blockchain_info.initial_block_download,
+        validated_blocks: blockchain_info.blocks,
+        chain: blockchain_info.chain,
+        stacks_bitcoin_block_height: stacks_client.get_node_info().await?.burn_block_height,
+    };
+
+    match snapshot.target_height() {
+        Err(outcome) => Ok(outcome),
+        Ok(target_height) => match bitcoin_client.prune_blockchain(target_height).await? {
+            Some(pruned_height) => Ok(PruneResult::Pruned(pruned_height)),
+            None => Ok(PruneResult::PruneRpcNoOp),
+        },
     }
 }
 
@@ -540,9 +592,7 @@ mod tests {
             .modify_settings(|settings| settings.bitcoin.prune = false)
             .build();
 
-        let pruner = BitcoinPrunerEventLoop::new(context);
-        let outcome = pruner
-            .prune_blocks(BitcoinBlockHeight::new(1_288))
+        let outcome = prune_blocks(&context, BitcoinBlockHeight::new(1_288))
             .await
             .unwrap();
 
@@ -593,9 +643,7 @@ mod tests {
             })
             .await;
 
-        let pruner = BitcoinPrunerEventLoop::new(context);
-        let outcome = pruner
-            .prune_blocks(BitcoinBlockHeight::new(1_288))
+        let outcome = prune_blocks(&context, BitcoinBlockHeight::new(1_288))
             .await
             .unwrap();
 

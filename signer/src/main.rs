@@ -461,7 +461,7 @@ async fn run_transaction_coordinator(ctx: impl Context) -> Result<(), Error> {
 }
 
 /// Run the bitcoin pruner event-loop.
-async fn run_bitcoin_pruner(ctx: impl Context) -> Result<(), Error> {
+async fn run_bitcoin_pruner(ctx: impl Context + 'static) -> Result<(), Error> {
     BitcoinPrunerEventLoop::new(ctx).run().await
 }
 
