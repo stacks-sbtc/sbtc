@@ -1,3 +1,81 @@
+# !! ==============================================================================
+# !! Blocklist Client Configuration
+# !! ==============================================================================
 [server]
+# The network interface (ip address) to bind the blocklist client to.
+#
+# Required: true
+# Environment: BLOCKLIST_CLIENT_SERVER__HOST
 host = "127.0.0.1"
+
+# The port to bind the blocklist client to.
+#
+# Required: true
+# Environment: BLOCKLIST_CLIENT_SERVER__PORT
 port = 3030
+
+# !! ==============================================================================
+# !! Sanctions List Configuration
+# !!
+# !! Configures the blocklist client to evaluate addresses against a sanctions
+# !! list fetched from a URL (and optionally seeded from a local file).
+# !!
+# !! `sanctions` and `risk_analysis` are mutually exclusive; configure exactly one.
+# !! ==============================================================================
+# [sanctions]
+# The URL to fetch the sanctions list from.
+#
+# Required: true (when the `sanctions` section is configured)
+# Environment: BLOCKLIST_CLIENT_SANCTIONS__URL
+# url = "https://example.com/sanctions.txt"
+
+# Optional HTTP header to send with the sanctions list fetch request, useful
+# for providing an API key or other authorization token.
+#
+# Required: false
+# Environment: BLOCKLIST_CLIENT_SANCTIONS__HEADER__KEY
+# Environment: BLOCKLIST_CLIENT_SANCTIONS__HEADER__VALUE
+# header = { key = "X-API-Key", value = "your-api-key" }
+
+# The polling interval, in seconds, used to refresh the sanctions list from
+# the configured URL.
+#
+# Default: 3600
+# Required: false
+# Environment: BLOCKLIST_CLIENT_SANCTIONS__POLLING_INTERVAL
+# polling_interval = 3600
+
+# Optional path to a local sanctions list file used to seed the in-memory set
+# before the first successful fetch from `url`.
+#
+# Required: false
+# Environment: BLOCKLIST_CLIENT_SANCTIONS__LOCAL_PATH
+# local_path = "/path/to/sanctions.txt"
+
+# !! ==============================================================================
+# !! Risk Analysis Configuration
+# !!
+# !! Configures the blocklist client to evaluate addresses against a third-party
+# !! risk analysis API.
+# !!
+# !! `sanctions` and `risk_analysis` are mutually exclusive; configure exactly one.
+# !! ==============================================================================
+# [risk_analysis]
+# The base URL of the risk analysis API.
+#
+# Required: true (when the `risk_analysis` section is configured)
+# Environment: BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL
+# api_url = "https://api.provider.example.com"
+
+# The API key used to authenticate against the risk analysis API.
+#
+# Required: true (when the `risk_analysis` section is configured)
+# Environment: BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY
+# api_key = "your-api-key"
+
+# Which assessment method to request from the risk analysis API.
+#
+# Required: true (when the `risk_analysis` section is configured)
+# Possible values: sanctions, risk_analysis
+# Environment: BLOCKLIST_CLIENT_RISK_ANALYSIS__ASSESSMENT_METHOD
+# assessment_method = "sanctions"
