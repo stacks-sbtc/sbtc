@@ -1667,6 +1667,12 @@ impl Sub for BitcoinBlockHeight {
 }
 
 impl BitcoinBlockHeight {
+    /// Create a BitcoinBlockHeight from a u64.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(height: u64) -> Self {
+        Self(height)
+    }
+
     /// Behaves same as u64.saturating_add
     pub fn saturating_add(self, rhs: impl Into<BitcoinBlockHeight>) -> Self {
         let rhs: u64 = rhs.into().0;

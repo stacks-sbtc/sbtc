@@ -17,7 +17,6 @@ use crate::context::TxCoordinatorEvent;
 use crate::error::Error;
 use crate::stacks::api::StacksInteract;
 use crate::storage::model::BitcoinBlockHeight;
-use crate::storage::model::BitcoinBlockRef;
 
 /// The bitcoin pruner event loop.
 #[derive(Debug)]
@@ -42,11 +41,10 @@ const KEEP_BLOCKS_NON_MAINNET: u64 = 100;
 
 /// The minimum number of additional blocks beyond the last pruned height
 /// that must be eligible for pruning before we will trigger another prune
-/// while bitcoin-core is still catching up to the chain tip. Pruning is
-/// an expensive operation so while bitcoin-core is syncing we only do it
-/// periodically. This interval is not used once bitcoin-core has finished
-/// its initial block download.
-const CATCHUP_PRUNE_INTERVAL: u64 = 25_000;
+/// while bitcoin-core is still catching up to the chain tip. It
+/// corresponds to 180 days worth of blocks. This interval is not used once
+/// bitcoin-core has finished its initial block download.
+const CATCHUP_PRUNE_INTERVAL: u64 = 6 * 24 * 180;
 
 /// Returns the number of bitcoin blocks we want bitcoin-core to keep
 /// available for the given network.
@@ -63,7 +61,7 @@ fn keep_blocks_for_network(network: bitcoin::Network) -> u64 {
 /// of these variants; transport and RPC failures are reported as
 /// [`Err`](Result::Err).
 #[derive(Debug, PartialEq, Eq)]
-pub enum PruneOutcome {
+pub enum PruneResult {
     /// bitcoin-core successfully pruned blocks up to the indicated
     /// height.
     Pruned(BitcoinBlockHeight),
@@ -114,7 +112,7 @@ pub enum PruneOutcome {
     },
 }
 
-impl PruneOutcome {
+impl PruneResult {
     /// Emit tracing output for this outcome (severity and fields depend on the variant).
     fn log(self) {
         match self {
@@ -171,72 +169,83 @@ impl PruneOutcome {
     }
 }
 
-/// Bundled inputs for [`PruneInputs::decide`]. Caller must
-/// already have established signer pruning is enabled; do not build this
-/// when the signer's `bitcoin.prune` config flag is false (exit early instead).
+/// Snapshot of the state used to decide whether (and where) to prune
+/// bitcoin-core on a given tenure. Caller must already have established
+/// signer pruning is enabled; do not build this when the signer's
+/// `bitcoin.prune` config flag is false (exit early instead).
+///
+/// The `pruned`, `automatic_pruning`, `prune_height`,
+/// `initial_block_download`, `validated_blocks`, and `chain` fields are
+/// sourced from bitcoin-core's `getblockchaininfo` response.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PruneInputs {
-    /// Tenure block from the coordinator signal.
-    pub block_ref: BitcoinBlockRef,
-    /// `GetBlockchainInfoResult::pruned`.
-    pub bitcoin_core_reports_pruned: bool,
-    /// `GetBlockchainInfoResult::automatic_pruning`.
+pub struct PruneSnapshot {
+    /// Height of the bitcoin chain tip the tenure was anchored to.
+    pub chain_tip_height: BitcoinBlockHeight,
+    /// Whether bitcoin-core has pruning enabled.
+    pub pruned: bool,
+    /// Whether bitcoin-core is pruning automatically. Some(false)
+    /// indicates manual pruning, and this is None when bitcoin-core did
+    /// not return the field in a `getblockchaininfo` response, which
+    /// indicates that pruning is disabled.
     pub automatic_pruning: Option<bool>,
-    /// `GetBlockchainInfoResult::prune_height`.
+    /// First non-pruned block height — in other words, the lowest height
+    /// bitcoin-core still has on disk. This is None when bitcoin-core did
+    /// not return the field in a `getblockchaininfo` response.
     pub prune_height: Option<u64>,
-    /// `GetBlockchainInfoResult::initial_block_download`.
+    /// Whether bitcoin-core is still in its initial block download.
     pub initial_block_download: bool,
-    /// `GetBlockchainInfoResult::blocks`.
+    /// Height of the most-work fully-validated chain.
     pub validated_blocks: u64,
-    /// `GetBlockchainInfoResult::chain`.
-    pub chain_network: bitcoin::Network,
-    /// `GetNodeInfoResponse::burn_block_height` from the Stacks node.
-    pub stacks_burn_block_height: BitcoinBlockHeight,
+    /// The bitcoin network bitcoin-core is connected to.
+    pub chain: bitcoin::Network,
+    /// `GetNodeInfoResponse::burn_block_height` — the bitcoin block
+    /// height the connected stacks node has processed up to.
+    pub stacks_bitcoin_block_height: BitcoinBlockHeight,
 }
 
-/// Same branching order as [`BitcoinPrunerEventLoop::prune_blocks`]. No I/O.
-///
-/// - [`Ok`] is the height to pass to `pruneblockchain`.
-/// - [`Err`] is a terminal outcome (no prune RPC this round).
-///
-/// When the signer is not configured to prune, callers should return
-/// [`PruneOutcome::SignerPruningDisabled`] before building [`PruneInputs`];
-/// this function does not represent that case.
-impl PruneInputs {
-    /// Decide whether to prune blocks based on the inputs.
-    fn compute_target_height(&self) -> Result<BitcoinBlockHeight, PruneOutcome> {
-        if !self.bitcoin_core_reports_pruned {
-            return Err(PruneOutcome::BitcoinPruningDisabled);
+impl PruneSnapshot {
+    /// Validate the snapshot and, if pruning should proceed, return the
+    /// height to pass to `pruneblockchain`.
+    ///
+    /// - [`Ok`] is the height to pass to `pruneblockchain`.
+    /// - [`Err`] is a terminal outcome (no prune RPC this round).
+    ///
+    /// When the signer is not configured to prune, callers should return
+    /// [`PruneResult::SignerPruningDisabled`] before building a
+    /// [`PruneSnapshot`]; this function does not represent that case.
+    fn target_height(&self) -> Result<BitcoinBlockHeight, PruneResult> {
+        if !self.pruned {
+            return Err(PruneResult::BitcoinPruningDisabled);
         }
         if self.automatic_pruning.unwrap_or(true) {
-            return Err(PruneOutcome::BitcoinAutomaticPruningEnabled);
+            return Err(PruneResult::BitcoinAutomaticPruningEnabled);
         }
 
-        let keep_blocks = keep_blocks_for_network(self.chain_network);
-        let target_height = self.block_ref.block_height.saturating_sub(keep_blocks);
+        let keep_blocks = keep_blocks_for_network(self.chain);
+        let target_height = self.chain_tip_height.saturating_sub(keep_blocks);
 
         let Some(prune_height) = self.prune_height.map(BitcoinBlockHeight::from) else {
-            return Err(PruneOutcome::PruneHeightMissing);
+            return Err(PruneResult::PruneHeightMissing);
         };
 
         if prune_height >= target_height {
-            return Err(PruneOutcome::AlreadyAtTarget { target_height, prune_height });
+            return Err(PruneResult::AlreadyAtTarget { target_height, prune_height });
         }
 
         if self.initial_block_download
             && *target_height.saturating_sub(prune_height) < CATCHUP_PRUNE_INTERVAL
         {
-            return Err(PruneOutcome::CatchupIntervalNotReached {
+            return Err(PruneResult::CatchupIntervalNotReached {
                 target_height,
                 prune_height,
                 validated_blocks: self.validated_blocks,
             });
         }
 
-        if self.stacks_burn_block_height <= target_height {
-            return Err(PruneOutcome::StacksNodeBehind {
+        if self.stacks_bitcoin_block_height <= target_height {
+            return Err(PruneResult::StacksNodeBehind {
                 target_height,
-                node_bitcoin_height: self.stacks_burn_block_height,
+                node_bitcoin_height: self.stacks_bitcoin_block_height,
             });
         }
 
@@ -255,7 +264,10 @@ impl<C: Context> BitcoinPrunerEventLoop<C> {
     }
 
     /// Run the bitcoin pruner event loop.
-    #[tracing::instrument(skip_all, name = "bitcoin-pruner")]
+    #[tracing::instrument(skip_all, name = "bitcoin-pruner", fields(
+        bitcoin_tip_hash = tracing::field::Empty,
+        bitcoin_tip_height = tracing::field::Empty,
+    ))]
     pub async fn run(self) -> Result<(), Error> {
         let start_message = BitcoinPrunerEvent::EventLoopStarted.into();
         if let Err(error) = self.context.signal(start_message) {
@@ -271,10 +283,15 @@ impl<C: Context> BitcoinPrunerEventLoop<C> {
                 SignerSignal::Event(SignerEvent::TxCoordinator(
                     TxCoordinatorEvent::TenureCompleted(block_ref),
                 )) => {
+                    let span = tracing::Span::current();
+                    let tracing_chain_tip = tracing::field::display(block_ref.block_hash);
+                    span.record("bitcoin_tip_hash", tracing_chain_tip);
+                    span.record("bitcoin_tip_height", *block_ref.block_height);
+
                     tracing::info!(
                         "bitcoin pruner received tenure completed signal; pruning blocks"
                     );
-                    match self.prune_blocks(block_ref).await {
+                    match self.prune_blocks(block_ref.block_height).await {
                         Ok(outcome) => outcome.log(),
                         Err(error) => {
                             tracing::error!(%error, "error pruning blocks; skipping this round");
@@ -291,14 +308,14 @@ impl<C: Context> BitcoinPrunerEventLoop<C> {
 
     /// Prune blocks from bitcoin-core.
     ///
-    /// On success, returns a [`PruneOutcome`] describing what happened
+    /// On success, returns a [`PruneResult`] describing what happened
     /// (including cases where pruning was skipped). The caller should
-    /// invoke [`PruneOutcome::log`] if tracing output is desired. RPC and
+    /// invoke [`PruneResult::log`] if tracing output is desired. RPC and
     /// transport failures are returned as [`Err`](Result::Err).
-    #[tracing::instrument(skip_all, fields(block_hash = %block_ref.block_hash))]
-    async fn prune_blocks(&self, block_ref: BitcoinBlockRef) -> Result<PruneOutcome, Error> {
+    #[tracing::instrument(skip_all)]
+    async fn prune_blocks(&self, block_height: BitcoinBlockHeight) -> Result<PruneResult, Error> {
         if !self.context.config().bitcoin.prune {
-            return Ok(PruneOutcome::SignerPruningDisabled);
+            return Ok(PruneResult::SignerPruningDisabled);
         }
 
         let bitcoin_client = self.context.get_bitcoin_client();
@@ -306,22 +323,22 @@ impl<C: Context> BitcoinPrunerEventLoop<C> {
 
         let stacks_client = self.context.get_stacks_client();
 
-        let inputs = PruneInputs {
-            block_ref,
-            bitcoin_core_reports_pruned: blockchain_info.pruned,
+        let snapshot = PruneSnapshot {
+            chain_tip_height: block_height,
+            pruned: blockchain_info.pruned,
             automatic_pruning: blockchain_info.automatic_pruning,
             prune_height: blockchain_info.prune_height,
             initial_block_download: blockchain_info.initial_block_download,
             validated_blocks: blockchain_info.blocks,
-            chain_network: blockchain_info.chain,
-            stacks_burn_block_height: stacks_client.get_node_info().await?.burn_block_height,
+            chain: blockchain_info.chain,
+            stacks_bitcoin_block_height: stacks_client.get_node_info().await?.burn_block_height,
         };
 
-        match inputs.compute_target_height() {
+        match snapshot.target_height() {
             Err(outcome) => Ok(outcome),
             Ok(target_height) => match bitcoin_client.prune_blockchain(target_height).await? {
-                Some(pruned_height) => Ok(PruneOutcome::Pruned(pruned_height)),
-                None => Ok(PruneOutcome::PruneRpcNoOp),
+                Some(pruned_height) => Ok(PruneResult::Pruned(pruned_height)),
+                None => Ok(PruneResult::PruneRpcNoOp),
             },
         }
     }
@@ -338,52 +355,156 @@ mod tests {
     use test_case::test_case;
 
     use crate::stacks::api::GetNodeInfoResponse;
-    use crate::storage::model::BitcoinBlockHash;
     use crate::testing::context::*;
 
     use super::*;
 
-    /// Per-test inputs for [`prune_blocks_outcome`]. Each field is
-    /// optional: tests set the ones they care about and fall back to
-    /// happy-path defaults (regtest, chain tip 1000, manual pruning
-    /// enabled, prune height 500, IBD finished, stacks and prune RPCs not
-    /// reached) via `..Default::default()`.
-    ///
-    /// Fields that are themselves `Option` in `GetBlockchainInfoResult`
-    /// (`automatic_pruning`, `prune_height`) are wrapped in an outer
-    /// `Option` so that tests can distinguish "leave at default" (`None`)
-    /// from "set to `None`" (`Some(None)`).
-    #[derive(Clone)]
-    struct PruneScenario {
-        chain: bitcoin::Network,
-        blocks: u64,
-        pruned: bool,
-        automatic_pruning: Option<bool>,
-        prune_height: Option<u64>,
-        initial_block_download: bool,
-        /// `burn_block_height` reported by the mocked stacks RPC. `None`
-        /// means the test does not expect the stacks RPC to be reached
-        /// (no expectation is registered).
-        stacks_burn_height: u64,
-        /// If set, registers a mock for `prune_blockchain`. The outer
-        /// `Option` is whether we expect the prune_blockchain RPC to be
-        /// invoked; the inner value response.
-        prune_blockchain_result: Option<Option<u64>>,
+    /// A happy-path `PruneSnapshot` used as the baseline for the
+    /// `target_height` test cases: regtest (so `keep_blocks` is 100),
+    /// chain tip at 1000 (so the target prune height is 900), manual
+    /// pruning enabled, bitcoin-core already pruned up to 500, IBD
+    /// finished, stacks node ahead of the target.
+    const SNAPSHOT: PruneSnapshot = PruneSnapshot {
+        chain_tip_height: BitcoinBlockHeight::new(1_000),
+        pruned: true,
+        automatic_pruning: Some(false),
+        prune_height: Some(500),
+        initial_block_download: false,
+        validated_blocks: 1_000,
+        chain: bitcoin::Network::Regtest,
+        stacks_bitcoin_block_height: BitcoinBlockHeight::new(2_000),
+    };
+
+    /// Build a happy-path `GetBlockchainInfoResult` matching the defaults
+    /// used by [`snapshot`].
+    fn blockchain_info() -> GetBlockchainInfoResult {
+        GetBlockchainInfoResult {
+            chain: bitcoin::Network::Regtest,
+            blocks: 1_000,
+            headers: 1_000,
+            best_block_hash: bitcoin::BlockHash::all_zeros(),
+            difficulty: 0.0,
+            median_time: 0,
+            verification_progress: 1.0,
+            initial_block_download: false,
+            chain_work: Vec::new(),
+            size_on_disk: 0,
+            pruned: true,
+            prune_height: Some(500),
+            automatic_pruning: Some(false),
+            prune_target_size: None,
+            softforks: HashMap::new(),
+            warnings: StringOrStringArray::String(String::new()),
+        }
     }
 
-    impl Default for PruneScenario {
-        fn default() -> Self {
-            Self {
-                chain: bitcoin::Network::Regtest,
-                blocks: 1_000,
-                pruned: true,
-                automatic_pruning: None,
-                prune_height: Some(0),
-                initial_block_download: false,
-                stacks_burn_height: 0,
-                prune_blockchain_result: None,
-            }
+    #[test_case(
+        PruneSnapshot { pruned: false, ..SNAPSHOT },
+        PruneResult::BitcoinPruningDisabled
+        ; "BitcoinPruningDisabled when bitcoin-core has pruning off"
+    )]
+    #[test_case(
+        PruneSnapshot { automatic_pruning: Some(true), ..SNAPSHOT },
+        PruneResult::BitcoinAutomaticPruningEnabled
+        ; "BitcoinAutomaticPruningEnabled when bitcoin-core auto-prunes"
+    )]
+    #[test_case(
+        PruneSnapshot { prune_height: None, ..SNAPSHOT },
+        PruneResult::PruneHeightMissing
+        ; "PruneHeightMissing when bitcoin-core does not return a prune height"
+    )]
+    #[test_case(
+        PruneSnapshot { prune_height: Some(950), ..SNAPSHOT },
+        PruneResult::AlreadyAtTarget {
+            target_height: BitcoinBlockHeight::new(900),
+            prune_height: BitcoinBlockHeight::new(950),
         }
+        ; "AlreadyAtTarget when prune height is past the target"
+    )]
+    #[test_case(
+        PruneSnapshot {
+            prune_height: Some(800),
+            initial_block_download: true,
+            ..SNAPSHOT
+        },
+        PruneResult::CatchupIntervalNotReached {
+            target_height: BitcoinBlockHeight::new(900),
+            prune_height: BitcoinBlockHeight::new(800),
+            validated_blocks: 1_000,
+        }
+        ; "CatchupIntervalNotReached on regtest during IBD with a small gap"
+    )]
+    #[test_case(
+        PruneSnapshot {
+            chain: bitcoin::Network::Bitcoin,
+            chain_tip_height: BitcoinBlockHeight::new(100_000),
+            prune_height: Some(30_000),
+            initial_block_download: true,
+            stacks_bitcoin_block_height: BitcoinBlockHeight::new(200_000),
+            ..SNAPSHOT
+        },
+        PruneResult::CatchupIntervalNotReached {
+            target_height: BitcoinBlockHeight::new(100_000 - u16::MAX as u64),
+            prune_height: BitcoinBlockHeight::new(30_000),
+            validated_blocks: 1_000,
+        }
+        ; "CatchupIntervalNotReached on mainnet during IBD with a small gap"
+    )]
+    #[test_case(
+        PruneSnapshot { stacks_bitcoin_block_height: BitcoinBlockHeight::new(800), ..SNAPSHOT },
+        PruneResult::StacksNodeBehind {
+            target_height: BitcoinBlockHeight::new(900),
+            node_bitcoin_height: BitcoinBlockHeight::new(800),
+        }
+        ; "StacksNodeBehind on regtest when stacks node is behind the target"
+    )]
+    #[test_case(
+        PruneSnapshot {
+            chain: bitcoin::Network::Bitcoin,
+            chain_tip_height: BitcoinBlockHeight::new(100_000),
+            stacks_bitcoin_block_height: BitcoinBlockHeight::new(34_000),
+            ..SNAPSHOT
+        },
+        PruneResult::StacksNodeBehind {
+            target_height: BitcoinBlockHeight::new(100_000 - u16::MAX as u64),
+            node_bitcoin_height: BitcoinBlockHeight::new(34_000),
+        }
+        ; "StacksNodeBehind on mainnet when stacks node is behind the target"
+    )]
+    fn target_height_outcome(snapshot: PruneSnapshot, expected: PruneResult) {
+        assert_eq!(snapshot.target_height(), Err(expected));
+    }
+
+    // Non-mainnet networks all share `KEEP_BLOCKS_NON_MAINNET` (100);
+    // mainnet uses `KEEP_BLOCKS_MAINNET` (u16::MAX = 65_535). The cases
+    // below exercise both branches of `keep_blocks_for_network`.
+    #[test_case(
+        SNAPSHOT,
+        BitcoinBlockHeight::new(900)
+        ; "regtest: chain tip minus 100"
+    )]
+    #[test_case(
+        PruneSnapshot { chain: bitcoin::Network::Testnet, ..SNAPSHOT },
+        BitcoinBlockHeight::new(900)
+        ; "testnet: chain tip minus 100"
+    )]
+    #[test_case(
+        PruneSnapshot { chain: bitcoin::Network::Signet, ..SNAPSHOT },
+        BitcoinBlockHeight::new(900)
+        ; "signet: chain tip minus 100"
+    )]
+    #[test_case(
+        PruneSnapshot {
+            chain: bitcoin::Network::Bitcoin,
+            chain_tip_height: BitcoinBlockHeight::new(100_000),
+            stacks_bitcoin_block_height: BitcoinBlockHeight::new(99_998),
+            ..SNAPSHOT
+        },
+        BitcoinBlockHeight::new(100_000 - u16::MAX as u64)
+        ; "mainnet: chain tip minus u16::MAX"
+    )]
+    fn target_height_happy_path(snapshot: PruneSnapshot, expected: BitcoinBlockHeight) {
+        assert_eq!(snapshot.target_height(), Ok(expected));
     }
 
     /// Build a `GetNodeInfoResponse` whose `burn_block_height` matches
@@ -396,15 +517,6 @@ mod tests {
         serde_json::from_value(value).unwrap()
     }
 
-    fn block_ref_at(height: u64) -> BitcoinBlockRef {
-        BitcoinBlockRef {
-            block_hash: BitcoinBlockHash::from([0; 32]),
-            block_height: height.into(),
-        }
-    }
-
-    /// `SignerPruningDisabled` is the only outcome that returns before
-    /// touching either RPC client, so it gets its own minimal test.
     #[tokio::test]
     async fn prune_blocks_returns_signer_pruning_disabled_when_config_disabled() {
         let context = TestContext::builder()
@@ -414,154 +526,63 @@ mod tests {
             .build();
 
         let pruner = BitcoinPrunerEventLoop::new(context);
-        let outcome = pruner.prune_blocks(block_ref_at(1_000)).await.unwrap();
+        let outcome = pruner
+            .prune_blocks(BitcoinBlockHeight::new(1_000))
+            .await
+            .unwrap();
 
-        assert_eq!(outcome, PruneOutcome::SignerPruningDisabled);
+        assert_eq!(outcome, PruneResult::SignerPruningDisabled);
     }
 
-    // On non-mainnet `keep_blocks` is 100, so with a chain tip of 1000
-    // the target prune height is 900 in every case below.
     #[test_case(
-        PruneScenario { 
-            pruned: false,
-            ..Default::default()
-        },
-        PruneOutcome::BitcoinPruningDisabled
-        ; "BitcoinPruningDisabled when bitcoin-core has pruning off"
-    )]
-    #[test_case(
-        PruneScenario { automatic_pruning: Some(true), ..Default::default() },
-        PruneOutcome::BitcoinAutomaticPruningEnabled
-        ; "BitcoinAutomaticPruningEnabled when bitcoin-core auto-prunes"
-    )]
-    #[test_case(
-        PruneScenario { 
-            prune_height: None,
-            automatic_pruning: Some(false),
-            ..Default::default()
-        },
-        PruneOutcome::PruneHeightMissing
-        ; "PruneHeightMissing when bitcoin-core does not return a prune height"
-    )]
-    #[test_case(
-        PruneScenario { 
-            prune_height: Some(950),
-            automatic_pruning: Some(false),
-            ..Default::default()
-        },
-        PruneOutcome::AlreadyAtTarget {
-            target_height: BitcoinBlockHeight::from(900u64),
-            prune_height: BitcoinBlockHeight::from(950u64),
-        }
-        ; "AlreadyAtTarget when prune height is past the target"
-    )]
-    #[test_case(
-        PruneScenario {
-            prune_height: Some(800),
-            initial_block_download: true,
-            automatic_pruning: Some(false),
-            ..Default::default()
-        },
-        PruneOutcome::CatchupIntervalNotReached {
-            target_height: BitcoinBlockHeight::from(900u64),
-            prune_height: BitcoinBlockHeight::from(800u64),
-            validated_blocks: 1_000,
-        }
-        ; "CatchupIntervalNotReached during IBD with a small gap"
-    )]
-    #[test_case(
-        PruneScenario { 
-            stacks_burn_height: 800,
-            automatic_pruning: Some(false),
-            ..Default::default() 
-        },
-        PruneOutcome::StacksNodeBehind {
-            target_height: BitcoinBlockHeight::from(900u64),
-            node_bitcoin_height: BitcoinBlockHeight::from(800u64),
-        }
-        ; "StacksNodeBehind when stacks node is behind the target"
-    )]
-    #[test_case(
-        PruneScenario {
-            stacks_burn_height: 2_000,
-            automatic_pruning: Some(false),
-            prune_blockchain_result: Some(Some(900)),
-            ..Default::default()
-        },
-        PruneOutcome::Pruned(BitcoinBlockHeight::from(900u64))
+        Some(BitcoinBlockHeight::from(900u64)),
+        PruneResult::Pruned(BitcoinBlockHeight::from(900u64))
         ; "Pruned when the prune RPC returns the target height"
     )]
     #[test_case(
-        PruneScenario {
-            stacks_burn_height: 2_000,
-            automatic_pruning: Some(false),
-            prune_blockchain_result: Some(None),
-            ..Default::default()
-        },
-        PruneOutcome::PruneRpcNoOp
+        None,
+        PruneResult::PruneRpcNoOp
         ; "PruneRpcNoOp when the prune RPC returns -1"
     )]
     #[tokio::test]
-    async fn prune_blocks_outcome(scenario: PruneScenario, expected: PruneOutcome) {
+    async fn prune_blocks_invokes_prune_rpc(
+        prune_rpc_result: Option<BitcoinBlockHeight>,
+        expected: PruneResult,
+    ) {
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|settings| settings.bitcoin.prune = true)
             .build();
 
-        let blockchain_info = GetBlockchainInfoResult {
-            chain: scenario.chain,
-            blocks: scenario.blocks,
-            headers: 5 * scenario.blocks,
-            best_block_hash: bitcoin::BlockHash::all_zeros(),
-            difficulty: 0.0,
-            median_time: 0,
-            verification_progress: 1.0,
-            initial_block_download: scenario.initial_block_download,
-            chain_work: Vec::new(),
-            size_on_disk: 0,
-            pruned: scenario.pruned,
-            prune_height: scenario.prune_height,
-            automatic_pruning: scenario.automatic_pruning,
-            prune_target_size: None,
-            softforks: HashMap::new(),
-            warnings: StringOrStringArray::String(String::new()),
-        };
-
         context
             .with_bitcoin_client(|client| {
                 client
                     .expect_get_blockchain_info()
                     .once()
-                    .returning(move || {
-                        let info = blockchain_info.clone();
-                        Box::pin(async move { Ok(info) })
-                    });
-
-                if let Some(result) = scenario.prune_blockchain_result {
-                    client
-                        .expect_prune_blockchain()
-                        .once()
-                        .withf(|h| *h == BitcoinBlockHeight::from(900u64))
-                        .returning(move |_| {
-                            Box::pin(async move { Ok(result.map(BitcoinBlockHeight::from)) })
-                        });
-                }
+                    .returning(|| Box::pin(async { Ok(blockchain_info()) }));
+                client
+                    .expect_prune_blockchain()
+                    .once()
+                    .withf(|h| *h == BitcoinBlockHeight::from(900u64))
+                    .returning(move |_| Box::pin(async move { Ok(prune_rpc_result) }));
             })
             .await;
 
         context
             .with_stacks_client(|client| {
-                client.expect_get_node_info().once().returning(move || {
-                    Box::pin(
-                        async move { Ok(node_info_with_burn_height(scenario.stacks_burn_height)) },
-                    )
-                });
+                client
+                    .expect_get_node_info()
+                    .once()
+                    .returning(|| Box::pin(async { Ok(node_info_with_burn_height(2_000)) }));
             })
             .await;
 
         let pruner = BitcoinPrunerEventLoop::new(context);
-        let outcome = pruner.prune_blocks(block_ref_at(1_000)).await.unwrap();
+        let outcome = pruner
+            .prune_blocks(BitcoinBlockHeight::new(1_000))
+            .await
+            .unwrap();
 
         assert_eq!(outcome, expected);
     }
