@@ -142,8 +142,7 @@ export class EmilyStack extends cdk.Stack {
             encryption: s3.BucketEncryption.S3_MANAGED,
             enforceSSL: true,
             removalPolicy,
-            // TODO: uncomment this before merging
-            // autoDeleteObjects: removalPolicy === cdk.RemovalPolicy.DESTROY,
+            autoDeleteObjects: removalPolicy === cdk.RemovalPolicy.DESTROY,
         });
     }
 
