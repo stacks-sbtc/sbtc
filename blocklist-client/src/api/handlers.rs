@@ -25,7 +25,8 @@ use warp::{Rejection, Reply, http::StatusCode};
     (status = 400, description = "Invalid request body"),
     (status = 404, description = "Address not found"),
     (status = 405, description = "Method not allowed"),
-    (status = 500, description = "Internal server error")
+    (status = 500, description = "Internal server error"),
+    (status = 503, description = "Sanctions list not loaded yet")
     )
 )]
 
@@ -47,9 +48,9 @@ pub async fn check_address_handler(
             }
         } else if config.sanctions.is_some() {
             if !sanctions_state.is_loaded() {
-                Err(Error::ServiceUnavailable)
+                Err(Error::SanctionsListNotReady)
             } else {
-                Ok(sanctions_state.check_address(&address))
+                Ok(sanctions_state.check_address(&address).await)
             }
         } else {
             // This shouldn't happen since we validate the config

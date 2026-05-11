@@ -3,11 +3,12 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
 
 use reqwest::Client;
 use tokio::fs::read_to_string;
+use tokio::sync::RwLock;
 
 use crate::common::error::Error;
 use crate::common::{BlocklistStatus, RiskSeverity};
@@ -28,18 +29,14 @@ impl SanctionsState {
     }
 
     /// Replace the in-memory addresses and mark the state as loaded.
-    pub fn load(&self, addresses: HashSet<String>) {
-        *self.addresses.write().expect("sanctions lock poisoned") = addresses;
+    pub async fn load(&self, addresses: HashSet<String>) {
+        *self.addresses.write().await = addresses;
         self.loaded.store(true, Ordering::Release);
     }
 
     /// Look up an address in the sanctions set.
-    pub fn check_address(&self, address: &str) -> BlocklistStatus {
-        let blocked = self
-            .addresses
-            .read()
-            .expect("sanctions lock poisoned")
-            .contains(address);
+    pub async fn check_address(&self, address: &str) -> BlocklistStatus {
+        let blocked = self.addresses.read().await.contains(address);
 
         if blocked {
             BlocklistStatus {
@@ -82,7 +79,7 @@ pub async fn run_refresh_loop(
         match fetch(&client, &config).await {
             Ok(set) => {
                 let count = set.len();
-                sanctions_state.load(set);
+                sanctions_state.load(set).await;
                 tracing::info!(count, "refreshed sanctions list");
             }
             Err(err) => tracing::warn!(%err, "failed to refresh sanctions list"),
@@ -97,8 +94,15 @@ async fn fetch(client: &Client, config: &SanctionFileConfig) -> Result<HashSet<S
         req = req.header(&header.key, &header.value);
     }
 
-    let body = req.send().await?.error_for_status()?.text().await?;
-    Ok(parse(&body))
+    let response = req.send().await?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(Error::HttpRequest(
+            status,
+            format!("upstream returned status {status} while fetching sanctions list"),
+        ));
+    }
+    Ok(parse(&response.text().await?))
 }
 
 #[cfg(test)]
@@ -146,23 +150,23 @@ mod tests {
         assert!(!state.is_loaded());
     }
 
-    #[test]
-    fn test_state_load_marks_loaded() {
+    #[tokio::test]
+    async fn test_state_load_marks_loaded() {
         let state = SanctionsState::default();
-        state.load(sanction_list());
+        state.load(sanction_list()).await;
         assert!(state.is_loaded());
-        assert_eq!(*state.addresses.read().unwrap(), sanction_list());
+        assert_eq!(*state.addresses.read().await, sanction_list());
     }
 
-    #[test]
-    fn test_check_address() {
+    #[tokio::test]
+    async fn test_check_address() {
         let sanction_list = sanction_list();
         let state = SanctionsState::default();
-        state.load(sanction_list.clone());
+        state.load(sanction_list.clone()).await;
 
         for addr in sanction_list {
             assert_eq!(
-                state.check_address(&addr),
+                state.check_address(&addr).await,
                 BlocklistStatus {
                     is_blocklisted: true,
                     severity: RiskSeverity::Severe,
@@ -173,7 +177,7 @@ mod tests {
         }
 
         assert_eq!(
-            state.check_address("not-an-address"),
+            state.check_address("not-an-address").await,
             BlocklistStatus {
                 is_blocklisted: false,
                 severity: RiskSeverity::Low,
@@ -253,14 +257,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fetch_fail() {
-        let server = Server::new_async().await;
+    async fn test_fetch_http_error() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("GET", "/sanctions")
+            .with_status(404)
+            .with_body("foo")
+            .create();
 
         let (client, config) = setup_client(&server);
 
         let result = fetch(&client, &config).await.unwrap_err();
 
-        assert_matches!(result, Error::Network(_));
+        mock.assert();
+        assert_matches!(
+            result,
+            Error::HttpRequest(status, _) if status == reqwest::StatusCode::NOT_FOUND
+        );
     }
 
     #[tokio::test]
@@ -296,6 +309,6 @@ mod tests {
         // Wait for another fetch
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert!(sanctions_state.is_loaded());
-        assert_eq!(*sanctions_state.addresses.read().unwrap(), sanction_list());
+        assert_eq!(*sanctions_state.addresses.read().await, sanction_list());
     }
 }

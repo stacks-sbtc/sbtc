@@ -32,7 +32,7 @@ async fn main() {
                 path = %path.display(),
                 "preloaded sanctions list from local file"
             );
-            sanctions_state.load(local_sanctions);
+            sanctions_state.load(local_sanctions).await;
         }
 
         let refresh_sanctions_state = sanctions_state.clone();

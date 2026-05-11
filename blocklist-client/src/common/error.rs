@@ -57,6 +57,10 @@ pub enum Error {
     #[error("Service unavailable")]
     ServiceUnavailable,
 
+    /// The local sanctions list has not been populated yet
+    #[error("Sanctions list not loaded yet")]
+    SanctionsListNotReady,
+
     /// Request timeout error
     #[error("Request timeout")]
     RequestTimeout,
@@ -78,7 +82,9 @@ impl Error {
             Error::NotAcceptable => StatusCode::NOT_ACCEPTABLE,
             Error::Conflict => StatusCode::CONFLICT,
             Error::InternalServer | Error::IO(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Error::ServiceUnavailable | Error::SanctionsListNotReady => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             Error::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
         }
     }
@@ -96,6 +102,7 @@ impl Error {
             Error::Conflict => "Request conflict".to_string(),
             Error::InternalServer | Error::IO(_) => "Internal server error".to_string(),
             Error::ServiceUnavailable => "Service unavailable".to_string(),
+            Error::SanctionsListNotReady => "Sanctions list not loaded yet".to_string(),
             Error::RequestTimeout => "Request timeout".to_string(),
         }
     }
