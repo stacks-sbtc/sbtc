@@ -44,4 +44,10 @@ export class Constants {
      * Prod stage name.
      */
     static PROD_STAGE_NAME: string = "prod";
+
+    /**
+     * Object key for the sanctions list served from the sanctions bucket
+     * through the public API at `GET /sanctions`.
+     */
+    static SANCTIONS_OBJECT_KEY: string = "sanctions.txt";
 }

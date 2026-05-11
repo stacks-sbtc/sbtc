@@ -6,6 +6,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as route53Targets from 'aws-cdk-lib/aws-route53-targets';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as certificatemanager from 'aws-cdk-lib/aws-certificatemanager';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as cr from 'aws-cdk-lib/custom-resources';
@@ -110,11 +111,40 @@ export class EmilyStack extends cdk.Stack {
             limitTable.grantReadWriteData(operationLambda);
             throttleTable.grantReadWriteData(operationLambda);
 
+            const sanctionsBucket: s3.Bucket = this.createSanctionsBucket(
+                persistentResourceRemovalPolicy,
+                props,
+            );
+
             const emilyApis: apig.SpecRestApi[] = this.createOrUpdateApi(
                 alias,
+                sanctionsBucket,
                 props,
             );
         }
+    }
+
+    /**
+     * Creates the private S3 bucket that backs the sanctions list served at
+     * `GET /sanctions` on the public API.
+     * @param {cdk.RemovalPolicy} removalPolicy The removal policy for the bucket.
+     * @param {EmilyStackProps} props The stack properties.
+     * @returns {s3.Bucket} The created or updated S3 bucket.
+     */
+    createSanctionsBucket(
+        removalPolicy: cdk.RemovalPolicy,
+        props: EmilyStackProps,
+    ): s3.Bucket {
+        const bucketId: string = 'SanctionsBucket';
+        return new s3.Bucket(this, bucketId, {
+            bucketName: EmilyStackUtils.getResourceName(bucketId, props).toLowerCase(),
+            blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+            encryption: s3.BucketEncryption.S3_MANAGED,
+            enforceSSL: true,
+            removalPolicy,
+            // TODO: uncomment this before merging
+            // autoDeleteObjects: removalPolicy === cdk.RemovalPolicy.DESTROY,
+        });
     }
 
     /**
@@ -491,12 +521,14 @@ export class EmilyStack extends cdk.Stack {
     /**
      * Creates or updates the API Gateway to connect with the Lambda function.
      * @param {lambda.Function} operationLambda The Lambda function to connect to the API.
+     * @param {s3.IBucket} sanctionsBucket The sanctions S3 bucket.
      * @param {EmilyStackProps} props The stack properties.
      * @returns {apig.SpecRestApi} The created or updated API Gateway.
      * @post An API Gateway with execute permissions linked to the Lambda function is returned.
      */
     createOrUpdateApi(
         operationLambda: lambda.Alias,
+        sanctionsBucket: s3.IBucket,
         props: EmilyStackProps
     ): apig.SpecRestApi[] {
 
@@ -523,6 +555,7 @@ export class EmilyStack extends cdk.Stack {
                 operationLambda,
                 apiToCreate.numApiKeys,
                 apiToCreate.purpose as "public" | "private" | "testing",
+                sanctionsBucket,
                 props
             ));
     }
@@ -532,6 +565,7 @@ export class EmilyStack extends cdk.Stack {
      * @param {lambda.Function} operationLambda The Lambda function to connect to the API.
      * @param {number} numApiKeys The number of API keys to create for the API.
      * @param {string} apiPurpose The purpose of the API.
+     * @param {s3.IBucket} sanctionsBucket The sanctions S3 bucket.
      * @param {EmilyStackProps} props The stack properties.
      * @returns {apig.SpecRestApi} The created or updated API Gateway.
      * @post An API Gateway with execute permissions linked to the Lambda function is returned.
@@ -540,6 +574,7 @@ export class EmilyStack extends cdk.Stack {
         operationLambda: lambda.Alias,
         numApiKeys: number,
         apiPurpose: "public" | "private" | "testing",
+        sanctionsBucket: s3.IBucket,
         props: EmilyStackProps,
     ): apig.SpecRestApi {
         const apiPurposeTitleCase = apiPurpose.charAt(0).toUpperCase() + apiPurpose.slice(1);
@@ -599,6 +634,11 @@ export class EmilyStack extends cdk.Stack {
             action: "lambda:InvokeFunction",
             sourceArn: api.arnForExecuteApi(),
         });
+
+        // The sanctions list is only served on the public API.
+        if (apiPurpose === "public") {
+            this.addSanctionsRoute(api, sanctionsBucket, apiPurposeResourceIdSuffix);
+        }
 
         // Only add the custom domain name it's specified.
         let customRootDomainNameRoot = EmilyStackUtils.getCustomRootDomainName();
@@ -665,5 +705,70 @@ export class EmilyStack extends cdk.Stack {
 
         // Return api resource.
         return api;
+    }
+
+    /**
+     * Wires `GET /sanctions` on the API Gateway to fetch a single object from
+     * the sanctions bucket via an AWS service integration.
+     * @param {apig.SpecRestApi} api The API Gateway.
+     * @param {s3.IBucket} sanctionsBucket The sanctions S3 bucket.
+     * @param {string} apiPurposeResourceIdSuffix The resource suffix.
+     * @post The method is added to the API Gateway.
+     */
+    addSanctionsRoute(
+        api: apig.SpecRestApi,
+        sanctionsBucket: s3.IBucket,
+        apiPurposeResourceIdSuffix: string,
+    ): void {
+        // Dedicated role assumed by API Gateway to read the sanctions object.
+        const integrationRoleId = `SanctionsIntegrationRole${apiPurposeResourceIdSuffix}`;
+        const integrationRole = new iam.Role(this, integrationRoleId, {
+            assumedBy: new iam.ServicePrincipal('apigateway.amazonaws.com'),
+        });
+        sanctionsBucket.grantRead(integrationRole, Constants.SANCTIONS_OBJECT_KEY);
+
+        const integration = new apig.AwsIntegration({
+            service: 's3',
+            integrationHttpMethod: 'GET',
+            // `path` is interpreted as `{bucket}/{key}` for the S3 service.
+            path: `${sanctionsBucket.bucketName}/${Constants.SANCTIONS_OBJECT_KEY}`,
+            options: {
+                credentialsRole: integrationRole,
+                // Pass the upstream Content-Type through and surface S3 error
+                // statuses as 404/500 instead of the default 200.
+                integrationResponses: [
+                    {
+                        statusCode: '200',
+                        responseParameters: {
+                            'method.response.header.Content-Type':
+                                'integration.response.header.Content-Type',
+                        },
+                    },
+                    {
+                        statusCode: '404',
+                        selectionPattern: '4\\d{2}',
+                    },
+                    {
+                        statusCode: '500',
+                        selectionPattern: '5\\d{2}',
+                    },
+                ],
+            },
+        });
+
+        const sanctionsResource = api.root.addResource('sanctions');
+        sanctionsResource.addMethod('GET', integration, {
+            apiKeyRequired: true,
+            methodResponses: [
+                {
+                    statusCode: '200',
+                    responseParameters: {
+                        'method.response.header.Content-Type': true,
+                    },
+                },
+                { statusCode: '404' },
+                { statusCode: '500' },
+            ],
+        });
     }
 }
