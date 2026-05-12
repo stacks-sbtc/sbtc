@@ -9,6 +9,7 @@ use fake::Faker;
 use mockito::Server;
 use serde_json::json;
 use signer::bitcoin::rpc::BitcoinCoreClient;
+use signer::storage::model::DepositSigner;
 use url::Url;
 
 use emily_client::apis::deposit_api;
@@ -20,10 +21,10 @@ use signer::emily_client::EmilyClient;
 use signer::emily_client::MockEmilyInteract;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
-use signer::message::SignerDepositDecision;
 use signer::network::InMemoryNetwork;
-use signer::network::in_memory2::SignerNetwork;
 use signer::request_decider::RequestDeciderEventLoop;
+use signer::request_decider::persist_received_deposit_decision;
+use signer::request_decider::run_backfill_worker;
 use signer::stacks::api::MockStacksInteract;
 use signer::storage::DbRead as _;
 use signer::storage::model::BitcoinBlockHash;
@@ -339,9 +340,8 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
         .with_mocked_stacks_client()
         .build();
 
-    // We need this so that there is a live "network". Otherwise,
-    // RequestDeciderEventLoop::persist_received_deposit_decision will
-    // error when trying to send a message at the end.
+    // Keep a receiver alive so the broadcast channel doesn't close
+    // when the backfill worker signals a deposit decision.
     let _rec = ctx.get_signal_receiver();
 
     let (rpc, faucet) = sbtc::testing::regtest::initialize_blockchain();
@@ -360,38 +360,35 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
     // Let's get the blockchain data into the database.
     backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
 
-    let network = SignerNetwork::single(&ctx);
-
-    let mut decider = RequestDeciderEventLoop {
-        network: network.spawn(),
-        context: ctx.clone(),
-        context_window: 10000,
-        deposit_decisions_retry_window: 1,
-        withdrawal_decisions_retry_window: 1,
-        blocklist_checker: Some(()),
-        signer_private_key: PrivateKey::new(&mut rng),
-    };
     let txid = setup.deposits[0].0.outpoint.txid.into();
     let output_index = setup.deposits[0].0.outpoint.vout;
 
     let votes = db.get_deposit_signers(&txid, output_index).await.unwrap();
     assert!(votes.is_empty());
 
-    let decision = SignerDepositDecision {
-        txid: *txid,
+    let sender_pub_key: PublicKey = Faker.fake_with_rng(&mut rng);
+    let decision = DepositSigner {
+        txid,
         output_index,
         can_accept: true,
+        signer_pub_key: sender_pub_key,
         can_sign: true,
     };
-    let sender_pub_key: PublicKey = Faker.fake_with_rng(&mut rng);
-    // Emily doesn't know about the deposit request so nothing should be
-    // written.
-    decider
-        .persist_received_deposit_decision(&decision, sender_pub_key)
+
+    // Emily doesn't know about the deposit request so the decision gets
+    // forwarded to the backfill worker, which also fails to find it.
+    let (backfill_tx, backfill_rx) = tokio::sync::mpsc::channel(128);
+    let backfill_handle = tokio::spawn(run_backfill_worker(ctx.clone(), backfill_rx));
+
+    persist_received_deposit_decision(&ctx, decision.clone(), &backfill_tx)
         .await
         .unwrap();
 
-    // A decision should get stored and there should only be one
+    // Drop sender and await the worker so it processes the queued item.
+    drop(backfill_tx);
+    backfill_handle.await.unwrap();
+
+    // Nothing should be stored because Emily didn't know about it.
     let votes = db.get_deposit_signers(&txid, output_index).await.unwrap();
     assert!(votes.is_empty());
 
@@ -407,13 +404,17 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
         .await
         .unwrap();
 
-    // Okay now before we attempt to fetch the decision, we'll ask emily,
-    // get the deposit reqeust, validate it, persist the request and
-    // persist the decision.
-    decider
-        .persist_received_deposit_decision(&decision, sender_pub_key)
+    // Now the backfill worker should fetch the deposit from Emily,
+    // validate it, persist the request, and persist the decision.
+    let (backfill_tx, backfill_rx) = tokio::sync::mpsc::channel(128);
+    let backfill_handle = tokio::spawn(run_backfill_worker(ctx.clone(), backfill_rx));
+
+    persist_received_deposit_decision(&ctx, decision.clone(), &backfill_tx)
         .await
         .unwrap();
+
+    drop(backfill_tx);
+    backfill_handle.await.unwrap();
 
     // A decision should get stored and there should only be one
     let votes = db.get_deposit_signers(&txid, output_index).await.unwrap();

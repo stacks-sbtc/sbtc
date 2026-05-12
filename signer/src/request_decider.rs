@@ -7,6 +7,10 @@
 
 use std::time::Duration;
 
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
+
+use crate::SIGNER_CHANNEL_CAPACITY;
 use crate::block_observer::BlockObserver;
 use crate::blocklist_client::BlocklistChecker;
 use crate::context::Context;
@@ -72,7 +76,7 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
 
 impl<C, N, B> RequestDeciderEventLoop<C, N, B>
 where
-    C: Context,
+    C: Context + 'static,
     N: MessageTransfer,
     B: BlocklistChecker,
 {
@@ -89,6 +93,21 @@ where
             return Err(error);
         };
 
+        // Channel for processing incoming signer messages off the main
+        // signal stream so we can keep draining the signal stream quickly.
+        let (msg_tx, msg_rx) = mpsc::channel::<Signed<SignerMessage>>(SIGNER_CHANNEL_CAPACITY);
+
+        // Channel for deposit decisions that require fetching the deposit
+        // request from Emily and potentially backfilling bitcoin blocks.
+        // This is the slowest path, so it gets its own task.
+        let (backfill_tx, backfill_rx) = mpsc::channel::<DepositSigner>(SIGNER_CHANNEL_CAPACITY);
+
+        let ctx = self.context.clone();
+        let msg_worker = tokio::spawn(run_message_worker(ctx, msg_rx, backfill_tx));
+
+        let ctx = self.context.clone();
+        let backfill_worker = tokio::spawn(run_backfill_worker(ctx, backfill_rx));
+
         let mut signal_stream = self.context.as_signal_stream(run_loop_message_filter);
 
         while let Some(message) = signal_stream.next().await {
@@ -97,8 +116,15 @@ where
                 SignerSignal::Command(SignerCommand::P2PPublish(_)) => {}
                 SignerSignal::Event(event) => match event {
                     SignerEvent::P2P(P2PEvent::MessageReceived(msg)) => {
-                        if let Err(error) = self.handle_signer_message(&msg).await {
-                            tracing::error!(%error, "error handling signer message");
+                        match msg_tx.try_send(*msg) {
+                            Ok(()) => {}
+                            Err(TrySendError::Full(_)) => tracing::warn!(
+                                "message worker channel full; dropping signer message"
+                            ),
+                            Err(TrySendError::Closed(_)) => {
+                                tracing::error!("The worker is closed, stopping the event loop");
+                                break;
+                            }
                         }
                     }
                     SignerEvent::BitcoinBlockObserved(chain_tip) => {
@@ -121,6 +147,9 @@ where
             }
         }
 
+        drop(msg_tx);
+        let _ = msg_worker.await;
+        let _ = backfill_worker.await;
         tracing::info!("request decider event loop has been stopped");
         Ok(())
     }
@@ -222,28 +251,6 @@ where
                     )
                 });
         }
-
-        Ok(())
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn handle_signer_message(&mut self, msg: &Signed<SignerMessage>) -> Result<(), Error> {
-        tracing::trace!(payload = %msg.inner.payload, "handling message");
-        match &msg.inner.payload {
-            Payload::SignerDepositDecision(decision) => {
-                self.persist_received_deposit_decision(decision, msg.signer_public_key)
-                    .await?;
-            }
-            Payload::SignerWithdrawalDecision(decision) => {
-                self.persist_received_withdraw_decision(decision, msg.signer_public_key)
-                    .await?;
-            }
-            Payload::StacksTransactionSignRequest(_)
-            | Payload::BitcoinPreSignRequest(_)
-            | Payload::BitcoinPreSignAck(_)
-            | Payload::WstsMessage(_)
-            | Payload::StacksTransactionSignature(_) => (),
-        };
 
         Ok(())
     }
@@ -438,96 +445,6 @@ where
         Ok(can_accept)
     }
 
-    /// Save the given decision into the database
-    ///
-    /// If we do not have a record of the associated deposit request in our
-    /// database then we fetch it from Emily and then attempt to persist
-    /// it.
-    #[tracing::instrument(skip_all, fields(sender = %signer_pub_key))]
-    pub async fn persist_received_deposit_decision(
-        &mut self,
-        decision: &SignerDepositDecision,
-        signer_pub_key: PublicKey,
-    ) -> Result<(), Error> {
-        let txid = decision.txid.into();
-        let output_index = decision.output_index;
-        let signer_decision = DepositSigner {
-            txid,
-            output_index,
-            signer_pub_key,
-            can_accept: decision.can_accept,
-            can_sign: decision.can_sign,
-        };
-
-        let db = self.context.get_storage_mut();
-        // Before storing a decision in the database, we first check to see
-        // if we have a record of the associated deposit request. If we
-        // don't have a record then fetch it from Emily and store it before
-        // storing the decision.
-        if !db.deposit_request_exists(&txid, output_index).await? {
-            tracing::debug!("no record of the deposit request, fetching from emily");
-            let processor = BlockObserver {
-                context: self.context.clone(),
-                bitcoin_block_source: (),
-            };
-            let deposit_request = self
-                .context
-                .get_emily_client()
-                .get_deposit(&txid, output_index)
-                .await?;
-
-            if let Some(request) = deposit_request {
-                processor.load_requests(&[request]).await?;
-            }
-        }
-        // We still might not have a record of the deposit request (perhaps
-        // it failed validation). In this case we do not persist the
-        // decision and move on.
-        if !db.deposit_request_exists(&txid, output_index).await? {
-            tracing::debug!(
-                %txid,
-                %output_index,
-                sender = %signer_pub_key,
-                "we still do not have a record of the deposit request"
-            );
-            return Ok(());
-        }
-        db.write_deposit_signer_decision(&signer_decision).await?;
-
-        self.context
-            .signal(RequestDeciderEvent::ReceivedDepositDecision.into())?;
-
-        Ok(())
-    }
-
-    #[tracing::instrument(skip_all, fields(sender = %signer_pub_key))]
-    async fn persist_received_withdraw_decision(
-        &mut self,
-        decision: &SignerWithdrawalDecision,
-        signer_pub_key: PublicKey,
-    ) -> Result<(), Error> {
-        let signer_decision = WithdrawalSigner {
-            request_id: decision.request_id,
-            block_hash: decision.block_hash,
-            signer_pub_key,
-            is_accepted: decision.accepted,
-            txid: decision.txid,
-        };
-
-        // TODO: we need to check to see if we have the withdrawal request
-        // first.
-
-        self.context
-            .get_storage_mut()
-            .write_withdrawal_signer_decision(&signer_decision)
-            .await?;
-
-        self.context
-            .signal(RequestDeciderEvent::ReceivedWithdrawalDecision.into())?;
-
-        Ok(())
-    }
-
     #[tracing::instrument(skip_all)]
     async fn send_message(
         &mut self,
@@ -547,6 +464,163 @@ where
     fn signer_public_key(&self) -> PublicKey {
         PublicKey::from_private_key(&self.signer_private_key)
     }
+}
+
+/// Processes incoming signer messages from the message channel.
+///
+/// Decisions for requests we already know about are persisted directly.
+/// Deposit decisions for unknown requests are forwarded to the backfill
+/// worker. Withdrawal decisions for unknown requests are dropped.
+async fn run_message_worker<C: Context>(
+    ctx: C,
+    mut msg_rx: mpsc::Receiver<Signed<SignerMessage>>,
+    backfill_tx: mpsc::Sender<DepositSigner>,
+) {
+    while let Some(msg) = msg_rx.recv().await {
+        tracing::trace!(payload = %msg.inner.payload, "handling message");
+        let result = match msg.inner.payload {
+            Payload::SignerDepositDecision(decision) => {
+                let decision = DepositSigner {
+                    txid: decision.txid.into(),
+                    output_index: decision.output_index,
+                    signer_pub_key: msg.signer_public_key,
+                    can_accept: decision.can_accept,
+                    can_sign: decision.can_sign,
+                };
+                persist_received_deposit_decision(&ctx, decision, &backfill_tx).await
+            }
+            Payload::SignerWithdrawalDecision(decision) => {
+                persist_received_withdraw_decision(&ctx, decision, msg.signer_public_key).await
+            }
+            Payload::StacksTransactionSignRequest(_)
+            | Payload::BitcoinPreSignRequest(_)
+            | Payload::BitcoinPreSignAck(_)
+            | Payload::WstsMessage(_)
+            | Payload::StacksTransactionSignature(_) => Ok(()),
+        };
+
+        if let Err(error) = result {
+            tracing::error!(%error, "error handling signer message");
+        }
+    }
+}
+
+/// Handles deposit decisions that require fetching the deposit request
+/// from Emily and potentially backfilling bitcoin blocks. This is the
+/// slowest path in message processing.
+pub async fn run_backfill_worker<C>(context: C, mut backfill_rx: mpsc::Receiver<DepositSigner>)
+where
+    C: Context,
+{
+    while let Some(decision) = backfill_rx.recv().await {
+        if let Err(error) = backfill_and_persist_deposit(&context, &decision).await {
+            tracing::warn!(
+                %error,
+                txid = %decision.txid,
+                output_index = decision.output_index,
+                "failed to backfill deposit decision",
+            );
+        }
+    }
+}
+
+/// Fetch an unknown deposit request from Emily, backfill it into the
+/// database, and persist the signer decision.
+#[tracing::instrument(skip_all, fields(
+    txid = %decision.txid,
+    output_index = decision.output_index,
+    sender = %decision.signer_pub_key,
+))]
+async fn backfill_and_persist_deposit<C: Context>(
+    context: &C,
+    decision: &DepositSigner,
+) -> Result<(), Error> {
+    let txid = decision.txid.clone();
+    let output_index = decision.output_index;
+    tracing::debug!("backfilling deposit request from emily");
+
+    let processor = BlockObserver {
+        context: context.clone(),
+        bitcoin_block_source: (),
+    };
+
+    let deposit_request = context
+        .get_emily_client()
+        .get_deposit(&txid, output_index)
+        .await?;
+
+    if let Some(request) = deposit_request {
+        processor.load_requests(&[request]).await?;
+    }
+
+    let db = context.get_storage_mut();
+
+    if !db.deposit_request_exists(&txid, output_index).await? {
+        tracing::debug!("we still do not have a record of the deposit request after backfill");
+        return Ok(());
+    }
+
+    db.write_deposit_signer_decision(&decision).await?;
+
+    context.signal(RequestDeciderEvent::ReceivedDepositDecision.into())?;
+
+    Ok(())
+}
+
+/// Save the given deposit decision into the database.
+///
+/// If we already have a record of the associated deposit request, the
+/// decision is persisted directly. Otherwise the decision is forwarded
+/// to the backfill worker which fetches it from Emily. This keeps the
+/// fast path (known requests) cheap and avoids blocking the message
+/// worker on Emily round-trips.
+#[tracing::instrument(skip_all, fields(sender = %decision.signer_pub_key))]
+pub async fn persist_received_deposit_decision<C: Context>(
+    ctx: &C,
+    decision: DepositSigner,
+    backfill_tx: &mpsc::Sender<DepositSigner>,
+) -> Result<(), Error> {
+    let txid = decision.txid;
+    let output_index = decision.output_index;
+
+    let db = ctx.get_storage_mut();
+
+    if !db.deposit_request_exists(&txid, output_index).await? {
+        tracing::debug!(%txid, %output_index, "no record of deposit request, forwarding to backfill worker");
+        if let Err(TrySendError::Full(_)) = backfill_tx.try_send(decision) {
+            tracing::warn!(%txid, %output_index, "backfill channel full; dropping deposit decision");
+        }
+        return Ok(());
+    }
+
+    db.write_deposit_signer_decision(&decision).await?;
+
+    ctx.signal(RequestDeciderEvent::ReceivedDepositDecision.into())?;
+
+    Ok(())
+}
+
+#[tracing::instrument(skip_all, fields(sender = %sender_public_key))]
+async fn persist_received_withdraw_decision<C: Context>(
+    ctx: &C,
+    decision: SignerWithdrawalDecision,
+    sender_public_key: PublicKey,
+) -> Result<(), Error> {
+    let signer_decision = WithdrawalSigner {
+        request_id: decision.request_id,
+        block_hash: decision.block_hash,
+        signer_pub_key: sender_public_key,
+        is_accepted: decision.accepted,
+        txid: decision.txid,
+    };
+
+    ctx.get_storage_mut()
+        .write_withdrawal_signer_decision(&signer_decision)
+        .await?;
+
+    ctx.signal(RequestDeciderEvent::ReceivedWithdrawalDecision.into())?;
+
+    Ok(())
 }
 
 #[cfg(test)]

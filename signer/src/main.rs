@@ -459,7 +459,7 @@ async fn run_transaction_coordinator(ctx: impl Context) -> Result<(), Error> {
 }
 
 /// Run the request decider event-loop.
-async fn run_request_decider(ctx: impl Context) -> Result<(), Error> {
+async fn run_request_decider(ctx: impl Context + 'static) -> Result<(), Error> {
     let config = ctx.config().clone();
     let network = P2PNetwork::new(&ctx);
 
