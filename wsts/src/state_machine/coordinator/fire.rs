@@ -474,7 +474,7 @@ impl Coordinator {
                                                     Ok(private_eval) => {
                                                         let poly_eval = match compute::poly(
                                                             &compute::id(*key_id),
-                                                            &poly.poly,
+                                                            poly.poly(),
                                                         ) {
                                                             Ok(p) => p,
                                                             Err(e) => {
@@ -555,7 +555,7 @@ impl Coordinator {
             .dkg_end_messages
             .keys()
             .flat_map(|signer_id| self.dkg_public_shares[signer_id].comms.clone())
-            .fold(Point::default(), |s, (_, comm)| s + comm.poly[0]);
+            .fold(Point::default(), |s, (_, comm)| s + comm.constant_term());
 
         info!("Aggregate public key: {}", key);
         self.aggregate_public_key = Some(key);
@@ -981,7 +981,7 @@ impl CoordinatorTrait for Coordinator {
     ) -> Result<(), Error> {
         let computed_key = party_polynomials
             .iter()
-            .fold(Point::default(), |s, (_, comm)| s + comm.poly[0]);
+            .fold(Point::default(), |s, (_, comm)| s + comm.constant_term());
         if computed_key != aggregate_key {
             return Err(Error::AggregateKeyPolynomialMismatch(
                 computed_key,
@@ -1076,6 +1076,7 @@ impl CoordinatorTrait for Coordinator {
 /// Test module for coordinator functionality
 pub mod test {
     use crate::{
+        common::PolyCommitment,
         curve::{point::Point, scalar::Scalar},
         net::{
             DkgBegin, DkgFailure, DkgPrivateShares, DkgPublicShares, Message, NonceRequest,
@@ -1416,14 +1417,17 @@ pub mod test {
                                 let comms = shares
                                     .comms
                                     .iter()
-                                    .map(|(id, comm)| {
+                                    .map(|(party_id, comm)| {
                                         let mut c = comm.clone();
+                                        let (id, mut poly) = c.into_parts();
                                         if signer.signer_id == 0 {
-                                            c.poly.push(Point::new());
+                                            poly.push(Point::new());
                                         } else {
-                                            c.poly.pop();
+                                            poly.pop();
                                         }
-                                        (*id, c)
+                                        c = PolyCommitment::new(id, poly)
+                                            .expect("polynomial should still be valid");
+                                        (*party_id, c)
                                     })
                                     .collect();
                                 Message::DkgPublicShares(DkgPublicShares {
