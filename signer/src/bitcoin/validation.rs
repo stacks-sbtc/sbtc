@@ -168,6 +168,7 @@ impl BitcoinPreSignRequest {
         let bitcoin_chain_tip = &btc_ctx.chain_tip;
 
         let maybe_stacks_chain_tip = ctx.state().stacks_chain_tip();
+        let sbtc_limits = ctx.state().get_current_limits();
         let Some(stacks_chain_tip) = maybe_stacks_chain_tip.map(|b| b.block_hash) else {
             return Err(Error::NoStacksChainTip);
         };
@@ -188,6 +189,10 @@ impl BitcoinPreSignRequest {
                     return Err(InputValidationResult::Unknown.into_error(btc_ctx));
                 };
 
+                report
+                    .validate_without_fee(btc_ctx.chain_tip_height, &sbtc_limits)
+                    .map_err(|result| result.into_error(btc_ctx))?;
+
                 let votes = db
                     .get_deposit_request_signer_votes(&txid, output_index, &btc_ctx.aggregate_key)
                     .await?;
@@ -206,6 +211,10 @@ impl BitcoinPreSignRequest {
                 let Some(report) = report.await? else {
                     return Err(WithdrawalValidationResult::Unknown.into_error(btc_ctx));
                 };
+
+                report
+                    .validate_without_fee(btc_ctx.chain_tip_height, &sbtc_limits)
+                    .map_err(|result| result.into_error(btc_ctx))?;
 
                 let votes = db
                     .get_withdrawal_request_signer_votes(qualified_id, &btc_ctx.aggregate_key)
@@ -818,30 +827,27 @@ pub struct DepositRequestReport {
 }
 
 impl DepositRequestReport {
-    /// Validate that the deposit request is okay given the report.
-    fn validate<F>(
+    /// Validate the deposit request without reference to a sweep
+    /// transaction. This covers the request's confirmation status, lock
+    /// time, votes, DKG shares, and per-deposit amount caps.
+    fn validate_without_fee(
         &self,
         chain_tip_height: BitcoinBlockHeight,
-        tx: &F,
-        tx_fee: Amount,
         sbtc_limits: &SbtcLimits,
-    ) -> InputValidationResult
-    where
-        F: FeeAssessment,
-    {
+    ) -> Result<(), InputValidationResult> {
         let confirmed_block_height = match self.status {
             // Deposit requests are only written to the database after they
             // have been confirmed, so this means that we have a record of
             // the request, but it has not been confirmed on the canonical
             // bitcoin blockchain.
             DepositConfirmationStatus::Unconfirmed => {
-                return InputValidationResult::TxNotOnBestChain;
+                return Err(InputValidationResult::TxNotOnBestChain);
             }
             // This means that we have a record of the deposit UTXO being
             // spent in a sweep transaction that has been confirmed on the
             // canonical bitcoin blockchain.
             DepositConfirmationStatus::Spent(_) => {
-                return InputValidationResult::DepositUtxoSpent;
+                return Err(InputValidationResult::DepositUtxoSpent);
             }
             // The deposit has been confirmed on the canonical bitcoin
             // blockchain and remains unspent by us.
@@ -849,11 +855,11 @@ impl DepositRequestReport {
         };
 
         if self.amount < sbtc_limits.per_deposit_minimum().to_sat() {
-            return InputValidationResult::AmountTooLow;
+            return Err(InputValidationResult::AmountTooLow);
         }
 
         if self.amount > sbtc_limits.per_deposit_cap().to_sat() {
-            return InputValidationResult::AmountTooHigh;
+            return Err(InputValidationResult::AmountTooHigh);
         }
 
         // We only sweep a deposit if the depositor cannot reclaim the
@@ -867,24 +873,12 @@ impl DepositRequestReport {
                     .saturating_sub(DEPOSIT_LOCKTIME_BLOCK_BUFFER)
                     .into();
                 if deposit_age >= max_age {
-                    return InputValidationResult::LockTimeExpiry;
+                    return Err(InputValidationResult::LockTimeExpiry);
                 }
             }
             LockTime::Time(_) => {
-                return InputValidationResult::UnsupportedLockTime;
+                return Err(InputValidationResult::UnsupportedLockTime);
             }
-        }
-
-        let Some(assessed_fee) = tx.assess_input_fee(&self.outpoint, tx_fee) else {
-            return InputValidationResult::Unknown;
-        };
-
-        if assessed_fee.to_sat() > self.max_fee.min(self.amount) {
-            return InputValidationResult::FeeTooHigh;
-        }
-
-        if self.amount.saturating_sub(assessed_fee.to_sat()) < DEPOSIT_DUST_LIMIT {
-            return InputValidationResult::MintAmountBelowDustLimit;
         }
 
         // Let's check whether we rejected this deposit.
@@ -893,8 +887,8 @@ impl DepositRequestReport {
             // If we are here, we know that we have a record for the
             // deposit request, but we have not voted on it yet, so we do
             // not know if we can sign for it.
-            None => return InputValidationResult::NoVote,
-            Some(false) => return InputValidationResult::RejectedRequest,
+            None => return Err(InputValidationResult::NoVote),
+            Some(false) => return Err(InputValidationResult::RejectedRequest),
         }
 
         match self.can_sign {
@@ -902,11 +896,11 @@ impl DepositRequestReport {
             // In this case we know that we cannot sign for the deposit
             // because it is locked with a public key where the current
             // signer is not part of the signing set.
-            Some(false) => return InputValidationResult::CannotSignUtxo,
+            Some(false) => return Err(InputValidationResult::CannotSignUtxo),
             // We shouldn't ever get None here, since we know that we can
             // accept the request. We do the check for whether we can sign
             // the request at that the same time as the can_accept check.
-            None => return InputValidationResult::NoVote,
+            None => return Err(InputValidationResult::NoVote),
         }
 
         // We do not sign for inputs where we have not verified the
@@ -914,12 +908,54 @@ impl DepositRequestReport {
         // verified then sending signature shares could be harmful overall.
         match self.dkg_shares_status {
             Some(DkgSharesStatus::Verified) => {}
-            Some(DkgSharesStatus::Unverified) => return InputValidationResult::DkgSharesUnverified,
-            Some(DkgSharesStatus::Failed) => return InputValidationResult::DkgSharesVerifyFailed,
-            None => return InputValidationResult::CannotSignUtxo,
+            Some(DkgSharesStatus::Unverified) => {
+                return Err(InputValidationResult::DkgSharesUnverified);
+            }
+            Some(DkgSharesStatus::Failed) => {
+                return Err(InputValidationResult::DkgSharesVerifyFailed);
+            }
+            None => return Err(InputValidationResult::CannotSignUtxo),
         }
 
-        InputValidationResult::Ok
+        Ok(())
+    }
+
+    /// Validate the assessed fee for this deposit input within a
+    /// constructed sweep transaction.
+    fn validate_assessed_fee<F>(&self, tx: &F, tx_fee: Amount) -> Result<(), InputValidationResult>
+    where
+        F: FeeAssessment,
+    {
+        let Some(assessed_fee) = tx.assess_input_fee(&self.outpoint, tx_fee) else {
+            return Err(InputValidationResult::Unknown);
+        };
+
+        if assessed_fee.to_sat() > self.max_fee.min(self.amount) {
+            return Err(InputValidationResult::FeeTooHigh);
+        }
+
+        if self.amount.saturating_sub(assessed_fee.to_sat()) < DEPOSIT_DUST_LIMIT {
+            return Err(InputValidationResult::MintAmountBelowDustLimit);
+        }
+
+        Ok(())
+    }
+
+    /// Validate that the deposit request is okay given the report.
+    fn validate<F>(
+        &self,
+        chain_tip_height: BitcoinBlockHeight,
+        tx: &F,
+        tx_fee: Amount,
+        sbtc_limits: &SbtcLimits,
+    ) -> InputValidationResult
+    where
+        F: FeeAssessment,
+    {
+        self.validate_without_fee(chain_tip_height, sbtc_limits)
+            .and_then(|()| self.validate_assessed_fee(tx, tx_fee))
+            .err()
+            .unwrap_or(InputValidationResult::Ok)
     }
 
     /// As deposit request.
@@ -981,6 +1017,72 @@ pub struct WithdrawalRequestReport {
 }
 
 impl WithdrawalRequestReport {
+    /// Validate the withdrawal request without reference to a sweep
+    /// transaction. This covers the request's confirmation status, votes,
+    /// dust amount, confirmation/expiry windows, and per-withdrawal cap.
+    fn validate_without_fee(
+        &self,
+        chain_tip_height: BitcoinBlockHeight,
+        sbtc_limits: &SbtcLimits,
+    ) -> Result<(), WithdrawalValidationResult> {
+        match self.status {
+            WithdrawalRequestStatus::Confirmed => {}
+            WithdrawalRequestStatus::Unconfirmed => {
+                return Err(WithdrawalValidationResult::TxNotOnBestChain);
+            }
+            WithdrawalRequestStatus::Fulfilled(_) => {
+                return Err(WithdrawalValidationResult::RequestFulfilled);
+            }
+        }
+
+        match self.is_accepted {
+            Some(true) => (),
+            None => return Err(WithdrawalValidationResult::NoVote),
+            Some(false) => return Err(WithdrawalValidationResult::RequestRejected),
+        }
+
+        if self.amount > sbtc_limits.per_withdrawal_cap().to_sat() {
+            return Err(WithdrawalValidationResult::AmountTooHigh);
+        }
+
+        if self.amount < self.recipient.minimal_non_dust().to_sat() {
+            return Err(WithdrawalValidationResult::AmountIsDust);
+        }
+
+        let block_wait = *chain_tip_height.saturating_sub(self.bitcoin_block_height);
+        if block_wait < WITHDRAWAL_MIN_CONFIRMATIONS {
+            return Err(WithdrawalValidationResult::RequestNotFinal);
+        }
+
+        if block_wait > WITHDRAWAL_BLOCKS_EXPIRY {
+            return Err(WithdrawalValidationResult::RequestExpired);
+        }
+
+        Ok(())
+    }
+
+    /// Validate the assessed fee for this withdrawal output within a
+    /// constructed sweep transaction.
+    fn validate_assessed_fee<F>(
+        &self,
+        output_index: usize,
+        tx: &F,
+        tx_fee: Amount,
+    ) -> Result<(), WithdrawalValidationResult>
+    where
+        F: FeeAssessment,
+    {
+        let Some(assessed_fee) = tx.assess_output_fee(output_index, tx_fee) else {
+            return Err(WithdrawalValidationResult::Unknown);
+        };
+
+        if assessed_fee.to_sat() > self.max_fee {
+            return Err(WithdrawalValidationResult::FeeTooHigh);
+        }
+
+        Ok(())
+    }
+
     /// Validate that the withdrawal request is okay given the report.
     ///
     /// See https://github.com/stacks-network/sbtc/issues/741 for the
@@ -996,49 +1098,10 @@ impl WithdrawalRequestReport {
     where
         F: FeeAssessment,
     {
-        match self.status {
-            WithdrawalRequestStatus::Confirmed => {}
-            WithdrawalRequestStatus::Unconfirmed => {
-                return WithdrawalValidationResult::TxNotOnBestChain;
-            }
-            WithdrawalRequestStatus::Fulfilled(_) => {
-                return WithdrawalValidationResult::RequestFulfilled;
-            }
-        }
-
-        match self.is_accepted {
-            Some(true) => (),
-            None => return WithdrawalValidationResult::NoVote,
-            Some(false) => return WithdrawalValidationResult::RequestRejected,
-        }
-
-        if self.amount > sbtc_limits.per_withdrawal_cap().to_sat() {
-            return WithdrawalValidationResult::AmountTooHigh;
-        }
-
-        if self.amount < self.recipient.minimal_non_dust().to_sat() {
-            return WithdrawalValidationResult::AmountIsDust;
-        }
-
-        let block_wait = *bitcoin_chain_tip_height.saturating_sub(self.bitcoin_block_height);
-        if block_wait < WITHDRAWAL_MIN_CONFIRMATIONS {
-            return WithdrawalValidationResult::RequestNotFinal;
-        }
-
-        if block_wait > WITHDRAWAL_BLOCKS_EXPIRY {
-            return WithdrawalValidationResult::RequestExpired;
-        }
-
-        let Some(assessed_fee) = tx.assess_output_fee(output_index, tx_fee) else {
-            // If we hit this, then there is a programming error somewhere
-            return WithdrawalValidationResult::Unknown;
-        };
-
-        if assessed_fee.to_sat() > self.max_fee {
-            return WithdrawalValidationResult::FeeTooHigh;
-        }
-
-        WithdrawalValidationResult::Ok
+        self.validate_without_fee(bitcoin_chain_tip_height, sbtc_limits)
+            .and_then(|()| self.validate_assessed_fee(output_index, tx, tx_fee))
+            .err()
+            .unwrap_or(WithdrawalValidationResult::Ok)
     }
 
     fn to_withdrawal_request(&self, votes: &SignerVotes) -> WithdrawalRequest {
