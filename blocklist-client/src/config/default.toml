@@ -75,7 +75,8 @@ port = 3030
 
 # Which assessment method to request from the risk analysis API.
 #
-# Required: true (when the `risk_analysis` section is configured)
+# Required: false
+# Default: sanctions
 # Possible values: sanctions, risk_analysis
 # Environment: BLOCKLIST_CLIENT_RISK_ANALYSIS__ASSESSMENT_METHOD
 # assessment_method = "sanctions"

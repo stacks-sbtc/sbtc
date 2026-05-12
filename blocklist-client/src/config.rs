@@ -54,6 +54,10 @@ fn default_sanction_polling_interval() -> Duration {
     Duration::from_secs(3600)
 }
 
+fn default_assessment_method() -> AssessmentMethod {
+    AssessmentMethod::Sanctions
+}
+
 /// Sanction file config
 #[derive(Deserialize, Clone, Debug)]
 #[allow(dead_code)] // TODO: remove once it's ready
@@ -90,6 +94,7 @@ pub struct RiskAnalysisConfig {
     /// API key for the Risk service
     pub api_key: String,
     /// Assessment method for the Blocklist client
+    #[serde(default = "default_assessment_method")]
     pub assessment_method: AssessmentMethod,
 }
 
@@ -241,15 +246,11 @@ mod tests {
     }
 
     #[test]
-    fn risk_api() {
+    fn risk_api_default() {
         clear_env();
 
         set_var("BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL", "some-url");
         set_var("BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY", "some-key");
-        set_var(
-            "BLOCKLIST_CLIENT_RISK_ANALYSIS__ASSESSMENT_METHOD",
-            "sanctions",
-        );
 
         let settings = Settings::new().unwrap();
 
@@ -257,6 +258,27 @@ mod tests {
         assert_eq!(risk_analysis.api_url, "some-url");
         assert_eq!(risk_analysis.api_key, "some-key");
         assert_matches!(risk_analysis.assessment_method, AssessmentMethod::Sanctions);
+    }
+
+    #[test]
+    fn risk_api_explicit_assessment() {
+        clear_env();
+        set_var("BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL", "some-url");
+        set_var("BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY", "some-key");
+        set_var(
+            "BLOCKLIST_CLIENT_RISK_ANALYSIS__ASSESSMENT_METHOD",
+            "risk_analysis",
+        );
+
+        let settings = Settings::new().unwrap();
+
+        let risk_analysis = settings.risk_analysis.unwrap();
+        assert_eq!(risk_analysis.api_url, "some-url");
+        assert_eq!(risk_analysis.api_key, "some-key");
+        assert_matches!(
+            risk_analysis.assessment_method,
+            AssessmentMethod::RiskAnalysis
+        );
 
         assert!(settings.sanctions.is_none());
     }
