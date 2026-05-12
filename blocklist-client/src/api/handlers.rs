@@ -47,11 +47,7 @@ pub async fn check_address_handler(
                 }
             }
         } else if config.sanctions.is_some() {
-            if !sanctions_state.is_loaded() {
-                Err(Error::SanctionsListNotReady)
-            } else {
-                Ok(sanctions_state.check_address(&address).await)
-            }
+            sanctions_state.check_address(&address).await
         } else {
             // This shouldn't happen since we validate the config
             Err(Error::InternalServer)
