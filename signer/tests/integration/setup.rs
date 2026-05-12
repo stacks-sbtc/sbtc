@@ -33,7 +33,6 @@ use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
 use signer::bitcoin::utxo::TxDeconstructor as _;
-use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
 use signer::block_observer::Deposit;
 use signer::codec::Encode as _;
@@ -1021,9 +1020,6 @@ impl TestSweepSetup2 {
             prevout_txid: self.donation.txid.into(),
             prevout_output_index: self.donation.vout,
             aggregate_key: self.signers.aggregate_key().into(),
-            will_sign: true,
-            is_valid_tx: true,
-            validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
             prevout_type: model::TxPrevoutType::SignersInput,
             sighash: Faker.fake_with_rng(&mut OsRng),
         };
@@ -1036,9 +1032,6 @@ impl TestSweepSetup2 {
                 prevout_txid: request.outpoint.txid.into(),
                 prevout_output_index: request.outpoint.vout,
                 aggregate_key: request.signers_public_key.into(),
-                will_sign: true,
-                is_valid_tx: true,
-                validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
                 prevout_type: model::TxPrevoutType::SignersInput,
                 sighash: Faker.fake_with_rng(&mut OsRng),
             };
@@ -1061,8 +1054,6 @@ impl TestSweepSetup2 {
                 stacks_txid: withdrawal.request.txid,
                 stacks_block_hash: withdrawal.request.block_hash,
                 bitcoin_chain_tip: sweep.block_hash.into(),
-                is_valid_tx: true,
-                validation_result: WithdrawalValidationResult::Ok,
                 output_index: index as u32 + 2,
                 bitcoin_txid: sweep.txid.into(),
             };

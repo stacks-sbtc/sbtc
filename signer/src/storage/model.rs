@@ -21,8 +21,6 @@ use stacks_common::types::chainstate::StacksBlockId;
 
 use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinBlockInfo;
-use crate::bitcoin::validation::InputValidationResult;
-use crate::bitcoin::validation::WithdrawalValidationResult;
 use crate::block_observer::Deposit;
 use crate::error::Error;
 use crate::keys::PublicKey;
@@ -1354,7 +1352,7 @@ impl std::fmt::Display for SigHash {
 }
 
 /// The sighash and enough metadata to piece together what happened.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct BitcoinTxSigHash {
     /// The transaction ID of the bitcoin transaction that sweeps funds
@@ -1377,21 +1375,10 @@ pub struct BitcoinTxSigHash {
     pub sighash: SigHash,
     /// The type of prevout that we are dealing with.
     pub prevout_type: TxPrevoutType,
-    /// The result of validation that was done on the input. For deposits,
-    /// this specifies whether validation succeeded and the first condition
-    /// that failed during validation. The signers' input is always valid,
-    /// since it is unconfirmed.
-    pub validation_result: InputValidationResult,
-    /// Whether the transaction is valid. A transaction is invalid if any
-    /// of the inputs or outputs failed validation.
-    pub is_valid_tx: bool,
-    /// Whether the signer will participate in a signing round for the
-    /// sighash.
-    pub will_sign: bool,
 }
 
 /// An output that was created due to a withdrawal request.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, sqlx::FromRow)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct BitcoinWithdrawalOutput {
     /// The ID of the transaction that includes this withdrawal output.
@@ -1417,11 +1404,6 @@ pub struct BitcoinWithdrawalOutput {
     /// Stacks block ID of the block that includes the transaction
     /// associated with this withdrawal request.
     pub stacks_block_hash: StacksBlockHash,
-    /// The outcome of validation of the withdrawal request.
-    pub validation_result: WithdrawalValidationResult,
-    /// Whether the transaction is valid. A transaction is invalid if any
-    /// of the inputs or outputs failed validation.
-    pub is_valid_tx: bool,
 }
 
 impl From<sbtc::events::StacksTxid> for StacksTxId {

@@ -519,10 +519,7 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
         prevout_type: model::TxPrevoutType::SignersInput,
         prevout_txid: setup.donation.txid.into(),
         prevout_output_index: setup.donation.vout,
-        validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
         aggregate_key: setup.signers.aggregate_key().into(),
-        is_valid_tx: false,
-        will_sign: false,
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([23; 32]).into(),
     };

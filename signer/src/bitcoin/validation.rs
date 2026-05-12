@@ -438,38 +438,25 @@ impl BitcoinTxValidationData {
     /// 3. That the signer is a party to signing set that controls the
     ///    public key locking the transaction output.
     pub fn to_input_rows(&self) -> Vec<BitcoinTxSigHash> {
-        // If any of the inputs or outputs fail validation, then the
-        // transaction is invalid, so we won't sign any of the inputs or
-        // outputs.
-        let is_valid_tx = self.is_valid_tx();
-
-        let validation_results = self.reports.deposits.iter().map(|(_, report)| {
-            report.validate(
-                self.chain_tip_height,
-                &self.tx,
-                self.tx_fee,
-                &self.sbtc_limits,
-            )
-        });
+        // We only persist sighashes for transactions that we will sign. If
+        // the transaction is invalid we won't sign anything, so skip it
+        // entirely.
+        if !self.is_valid_tx() {
+            return Vec::new();
+        }
 
         // just a sanity check
         debug_assert_eq!(self.deposit_sighashes.len(), self.reports.deposits.len());
-
-        let deposit_sighashes = self
-            .deposit_sighashes
-            .iter()
-            .copied()
-            .zip(validation_results);
 
         // We know the signers' input is valid. We started by fetching it
         // from our database, so we know it is unspent and valid. Later,
         // each of the signer's inputs were created as part of a
         // transaction chain, so each one is unspent and locked by the
         // signers' "aggregate" private key.
-        [(self.signer_sighash, InputValidationResult::Ok)]
+        [self.signer_sighash]
             .into_iter()
-            .chain(deposit_sighashes)
-            .map(|(sighash, validation_result)| BitcoinTxSigHash {
+            .chain(self.deposit_sighashes.iter().copied())
+            .map(|sighash| BitcoinTxSigHash {
                 txid: sighash.txid.into(),
                 sighash: sighash.sighash.into(),
                 chain_tip: self.chain_tip,
@@ -477,19 +464,20 @@ impl BitcoinTxValidationData {
                 prevout_txid: sighash.outpoint.txid.into(),
                 prevout_output_index: sighash.outpoint.vout,
                 prevout_type: sighash.prevout_type,
-                validation_result,
-                is_valid_tx,
-                will_sign: is_valid_tx && validation_result == InputValidationResult::Ok,
             })
             .collect()
     }
 
-    /// Construct objects with withdrawal output identifier with the
-    /// validation result.
+    /// Construct objects with withdrawal output identifiers for each
+    /// withdrawal serviced by this transaction. Returns an empty vec if
+    /// the transaction is invalid (and so we will not sign).
     pub fn to_withdrawal_rows(&self) -> Vec<BitcoinWithdrawalOutput> {
+        if !self.is_valid_tx() {
+            return Vec::new();
+        }
+
         let bitcoin_txid = self.tx.compute_txid().into();
 
-        let is_valid_tx = self.is_valid_tx();
         // If we ever construct a transaction with more than u32::MAX then
         // we are dealing with a very different Bitcoin and Stacks than we
         // started with, and there are other things that we need to change
@@ -505,27 +493,16 @@ impl BitcoinTxValidationData {
                 request_id: report.id.request_id,
                 stacks_txid: report.id.txid,
                 stacks_block_hash: report.id.block_hash,
-                validation_result: report.validate(
-                    self.chain_tip_height,
-                    output_index + 2,
-                    &self.tx,
-                    self.tx_fee,
-                    &self.sbtc_limits,
-                ),
-                is_valid_tx,
             })
             .collect()
     }
 
     /// Check whether the transaction is valid. This determines whether
-    /// this signer will sign any of the sighashes for the transaction
+    /// this signer will sign any of the sighashes for the transaction.
     ///
-    /// This checks that all deposits and withdrawals pass validation. Note
-    /// that the transaction can still pass validation if this signer is
-    /// not a part of the signing set locking one or more deposits, or if
-    /// the DKG shares locking one of the deposit inputs have not passed
-    /// verification for the signer. In such cases, it will just sign for
-    /// the deposits that it can.
+    /// All non-fee validation failures cause `fetch_all_reports` to bail
+    /// before we get here, so the only failures this can observe are
+    /// fee-related (assessed fee exceeds the request's max fee, etc.).
     pub fn is_valid_tx(&self) -> bool {
         // A transaction is invalid if it is not servicing any deposit or
         // withdrawal requests. Doing so costs fees and the signers do not
@@ -539,29 +516,22 @@ impl BitcoinTxValidationData {
         let tx_fee = self.tx_fee;
         let sbtc_limits = &self.sbtc_limits;
 
-        let deposit_validation_results = self.reports.deposits.iter().all(|(_, report)| {
-            matches!(
-                report.validate(chain_tip_height, tx, tx_fee, sbtc_limits),
-                InputValidationResult::Ok
-                    | InputValidationResult::CannotSignUtxo
-                    | InputValidationResult::DkgSharesUnverified
-                    | InputValidationResult::DkgSharesVerifyFailed
-            )
+        let deposits_ok = self.reports.deposits.iter().all(|(_, report)| {
+            report.validate(chain_tip_height, tx, tx_fee, sbtc_limits) == InputValidationResult::Ok
         });
 
-        let withdrawal_validation_results =
+        let withdrawals_ok =
             self.reports
                 .withdrawals
                 .iter()
                 .enumerate()
                 .all(|(index, (_, report))| {
                     let output_index = index + 2;
-                    let result =
-                        report.validate(chain_tip_height, output_index, tx, tx_fee, sbtc_limits);
-                    result == WithdrawalValidationResult::Ok
+                    report.validate(chain_tip_height, output_index, tx, tx_fee, sbtc_limits)
+                        == WithdrawalValidationResult::Ok
                 });
 
-        deposit_validation_results && withdrawal_validation_results
+        deposits_ok && withdrawals_ok
     }
 }
 
@@ -598,7 +568,7 @@ impl SbtcReports {
 }
 
 /// The responses for validation of a sweep transaction on bitcoin.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum InputValidationResult {
@@ -662,7 +632,7 @@ impl InputValidationResult {
 
 /// The responses for validation of the outputs of a sweep transaction on
 /// bitcoin.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum WithdrawalValidationResult {

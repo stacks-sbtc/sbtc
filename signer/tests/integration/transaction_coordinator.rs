@@ -63,7 +63,6 @@ use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SOLO_DEPOSIT_TX_VSIZE;
 use signer::bitcoin::utxo::TxDeconstructor as _;
-use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
 use signer::context::P2PEvent;
 use signer::context::RequestDeciderEvent;
@@ -5345,11 +5344,6 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
             request_id: request.request_id,
             stacks_txid: request.txid,
             stacks_block_hash: request.block_hash,
-            // We don't care about validation, as the majority of signers may
-            // have validated it, so we err towards checking more rather than
-            // less txids.
-            validation_result: WithdrawalValidationResult::NoVote,
-            is_valid_tx: false,
         };
         db.write_bitcoin_withdrawals_outputs(&[withdrawal_output])
             .await
@@ -5360,10 +5354,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
             prevout_type: model::TxPrevoutType::SignersInput,
             prevout_txid: donation.txid.into(),
             prevout_output_index: donation.vout,
-            validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
             aggregate_key: aggregate_key.into(),
-            is_valid_tx: false,
-            will_sign: false,
             chain_tip: bitcoin_chain_tip.block_hash,
             sighash: bitcoin::TapSighash::from_byte_array([1; 32]).into(),
         };

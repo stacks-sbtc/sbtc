@@ -470,16 +470,12 @@ where
             .construct_package_sighashes(&self.context, &btc_ctx)
             .await?;
 
-        let deposits_sighashes: Vec<model::BitcoinTxSigHash> = sighashes
-            .iter()
-            .flat_map(|s| s.to_input_rows())
-            .filter(|r| r.is_valid_tx)
-            .collect();
+        let deposits_sighashes: Vec<model::BitcoinTxSigHash> =
+            sighashes.iter().flat_map(|s| s.to_input_rows()).collect();
 
         let withdrawals_outputs: Vec<model::BitcoinWithdrawalOutput> = sighashes
             .iter()
             .flat_map(|s| s.to_withdrawal_rows())
-            .filter(|r| r.is_valid_tx)
             .collect();
 
         tracing::debug!("storing sighashes to the database");
@@ -1211,8 +1207,7 @@ where
             .into();
 
         match db.will_sign_bitcoin_tx_sighash(&sighash).await? {
-            Some((true, public_key)) => Ok(AcceptedSigHash { public_key, sighash }),
-            Some((false, _)) => Err(Error::InvalidSigHash(sighash)),
+            Some(public_key) => Ok(AcceptedSigHash { public_key, sighash }),
             None => Err(Error::UnknownSigHash(sighash)),
         }
     }

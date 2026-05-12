@@ -657,21 +657,16 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
     .unwrap();
 
     // Check that the intentions to sign the requests sighashes
-    // are stored in the database
-    let (will_sign, _) = db
-        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into())
+    // are stored in the database. The presence of a row means "will sign".
+    db.will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into())
         .await
         .expect("query to check if signer sighash is stored failed")
         .expect("signer sighash not stored");
 
-    assert!(will_sign);
-    let (will_sign, _) = db
-        .will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into())
+    db.will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into())
         .await
         .expect("query to check if deposit sighash is stored failed")
         .expect("deposit sighash not stored");
-
-    assert!(will_sign);
 
     testing::storage::drop_db(db).await;
 }
@@ -982,9 +977,6 @@ mod serial {
             prevout_output_index: 0,
             sighash,
             prevout_type: model::TxPrevoutType::Deposit,
-            validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-            is_valid_tx: true,
-            will_sign: true,
             aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
         };
 
@@ -1107,9 +1099,6 @@ mod serial {
             prevout_output_index: 0,
             sighash,
             prevout_type: model::TxPrevoutType::Deposit,
-            validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-            is_valid_tx: true,
-            will_sign: true,
             aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
         };
 

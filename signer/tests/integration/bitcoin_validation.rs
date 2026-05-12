@@ -5,14 +5,15 @@ use bitcoin::hashes::Hash as _;
 use rand::rngs::OsRng;
 use rand::seq::SliceRandom as _;
 use sbtc::testing::containers::TestContainersBuilder;
+use signer::error::Error;
 use test_case::test_case;
 
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
+use signer::bitcoin::validation::BitcoinSweepErrorMsg;
 use signer::bitcoin::validation::BitcoinTxContext;
 use signer::bitcoin::validation::BitcoinTxValidationData;
-use signer::bitcoin::validation::InputValidationResult;
 use signer::bitcoin::validation::TxRequestIds;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::Context;
@@ -72,11 +73,6 @@ pub trait AssertConstantInvariants {
                 .map(|row| row.txid)
                 .chain(withdrawal_rows.iter().map(|row| row.bitcoin_txid))
                 .collect();
-            let is_valid_tx: HashSet<_> = input_rows
-                .iter()
-                .map(|row| row.is_valid_tx)
-                .chain(withdrawal_rows.iter().map(|row| row.is_valid_tx))
-                .collect();
             let chain_tip: HashSet<_> = input_rows
                 .iter()
                 .map(|row| row.chain_tip)
@@ -84,7 +80,6 @@ pub trait AssertConstantInvariants {
                 .collect();
 
             assert_eq!(txids.len(), 1);
-            assert_eq!(is_valid_tx.len(), 1);
             assert_eq!(chain_tip.len(), 1);
         }
     }
@@ -177,19 +172,13 @@ async fn one_tx_per_request_set() {
     let input_rows = set.to_input_rows();
     let [signer, deposit] = input_rows.last_chunk().unwrap();
     assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
-    assert_eq!(signer.validation_result, InputValidationResult::Ok);
     assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
     assert_eq!(signer.prevout_output_index, setup.donation.vout);
-    assert!(signer.will_sign);
-    assert!(signer.is_valid_tx);
 
     let deposit_outpoint = setup.deposits[0].0.outpoint;
     assert_eq!(deposit.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit.validation_result, InputValidationResult::Ok);
     assert_eq!(deposit.prevout_txid.deref(), &deposit_outpoint.txid);
     assert_eq!(deposit.prevout_output_index, deposit_outpoint.vout);
-    assert!(deposit.will_sign);
-    assert!(deposit.is_valid_tx);
 
     testing::storage::drop_db(db).await;
 }
@@ -286,39 +275,8 @@ async fn one_invalid_deposit_invalidates_tx() {
     assert!(set.to_withdrawal_rows().is_empty());
 
     // The signer won't sign any of the sighashes, even though only one of
-    // the deposits have failed validation.
-    let input_rows = set.to_input_rows();
-    let signer = input_rows.first().unwrap();
-    assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
-    assert_eq!(signer.validation_result, InputValidationResult::Ok);
-    assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
-    assert_eq!(signer.prevout_output_index, setup.donation.vout);
-    assert!(!signer.will_sign);
-    assert!(!signer.is_valid_tx);
-
-    let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
-
-    let (validation_result1, validation_result2) = if setup.deposits[0].0.max_fee == low_fee {
-        (InputValidationResult::FeeTooHigh, InputValidationResult::Ok)
-    } else {
-        (InputValidationResult::Ok, InputValidationResult::FeeTooHigh)
-    };
-
-    let outpoint = setup.deposits[0].0.outpoint;
-    assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit1.validation_result, validation_result1);
-    assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
-    assert_eq!(deposit1.prevout_output_index, outpoint.vout);
-    assert!(!deposit1.will_sign);
-    assert!(!deposit1.is_valid_tx);
-
-    let outpoint = setup.deposits[1].0.outpoint;
-    assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit2.validation_result, validation_result2);
-    assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
-    assert_eq!(deposit2.prevout_output_index, outpoint.vout);
-    assert!(!deposit2.will_sign);
-    assert!(!deposit2.is_valid_tx);
+    // the deposits has failed validation, so no rows are emitted.
+    assert!(set.to_input_rows().is_empty());
 
     testing::storage::drop_db(db).await;
 }
@@ -464,12 +422,10 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
     let iter = output_rows.iter().zip(setup.withdrawals.iter()).enumerate();
 
     for (output_index, (row, withdrawal)) in iter {
-        assert_eq!(row.validation_result, WithdrawalValidationResult::Ok);
         assert_eq!(row.request_id, withdrawal.request.request_id);
         assert_eq!(row.stacks_block_hash, withdrawal.request.block_hash);
         assert_eq!(row.stacks_txid, withdrawal.request.txid);
         assert_eq!(row.output_index, output_index as u32 + 2);
-        assert!(row.is_valid_tx);
     }
 
     testing::storage::drop_db(db).await;
@@ -563,35 +519,13 @@ async fn swept_withdrawals_fail_validation() {
         aggregate_key,
     };
 
-    let validation_data = request
+    let validation_error = request
         .construct_package_sighashes(&ctx, &btc_ctx)
         .await
-        .unwrap();
+        .unwrap_err();
 
-    // There are a few invariants that we uphold for our validation data.
-    // These are things like "the transaction ID per package must be the
-    // same", we check for them here.
-    validation_data.assert_invariants();
-    // We only had a package with one set of requests that were being
-    // handled.
-    assert_eq!(validation_data.len(), 1);
-
-    let output_rows = validation_data[0].to_withdrawal_rows();
-    assert_eq!(output_rows.len(), 1);
-
-    let iter = output_rows.iter().zip(setup.withdrawals.iter()).enumerate();
-
-    for (output_index, (row, withdrawal)) in iter {
-        assert_eq!(
-            row.validation_result,
-            WithdrawalValidationResult::RequestFulfilled
-        );
-        assert_eq!(row.request_id, withdrawal.request.request_id);
-        assert_eq!(row.stacks_block_hash, withdrawal.request.block_hash);
-        assert_eq!(row.stacks_txid, withdrawal.request.txid);
-        assert_eq!(row.output_index, output_index as u32 + 2);
-        assert!(!row.is_valid_tx);
-    }
+    assert_matches::assert_matches!(validation_error, Error::BitcoinValidation(err) 
+        if err.error == BitcoinSweepErrorMsg::Withdrawal(WithdrawalValidationResult::RequestFulfilled));
 
     testing::storage::drop_db(db).await;
 }
@@ -716,31 +650,19 @@ async fn cannot_sign_deposit_is_ok() {
     let signer = input_rows.first().unwrap();
     assert_eq!(input_rows.len(), 3);
     assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
-    assert_eq!(signer.validation_result, InputValidationResult::Ok);
     assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
     assert_eq!(signer.prevout_output_index, setup.donation.vout);
-    assert!(signer.will_sign);
-    assert!(signer.is_valid_tx);
 
     let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
     let outpoint = setup.deposits[0].0.outpoint;
     assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(
-        deposit1.validation_result,
-        InputValidationResult::CannotSignUtxo
-    );
     assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
     assert_eq!(deposit1.prevout_output_index, outpoint.vout);
-    assert!(!deposit1.will_sign);
-    assert!(deposit1.is_valid_tx);
 
     let outpoint = setup.deposits[1].0.outpoint;
     assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit2.validation_result, InputValidationResult::Ok);
     assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
     assert_eq!(deposit2.prevout_output_index, outpoint.vout);
-    assert!(deposit2.will_sign);
-    assert!(deposit2.is_valid_tx);
 
     // Let's make sure the sighashes still match
     let sbtc_requests = SbtcRequests {
@@ -861,28 +783,19 @@ async fn sighashes_match_from_sbtc_requests_object() {
     let signer = input_rows.first().unwrap();
     assert_eq!(input_rows.len(), 3);
     assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
-    assert_eq!(signer.validation_result, InputValidationResult::Ok);
     assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
     assert_eq!(signer.prevout_output_index, setup.donation.vout);
-    assert!(signer.will_sign);
-    assert!(signer.is_valid_tx);
 
     let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
     let outpoint = setup.deposits[0].0.outpoint;
     assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit1.validation_result, InputValidationResult::Ok);
     assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
     assert_eq!(deposit1.prevout_output_index, outpoint.vout);
-    assert!(deposit1.will_sign);
-    assert!(deposit1.is_valid_tx);
 
     let outpoint = setup.deposits[1].0.outpoint;
     assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit2.validation_result, InputValidationResult::Ok);
     assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
     assert_eq!(deposit2.prevout_output_index, outpoint.vout);
-    assert!(deposit2.will_sign);
-    assert!(deposit2.is_valid_tx);
 
     let sbtc_requests = SbtcRequests {
         deposits: setup

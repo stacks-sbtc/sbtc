@@ -674,13 +674,13 @@ impl DbRead for SharedStore {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
+    ) -> Result<Option<PublicKeyXOnly>, Error> {
         Ok(self
             .lock()
             .await
             .bitcoin_sighashes
             .get(sighash)
-            .map(|s| (s.will_sign, s.aggregate_key)))
+            .map(|s| s.aggregate_key))
     }
 
     // The postgres implementation uses a timestamp to figure out when a
@@ -1167,7 +1167,7 @@ impl DbRead for InMemoryTransaction {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
+    ) -> Result<Option<PublicKeyXOnly>, Error> {
         self.store.will_sign_bitcoin_tx_sighash(sighash).await
     }
 

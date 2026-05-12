@@ -23,7 +23,6 @@ use rand::seq::SliceRandom as _;
 use sbtc::testing::containers::TestContainersBuilder;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::bitcoin::validation::WithdrawalRequestStatus;
-use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::SbtcLimits;
 use signer::stacks::api::StacksBlockHeader;
 use signer::stacks::api::TenureBlockHeaders;
@@ -2444,7 +2443,6 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests(
             bitcoin_chain_tip: bitcoin_block.block_hash,
             output_index: sweep_output_index,
             bitcoin_txid: sweep_tx_id,
-            ..Faker.fake_with_rng(&mut rng)
         };
 
         db.write_bitcoin_withdrawals_outputs(&[swept_output])
@@ -2902,7 +2900,6 @@ async fn get_swept_withdrawal_requests_does_not_return_withdrawal_requests_with_
             bitcoin_chain_tip: bitcoin_block.block_hash,
             output_index: sweep_output_index,
             bitcoin_txid: sweep_tx_id,
-            ..Faker.fake_with_rng(&mut rng)
         };
 
         db.write_bitcoin_withdrawals_outputs(&[swept_output])
@@ -3352,7 +3349,6 @@ async fn get_swept_withdrawal_requests_response_tx_reorged(setup_tables: SetupTa
             bitcoin_chain_tip: bitcoin_block.block_hash,
             output_index: sweep_output_index,
             bitcoin_txid: sweep_tx_id,
-            ..Faker.fake_with_rng(&mut rng)
         };
 
         db.write_bitcoin_withdrawals_outputs(&[swept_output])
@@ -4784,9 +4780,10 @@ async fn can_write_and_get_multiple_bitcoin_txs_sighashes() {
 
     let results = join_all(withdrawal_outputs_futures).await;
 
-    for (output, result) in sighashes.iter().zip(results) {
-        let (result, _) = result.unwrap().unwrap();
-        assert_eq!(result, output.will_sign);
+    for (_output, result) in sighashes.iter().zip(results) {
+        // The presence of a row means "will sign"; absence means
+        // "won't / unknown sighash".
+        assert!(result.unwrap().is_some());
     }
     signer::testing::storage::drop_db(db).await;
 }
@@ -6143,8 +6140,6 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
         stacks_block_hash: id.block_hash,
         bitcoin_chain_tip: chain_tip,
         bitcoin_txid,
-        is_valid_tx: true,
-        validation_result: WithdrawalValidationResult::Ok,
         output_index: 2,
     };
     db.write_bitcoin_withdrawals_outputs(&[output])
@@ -6158,10 +6153,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
         prevout_type: model::TxPrevoutType::SignersInput,
         prevout_txid: setup.donation.txid.into(),
         prevout_output_index: setup.donation.vout,
-        validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
         aggregate_key: setup.signers.aggregate_key().into(),
-        is_valid_tx: false,
-        will_sign: false,
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([88; 32]).into(),
     };
@@ -6222,8 +6214,6 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         stacks_block_hash: id.block_hash,
         bitcoin_chain_tip: chain_tip,
         bitcoin_txid: bitcoin_txid3,
-        is_valid_tx: true,
-        validation_result: WithdrawalValidationResult::Ok,
         output_index: 2,
     };
     db.write_bitcoin_withdrawals_outputs(&[output])
@@ -6238,10 +6228,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         prevout_type: model::TxPrevoutType::SignersInput,
         prevout_txid: bitcoin_txid2,
         prevout_output_index: 0,
-        validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
         aggregate_key: setup.signers.aggregate_key().into(),
-        is_valid_tx: false,
-        will_sign: false,
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([66; 32]).into(),
     };
@@ -6254,10 +6241,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         prevout_type: model::TxPrevoutType::SignersInput,
         prevout_txid: bitcoin_txid1,
         prevout_output_index: 0,
-        validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
         aggregate_key: setup.signers.aggregate_key().into(),
-        is_valid_tx: false,
-        will_sign: false,
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([77; 32]).into(),
     };
@@ -6272,10 +6256,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         prevout_type: model::TxPrevoutType::SignersInput,
         prevout_txid: setup.donation.txid.into(),
         prevout_output_index: setup.donation.vout,
-        validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
         aggregate_key: setup.signers.aggregate_key().into(),
-        is_valid_tx: false,
-        will_sign: false,
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([88; 32]).into(),
     };
@@ -6319,8 +6300,6 @@ async fn is_withdrawal_active_for_considered_withdrawal() {
         stacks_txid: qualified_id.txid,
         stacks_block_hash: qualified_id.block_hash,
         bitcoin_chain_tip: chain_tip.block_hash,
-        is_valid_tx: true,
-        validation_result: WithdrawalValidationResult::Ok,
         output_index: 2,
         bitcoin_txid: Faker.fake_with_rng(&mut rng),
     };
@@ -6718,10 +6697,7 @@ mod p2p_peers {
 /// Module containing a test suite and helpers specific to
 /// `DbRead::get_pending_accepted_withdrawal_requests`.
 mod get_pending_accepted_withdrawal_requests {
-    use signer::{
-        bitcoin::validation::WithdrawalValidationResult,
-        testing::storage::{self, DbReadTestExt as _, DbWriteTestExt as _},
-    };
+    use signer::testing::storage::{self, DbReadTestExt as _, DbWriteTestExt as _};
 
     use super::*;
     use test_case::test_case;
@@ -6812,11 +6788,9 @@ mod get_pending_accepted_withdrawal_requests {
             db.write_bitcoin_withdrawals_outputs(&[model::BitcoinWithdrawalOutput {
                 bitcoin_txid: bitcoin_sweep_tx.txid,
                 bitcoin_chain_tip: *at_bitcoin_block,
-                is_valid_tx: true,
                 stacks_txid: request.txid,
                 stacks_block_hash: request.block_hash,
                 request_id: request.request_id,
-                validation_result: WithdrawalValidationResult::Ok,
                 output_index: 2,
             }])
             .await

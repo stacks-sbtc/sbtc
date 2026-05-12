@@ -749,9 +749,6 @@ impl PgWrite {
         let mut prevout_output_index = Vec::with_capacity(sighashes.len());
         let mut sighash = Vec::with_capacity(sighashes.len());
         let mut prevout_type = Vec::with_capacity(sighashes.len());
-        let mut validation_result = Vec::with_capacity(sighashes.len());
-        let mut is_valid_tx = Vec::with_capacity(sighashes.len());
-        let mut will_sign = Vec::with_capacity(sighashes.len());
         let mut aggregate_key = Vec::with_capacity(sighashes.len());
 
         for tx_sighash in sighashes {
@@ -764,9 +761,6 @@ impl PgWrite {
             );
             sighash.push(tx_sighash.sighash);
             prevout_type.push(tx_sighash.prevout_type);
-            validation_result.push(tx_sighash.validation_result);
-            is_valid_tx.push(tx_sighash.is_valid_tx);
-            will_sign.push(tx_sighash.will_sign);
             aggregate_key.push(tx_sighash.aggregate_key);
         }
 
@@ -778,10 +772,7 @@ impl PgWrite {
             , prevout_output_index  AS (SELECT ROW_NUMBER() OVER (), prevout_output_index FROM UNNEST($4::INTEGER[]) AS prevout_output_index)
             , sighash               AS (SELECT ROW_NUMBER() OVER (), sighash FROM UNNEST($5::BYTEA[]) AS sighash)
             , prevout_type          AS (SELECT ROW_NUMBER() OVER (), prevout_type FROM UNNEST($6::sbtc_signer.prevout_type[]) AS prevout_type)
-            , validation_result     AS (SELECT ROW_NUMBER() OVER (), validation_result FROM UNNEST($7::TEXT[]) AS validation_result)
-            , is_valid_tx           AS (SELECT ROW_NUMBER() OVER (), is_valid_tx FROM UNNEST($8::BOOLEAN[]) AS is_valid_tx)
-            , will_sign             AS (SELECT ROW_NUMBER() OVER (), will_sign FROM UNNEST($9::BOOLEAN[]) AS will_sign)
-            , x_only_public_key     AS (SELECT ROW_NUMBER() OVER (), x_only_public_key FROM UNNEST($10::BYTEA[]) AS x_only_public_key)
+            , x_only_public_key     AS (SELECT ROW_NUMBER() OVER (), x_only_public_key FROM UNNEST($7::BYTEA[]) AS x_only_public_key)
             INSERT INTO sbtc_signer.bitcoin_tx_sighashes (
                   txid
                 , chain_tip
@@ -789,9 +780,6 @@ impl PgWrite {
                 , prevout_output_index
                 , sighash
                 , prevout_type
-                , validation_result
-                , is_valid_tx
-                , will_sign
                 , x_only_public_key
             )
             SELECT
@@ -801,9 +789,6 @@ impl PgWrite {
               , prevout_output_index
               , sighash
               , prevout_type
-              , validation_result
-              , is_valid_tx
-              , will_sign
               , x_only_public_key
             FROM tx_ids
             JOIN chain_tip USING (row_number)
@@ -811,9 +796,6 @@ impl PgWrite {
             JOIN prevout_output_index USING (row_number)
             JOIN sighash USING (row_number)
             JOIN prevout_type USING (row_number)
-            JOIN validation_result USING (row_number)
-            JOIN is_valid_tx USING (row_number)
-            JOIN will_sign USING (row_number)
             JOIN x_only_public_key USING (row_number)
             ON CONFLICT DO NOTHING"#,
         )
@@ -823,9 +805,6 @@ impl PgWrite {
         .bind(prevout_output_index)
         .bind(sighash)
         .bind(prevout_type)
-        .bind(validation_result)
-        .bind(is_valid_tx)
-        .bind(will_sign)
         .bind(aggregate_key)
         .execute(executor)
         .await
@@ -851,8 +830,6 @@ impl PgWrite {
         let mut output_index = Vec::with_capacity(withdrawal_outputs.len());
         let mut stacks_txid = Vec::with_capacity(withdrawal_outputs.len());
         let mut stacks_block_hash = Vec::with_capacity(withdrawal_outputs.len());
-        let mut validation_result = Vec::with_capacity(withdrawal_outputs.len());
-        let mut is_valid_tx = Vec::with_capacity(withdrawal_outputs.len());
 
         for withdrawal_output in withdrawal_outputs {
             bitcoin_txid.push(withdrawal_output.bitcoin_txid);
@@ -867,8 +844,6 @@ impl PgWrite {
             );
             stacks_txid.push(withdrawal_output.stacks_txid);
             stacks_block_hash.push(withdrawal_output.stacks_block_hash);
-            validation_result.push(withdrawal_output.validation_result);
-            is_valid_tx.push(withdrawal_output.is_valid_tx);
         }
 
         sqlx::query(
@@ -879,17 +854,13 @@ impl PgWrite {
             , request_id            AS (SELECT ROW_NUMBER() OVER (), request_id FROM UNNEST($4::BIGINT[]) AS request_id)
             , stacks_txid           AS (SELECT ROW_NUMBER() OVER (), stacks_txid FROM UNNEST($5::BYTEA[]) AS stacks_txid)
             , stacks_block_hash     AS (SELECT ROW_NUMBER() OVER (), stacks_block_hash FROM UNNEST($6::BYTEA[]) AS stacks_block_hash)
-            , validation_result     AS (SELECT ROW_NUMBER() OVER (), validation_result FROM UNNEST($7::TEXT[]) AS validation_result)
-            , is_valid_tx           AS (SELECT ROW_NUMBER() OVER (), is_valid_tx FROM UNNEST($8::BOOLEAN[]) AS is_valid_tx)
             INSERT INTO sbtc_signer.bitcoin_withdrawals_outputs (
                   bitcoin_txid
                 , bitcoin_chain_tip
                 , output_index
                 , request_id
                 , stacks_txid
-                , stacks_block_hash
-                , validation_result
-                , is_valid_tx)
+                , stacks_block_hash)
             SELECT
                 bitcoin_txid
               , bitcoin_chain_tip
@@ -897,16 +868,12 @@ impl PgWrite {
               , request_id
               , stacks_txid
               , stacks_block_hash
-              , validation_result
-              , is_valid_tx
             FROM bitcoin_tx_ids
             JOIN bitcoin_chain_tip USING (row_number)
             JOIN output_index USING (row_number)
             JOIN request_id USING (row_number)
             JOIN stacks_txid USING (row_number)
             JOIN stacks_block_hash USING (row_number)
-            JOIN validation_result USING (row_number)
-            JOIN is_valid_tx USING (row_number)
             ON CONFLICT DO NOTHING"#,
         )
         .bind(bitcoin_txid)
@@ -915,8 +882,6 @@ impl PgWrite {
         .bind(request_id)
         .bind(stacks_txid)
         .bind(stacks_block_hash)
-        .bind(validation_result)
-        .bind(is_valid_tx)
         .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
