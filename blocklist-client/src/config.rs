@@ -60,7 +60,6 @@ fn default_assessment_method() -> AssessmentMethod {
 
 /// Sanction file config
 #[derive(Deserialize, Clone, Debug)]
-#[allow(dead_code)] // TODO: remove once it's ready
 pub struct SanctionFileConfig {
     /// The URL to fetch the file from
     #[serde(deserialize_with = "url_deserializer_single")]
