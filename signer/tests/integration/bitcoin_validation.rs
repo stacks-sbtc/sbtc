@@ -12,9 +12,9 @@ use test_case::test_case;
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
-use signer::bitcoin::validation::BitcoinSweepErrorMsg;
 use signer::bitcoin::validation::BitcoinTxContext;
 use signer::bitcoin::validation::BitcoinTxValidationData;
+use signer::bitcoin::validation::BitcoinValidationError;
 use signer::bitcoin::validation::TxRequestIds;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::Context;
@@ -263,8 +263,8 @@ async fn one_invalid_deposit_invalidates_tx() {
         .await
         .unwrap_err();
 
-    assert_matches::assert_matches!(validation_error, Error::BitcoinValidation(err) 
-        if err.error == BitcoinSweepErrorMsg::Deposit(InputValidationResult::FeeTooHigh));
+    assert_matches::assert_matches!(validation_error, Error::BitcoinValidation(err)
+        if matches!(*err, BitcoinValidationError::Deposit(InputValidationResult::FeeTooHigh, _)));
 
     testing::storage::drop_db(db).await;
 }
@@ -513,7 +513,7 @@ async fn swept_withdrawals_fail_validation() {
         .unwrap_err();
 
     assert_matches::assert_matches!(validation_error, Error::BitcoinValidation(err) 
-        if err.error == BitcoinSweepErrorMsg::Withdrawal(WithdrawalValidationResult::RequestFulfilled));
+        if matches!(*err, BitcoinValidationError::Withdrawal(WithdrawalValidationResult::RequestFulfilled, _)));
 
     testing::storage::drop_db(db).await;
 }
@@ -620,7 +620,7 @@ async fn cannot_sign_deposit_is_not_ok() {
         .unwrap_err();
 
     assert_matches::assert_matches!(validation_error, Error::BitcoinValidation(err) 
-        if err.error == BitcoinSweepErrorMsg::Deposit(InputValidationResult::CannotSignUtxo));
+        if matches!(*err, BitcoinValidationError::Deposit(InputValidationResult::CannotSignUtxo, _)));
 
     testing::storage::drop_db(db).await;
 }

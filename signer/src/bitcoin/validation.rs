@@ -186,12 +186,12 @@ impl BitcoinPreSignRequest {
                     &btc_ctx.signer_public_key,
                 );
                 let Some(report) = report_future.await? else {
-                    return Err(InputValidationResult::Unknown.into_error(btc_ctx));
+                    return Err(InputValidationResult::Unknown.into_error(*outpoint));
                 };
 
                 report
                     .validate_without_fee(btc_ctx.chain_tip_height, &sbtc_limits)
-                    .map_err(|result| result.into_error(btc_ctx))?;
+                    .map_err(|result| result.into_error(*outpoint))?;
 
                 let votes = db
                     .get_deposit_request_signer_votes(&txid, output_index, &btc_ctx.aggregate_key)
@@ -209,12 +209,13 @@ impl BitcoinPreSignRequest {
                     &btc_ctx.signer_public_key,
                 );
                 let Some(report) = report.await? else {
-                    return Err(WithdrawalValidationResult::Unknown.into_error(btc_ctx));
+                    let id = qualified_id.clone();
+                    return Err(WithdrawalValidationResult::Unknown.into_error(id));
                 };
 
                 report
                     .validate_without_fee(btc_ctx.chain_tip_height, &sbtc_limits)
-                    .map_err(|result| result.into_error(btc_ctx))?;
+                    .map_err(|result| result.into_error(qualified_id.clone()))?;
 
                 let votes = db
                     .get_withdrawal_request_signer_votes(qualified_id, &btc_ctx.aggregate_key)
@@ -351,7 +352,7 @@ impl BitcoinPreSignRequest {
                 .deposit_reports
                 .get(outpoint)
                 // This should never happen because we have already validated that we have all the reports.
-                .ok_or_else(|| InputValidationResult::Unknown.into_error(btc_ctx))?;
+                .ok_or_else(|| InputValidationResult::Unknown.into_error(*outpoint))?;
             deposits.push((report.to_deposit_request(votes), report.clone()));
         }
 
@@ -360,7 +361,7 @@ impl BitcoinPreSignRequest {
                 .withdrawal_reports
                 .get(id)
                 // This should never happen because we have already validated that we have all the reports.
-                .ok_or_else(|| WithdrawalValidationResult::Unknown.into_error(btc_ctx))?;
+                .ok_or_else(|| WithdrawalValidationResult::Unknown.into_error(id.clone()))?;
             withdrawals.push((report.to_withdrawal_request(votes), report.clone()));
         }
 
@@ -394,7 +395,7 @@ impl BitcoinPreSignRequest {
             sbtc_limits: ctx.state().get_current_limits(),
         };
 
-        out.validate(btc_ctx)?;
+        out.validate()?;
 
         Ok((out, signer_state))
     }
@@ -509,46 +510,17 @@ impl BitcoinTxValidationData {
         // A transaction is invalid if it is not servicing any deposit or
         // withdrawal requests. Doing so costs fees and the signers do not
         // gain anything by permitting such a transaction.
-        if self.reports.deposits.is_empty() && self.reports.withdrawals.is_empty() {
-            return false;
-        }
-
-        let chain_tip_height = self.chain_tip_height;
-        let tx = &self.tx;
-        let tx_fee = self.tx_fee;
-        let sbtc_limits = &self.sbtc_limits;
-
-        let deposits_ok = self.reports.deposits.iter().all(|(_, report)| {
-            report
-                .validate(chain_tip_height, tx, tx_fee, sbtc_limits)
-                .is_ok()
-        });
-
-        let withdrawals_ok =
-            self.reports
-                .withdrawals
-                .iter()
-                .enumerate()
-                .all(|(index, (_, report))| {
-                    let output_index = index + 2;
-                    report
-                        .validate(chain_tip_height, output_index, tx, tx_fee, sbtc_limits)
-                        .is_ok()
-                });
-
-        deposits_ok && withdrawals_ok
+        self.validate().is_ok()
     }
 
     /// Validate the transaction and return an error if it is invalid.
-    fn validate(&self, btc_ctx: &BitcoinTxContext) -> Result<(), Error> {
+    fn validate(&self) -> Result<(), Error> {
         // A transaction is invalid if it is not servicing any deposit or
         // withdrawal requests. Doing so costs fees and the signers do not
         // gain anything by permitting such a transaction.
         if self.reports.deposits.is_empty() && self.reports.withdrawals.is_empty() {
-            return Err(Error::BitcoinValidation(Box::new(BitcoinValidationError {
-                error: BitcoinSweepErrorMsg::NoRequests,
-                context: btc_ctx.clone(),
-            })));
+            let inner = BitcoinValidationError::NoRequests;
+            return Err(Error::BitcoinValidation(Box::new(inner)));
         }
 
         let chain_tip_height = self.chain_tip_height;
@@ -558,7 +530,7 @@ impl BitcoinTxValidationData {
 
         for (_, report) in self.reports.deposits.iter() {
             if let Err(error) = report.validate(chain_tip_height, tx, tx_fee, sbtc_limits) {
-                return Err(error.into_error(btc_ctx));
+                return Err(error.into_error(report.outpoint));
             }
         }
 
@@ -567,7 +539,7 @@ impl BitcoinTxValidationData {
             if let Err(error) =
                 report.validate(chain_tip_height, output_index, tx, tx_fee, sbtc_limits)
             {
-                return Err(error.into_error(btc_ctx));
+                return Err(error.into_error(report.id.clone()));
             }
         }
 
@@ -608,8 +580,9 @@ impl SbtcReports {
 }
 
 /// The responses for validation of a sweep transaction on bitcoin.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, sqlx::Type, strum::Display)]
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum InputValidationResult {
     /// The deposit request amount is below the allowed per-deposit minimum.
@@ -660,18 +633,16 @@ pub enum InputValidationResult {
 }
 
 impl InputValidationResult {
-    fn into_error(self, ctx: &BitcoinTxContext) -> Error {
-        Error::BitcoinValidation(Box::new(BitcoinValidationError {
-            error: BitcoinSweepErrorMsg::Deposit(self),
-            context: ctx.clone(),
-        }))
+    fn into_error(self, outpoint: OutPoint) -> Error {
+        Error::BitcoinValidation(Box::new(BitcoinValidationError::Deposit(self, outpoint)))
     }
 }
 
 /// The responses for validation of the outputs of a sweep transaction on
 /// bitcoin.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, sqlx::Type, strum::Display)]
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum WithdrawalValidationResult {
     /// The withdrawal request amount exceeds the allowed per-withdrawal cap
@@ -728,51 +699,24 @@ pub struct WithdrawalCapContext {
 
 impl WithdrawalValidationResult {
     /// Make into a crate error
-    pub fn into_error(self, ctx: &BitcoinTxContext) -> Error {
-        Error::BitcoinValidation(Box::new(BitcoinValidationError {
-            error: BitcoinSweepErrorMsg::Withdrawal(self),
-            context: ctx.clone(),
-        }))
+    pub fn into_error(self, qualified_id: QualifiedRequestId) -> Error {
+        let inner = BitcoinValidationError::Withdrawal(self, qualified_id);
+        Error::BitcoinValidation(Box::new(inner))
     }
 }
 
 /// The responses for validation of a sweep transaction on bitcoin.
-#[derive(Debug, thiserror::Error, PartialEq, Eq, Copy, Clone)]
-pub enum BitcoinSweepErrorMsg {
+#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
+pub enum BitcoinValidationError {
     /// The transaction does not service any deposit or withdrawal requests.
     #[error("no requests")]
     NoRequests,
     /// The error has something to do with the inputs.
-    #[error("deposit error")]
-    Deposit(InputValidationResult),
+    #[error("deposit error: {0}")]
+    Deposit(InputValidationResult, OutPoint),
     /// The error has something to do with the outputs.
-    #[error("withdrawal error")]
-    Withdrawal(WithdrawalValidationResult),
-}
-
-/// A struct for a bitcoin validation error containing all the necessary
-/// context.
-#[derive(Debug)]
-pub struct BitcoinValidationError {
-    /// The specific error that happened during validation.
-    pub error: BitcoinSweepErrorMsg,
-    /// The additional information that was used when trying to validate
-    /// the bitcoin transaction. This includes the public key of the signer
-    /// that was attempting to generate the transaction.
-    pub context: BitcoinTxContext,
-}
-
-impl std::fmt::Display for BitcoinValidationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // TODO(191): Add the other variables to the error message.
-        self.error.fmt(f)
-    }
-}
-
-impl std::error::Error for BitcoinValidationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.error)
-    }
+    #[error("withdrawal error: {0}")]
+    Withdrawal(WithdrawalValidationResult, QualifiedRequestId),
 }
 
 /// An enum for the confirmation status of a deposit request.
