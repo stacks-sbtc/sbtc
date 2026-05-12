@@ -394,6 +394,8 @@ impl BitcoinPreSignRequest {
             sbtc_limits: ctx.state().get_current_limits(),
         };
 
+        out.validate(btc_ctx)?;
+
         Ok((out, signer_state))
     }
 }
@@ -517,7 +519,9 @@ impl BitcoinTxValidationData {
         let sbtc_limits = &self.sbtc_limits;
 
         let deposits_ok = self.reports.deposits.iter().all(|(_, report)| {
-            report.validate(chain_tip_height, tx, tx_fee, sbtc_limits) == InputValidationResult::Ok
+            report
+                .validate(chain_tip_height, tx, tx_fee, sbtc_limits)
+                .is_ok()
         });
 
         let withdrawals_ok =
@@ -527,11 +531,47 @@ impl BitcoinTxValidationData {
                 .enumerate()
                 .all(|(index, (_, report))| {
                     let output_index = index + 2;
-                    report.validate(chain_tip_height, output_index, tx, tx_fee, sbtc_limits)
-                        == WithdrawalValidationResult::Ok
+                    report
+                        .validate(chain_tip_height, output_index, tx, tx_fee, sbtc_limits)
+                        .is_ok()
                 });
 
         deposits_ok && withdrawals_ok
+    }
+
+    /// Validate the transaction and return an error if it is invalid.
+    fn validate(&self, btc_ctx: &BitcoinTxContext) -> Result<(), Error> {
+        // A transaction is invalid if it is not servicing any deposit or
+        // withdrawal requests. Doing so costs fees and the signers do not
+        // gain anything by permitting such a transaction.
+        if self.reports.deposits.is_empty() && self.reports.withdrawals.is_empty() {
+            return Err(Error::BitcoinValidation(Box::new(BitcoinValidationError {
+                error: BitcoinSweepErrorMsg::NoRequests,
+                context: btc_ctx.clone(),
+            })));
+        }
+
+        let chain_tip_height = self.chain_tip_height;
+        let tx = &self.tx;
+        let tx_fee = self.tx_fee;
+        let sbtc_limits = &self.sbtc_limits;
+
+        for (_, report) in self.reports.deposits.iter() {
+            if let Err(error) = report.validate(chain_tip_height, tx, tx_fee, sbtc_limits) {
+                return Err(error.into_error(btc_ctx));
+            }
+        }
+
+        for (index, (_, report)) in self.reports.withdrawals.iter().enumerate() {
+            let output_index = index + 2;
+            if let Err(error) =
+                report.validate(chain_tip_height, output_index, tx, tx_fee, sbtc_limits)
+            {
+                return Err(error.into_error(btc_ctx));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -572,8 +612,6 @@ impl SbtcReports {
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum InputValidationResult {
-    /// The deposit request passed validation
-    Ok,
     /// The deposit request amount is below the allowed per-deposit minimum.
     AmountTooLow,
     /// The deposit request amount, less the fees, would be rejected from
@@ -636,8 +674,6 @@ impl InputValidationResult {
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum WithdrawalValidationResult {
-    /// The withdrawal request passed validation
-    Ok,
     /// The withdrawal request amount exceeds the allowed per-withdrawal cap
     AmountTooHigh,
     /// The withdrawal request amount is below the bitcoin dust amount.
@@ -703,6 +739,9 @@ impl WithdrawalValidationResult {
 /// The responses for validation of a sweep transaction on bitcoin.
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Copy, Clone)]
 pub enum BitcoinSweepErrorMsg {
+    /// The transaction does not service any deposit or withdrawal requests.
+    #[error("no requests")]
+    NoRequests,
     /// The error has something to do with the inputs.
     #[error("deposit error")]
     Deposit(InputValidationResult),
@@ -918,14 +957,12 @@ impl DepositRequestReport {
         tx: &F,
         tx_fee: Amount,
         sbtc_limits: &SbtcLimits,
-    ) -> InputValidationResult
+    ) -> Result<(), InputValidationResult>
     where
         F: FeeAssessment,
     {
-        self.validate_without_fee(chain_tip_height, sbtc_limits)
-            .and_then(|()| self.validate_assessed_fee(tx, tx_fee))
-            .err()
-            .unwrap_or(InputValidationResult::Ok)
+        self.validate_without_fee(chain_tip_height, sbtc_limits)?;
+        self.validate_assessed_fee(tx, tx_fee)
     }
 
     /// As deposit request.
@@ -1064,14 +1101,12 @@ impl WithdrawalRequestReport {
         tx: &F,
         tx_fee: Amount,
         sbtc_limits: &SbtcLimits,
-    ) -> WithdrawalValidationResult
+    ) -> Result<(), WithdrawalValidationResult>
     where
         F: FeeAssessment,
     {
-        self.validate_without_fee(bitcoin_chain_tip_height, sbtc_limits)
-            .and_then(|()| self.validate_assessed_fee(output_index, tx, tx_fee))
-            .err()
-            .unwrap_or(WithdrawalValidationResult::Ok)
+        self.validate_without_fee(bitcoin_chain_tip_height, sbtc_limits)?;
+        self.validate_assessed_fee(output_index, tx, tx_fee)
     }
 
     fn to_withdrawal_request(&self, votes: &SignerVotes) -> WithdrawalRequest {
@@ -1115,7 +1150,7 @@ mod tests {
     #[derive(Debug)]
     struct DepositReportErrorMapping {
         report: DepositRequestReport,
-        status: InputValidationResult,
+        status: Result<(), InputValidationResult>,
         chain_tip_height: BitcoinBlockHeight,
         limits: SbtcLimits,
     }
@@ -1136,7 +1171,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::TxNotOnBestChain,
+        status: Err(InputValidationResult::TxNotOnBestChain),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     }; "deposit-reorged")]
@@ -1154,7 +1189,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::DepositUtxoSpent,
+        status: Err(InputValidationResult::DepositUtxoSpent),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     }; "deposit-spent")]
@@ -1172,7 +1207,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::NoVote,
+        status: Err(InputValidationResult::NoVote),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "deposit-no-vote")]
@@ -1190,7 +1225,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::CannotSignUtxo,
+        status: Err(InputValidationResult::CannotSignUtxo),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "cannot-sign-for-deposit")]
@@ -1208,7 +1243,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::RejectedRequest,
+        status: Err(InputValidationResult::RejectedRequest),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "rejected-deposit")]
@@ -1226,7 +1261,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::LockTimeExpiry,
+        status: Err(InputValidationResult::LockTimeExpiry),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "lock-time-expires-soon-1")]
@@ -1244,7 +1279,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::LockTimeExpiry,
+        status: Err(InputValidationResult::LockTimeExpiry),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "lock-time-expires-soon-2")]
@@ -1262,7 +1297,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::UnsupportedLockTime,
+        status: Err(InputValidationResult::UnsupportedLockTime),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "lock-time-in-time-units-2")]
@@ -1280,7 +1315,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::Ok,
+        status: Ok(()),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "happy-path")]
@@ -1298,7 +1333,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::Unknown,
+        status: Err(InputValidationResult::Unknown),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "unknown-prevout")]
@@ -1316,7 +1351,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::Ok,
+        status: Ok(()),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "at-the-border")]
@@ -1334,7 +1369,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::FeeTooHigh,
+        status: Err(InputValidationResult::FeeTooHigh),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "one-sat-too-high-fee-amount")]
@@ -1352,7 +1387,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::MintAmountBelowDustLimit,
+        status: Err(InputValidationResult::MintAmountBelowDustLimit),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "one-sat-under-dust-amount")]
@@ -1370,7 +1405,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::Ok,
+        status: Ok(()),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "at-dust-amount")]
@@ -1388,7 +1423,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::FeeTooHigh,
+        status: Err(InputValidationResult::FeeTooHigh),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "one-sat-too-high-fee")]
@@ -1406,7 +1441,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::AmountTooHigh,
+        status: Err(InputValidationResult::AmountTooHigh),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, 99_999_999),
     } ; "amount-too-high")]
@@ -1424,7 +1459,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Verified),
         },
-        status: InputValidationResult::AmountTooLow,
+        status: Err(InputValidationResult::AmountTooLow),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(100_000_000, u64::MAX),
     } ; "amount-too-low")]
@@ -1442,7 +1477,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Unverified),
         },
-        status: InputValidationResult::DkgSharesUnverified,
+        status: Err(InputValidationResult::DkgSharesUnverified),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "unverified-dkg-shares")]
@@ -1460,7 +1495,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: Some(DkgSharesStatus::Failed),
         },
-        status: InputValidationResult::DkgSharesVerifyFailed,
+        status: Err(InputValidationResult::DkgSharesVerifyFailed),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "dkg-shares-failed-verification")]
@@ -1478,7 +1513,7 @@ mod tests {
             signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
             dkg_shares_status: None,
         },
-        status: InputValidationResult::CannotSignUtxo,
+        status: Err(InputValidationResult::CannotSignUtxo),
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(0, u64::MAX),
     } ; "no-dkg-shares-status")]
@@ -1503,7 +1538,7 @@ mod tests {
     #[derive(Debug)]
     struct WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport,
-        status: WithdrawalValidationResult,
+        status: Result<(), WithdrawalValidationResult>,
         chain_tip_height: BitcoinBlockHeight,
         limits: SbtcLimits,
     }
@@ -1539,7 +1574,7 @@ mod tests {
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
         // This is set by Emily.
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::Ok,
+        status: Ok(()),
     } ; "happy-path-ok")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
@@ -1555,7 +1590,7 @@ mod tests {
             recipient: TEST_RECIPIENT.clone(),
             bitcoin_block_height: 0u64.into(),
         },
-        status: WithdrawalValidationResult::AmountTooHigh,
+        status: Err(WithdrawalValidationResult::AmountTooHigh),
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
     } ; "amount-too-high")]
@@ -1575,7 +1610,7 @@ mod tests {
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::AmountIsDust,
+        status: Err(WithdrawalValidationResult::AmountIsDust),
     } ; "amount-is-dust")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
@@ -1593,7 +1628,7 @@ mod tests {
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::Ok,
+        status: Ok(()),
     } ; "amount-and-fee-divorced")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
@@ -1611,7 +1646,7 @@ mod tests {
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::FeeTooHigh,
+        status: Err(WithdrawalValidationResult::FeeTooHigh) ,
     } ; "fee-too-high")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
@@ -1629,7 +1664,7 @@ mod tests {
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::NoVote,
+        status: Err(WithdrawalValidationResult::NoVote),
     } ; "no-vote")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
@@ -1647,7 +1682,7 @@ mod tests {
         },
         chain_tip_height: (WITHDRAWAL_BLOCKS_EXPIRY + 1).into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::RequestExpired,
+        status: Err(WithdrawalValidationResult::RequestExpired),
     } ; "request-expired")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
@@ -1668,7 +1703,7 @@ mod tests {
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::RequestFulfilled,
+        status: Err(WithdrawalValidationResult::RequestFulfilled),
     } ; "request-fulfilled")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
@@ -1686,7 +1721,7 @@ mod tests {
         },
         chain_tip_height: (WITHDRAWAL_MIN_CONFIRMATIONS - 1).into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::RequestNotFinal,
+        status: Err(WithdrawalValidationResult::RequestNotFinal),
     } ; "request-not-final")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
@@ -1704,7 +1739,7 @@ mod tests {
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::RequestRejected,
+        status: Err(WithdrawalValidationResult::RequestRejected),
     } ; "request-rejected")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
@@ -1722,7 +1757,7 @@ mod tests {
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
-        status: WithdrawalValidationResult::TxNotOnBestChain,
+        status: Err(WithdrawalValidationResult::TxNotOnBestChain),
     } ; "tx-not-on-best-chain")]
     fn withdrawal_report_validation(mapping: WithdrawalReportErrorMapping) {
         let mut tx = crate::testing::btc::base_signer_transaction();
@@ -1773,7 +1808,7 @@ mod tests {
 
         let status = report.validate(bitcoin_chain_tip_height, output_index, &tx, TX_FEE, limits);
 
-        assert_eq!(status, WithdrawalValidationResult::Unknown);
+        assert_eq!(status, Err(WithdrawalValidationResult::Unknown));
     }
 
     #[test_case(

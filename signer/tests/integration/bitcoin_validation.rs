@@ -5,6 +5,7 @@ use bitcoin::hashes::Hash as _;
 use rand::rngs::OsRng;
 use rand::seq::SliceRandom as _;
 use sbtc::testing::containers::TestContainersBuilder;
+use signer::bitcoin::validation::InputValidationResult;
 use signer::error::Error;
 use test_case::test_case;
 
@@ -184,8 +185,8 @@ async fn one_tx_per_request_set() {
 }
 
 /// Test that including a single invalid transaction in a set of requests
-/// results in the entire bitcoin transaction being invalid, and that will
-/// sign for the associated sighashes are all false.
+/// results in the entire bitcoin transaction being invalid, and that no
+/// sighashes are returned to be written to the database.
 #[tokio::test]
 async fn one_invalid_deposit_invalidates_tx() {
     let low_fee = 10;
@@ -257,26 +258,13 @@ async fn one_invalid_deposit_invalidates_tx() {
         aggregate_key,
     };
 
-    let validation_data = request
+    let validation_error = request
         .construct_package_sighashes(&ctx, &btc_ctx)
         .await
-        .unwrap();
-    // There are a few invariants that we uphold for our validation data.
-    // These are things like "the transaction ID per package must be the
-    // same", we check for them here.
-    validation_data.assert_invariants();
-    // We only had a package with one set of requests that were being
-    // handled.
-    assert_eq!(validation_data.len(), 1);
+        .unwrap_err();
 
-    // We didn't give any withdrawals so the outputs vector should be
-    // empty (it only has signer outputs).
-    let set = &validation_data[0];
-    assert!(set.to_withdrawal_rows().is_empty());
-
-    // The signer won't sign any of the sighashes, even though only one of
-    // the deposits has failed validation, so no rows are emitted.
-    assert!(set.to_input_rows().is_empty());
+    assert_matches::assert_matches!(validation_error, Error::BitcoinValidation(err) 
+        if err.error == BitcoinSweepErrorMsg::Deposit(InputValidationResult::FeeTooHigh));
 
     testing::storage::drop_db(db).await;
 }
@@ -531,7 +519,7 @@ async fn swept_withdrawals_fail_validation() {
 }
 
 #[tokio::test]
-async fn cannot_sign_deposit_is_ok() {
+async fn cannot_sign_deposit_is_not_ok() {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
@@ -626,68 +614,13 @@ async fn cannot_sign_deposit_is_ok() {
         aggregate_key,
     };
 
-    let validation_data = request
+    let validation_error = request
         .construct_package_sighashes(&ctx, &btc_ctx)
         .await
-        .unwrap();
+        .unwrap_err();
 
-    // There are a few invariants that we uphold for our validation data.
-    // These are things like "the transaction ID per package must be the
-    // same", we check for them here.
-    validation_data.assert_invariants();
-    // We only had a package with one set of requests that were being
-    // handled.
-    assert_eq!(validation_data.len(), 1);
-
-    // We didn't give any withdrawals so the outputs vector should be
-    // empty (it only has signer outputs).
-    let set = &validation_data[0];
-    assert!(set.to_withdrawal_rows().is_empty());
-
-    // The signer won't sign the sighashes where they cannot sign, but the
-    // transaction is still valid, so they will sign the other sighashes.
-    let input_rows = set.to_input_rows();
-    let signer = input_rows.first().unwrap();
-    assert_eq!(input_rows.len(), 3);
-    assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
-    assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
-    assert_eq!(signer.prevout_output_index, setup.donation.vout);
-
-    let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
-    let outpoint = setup.deposits[0].0.outpoint;
-    assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit1.prevout_txid.deref(), &outpoint.txid);
-    assert_eq!(deposit1.prevout_output_index, outpoint.vout);
-
-    let outpoint = setup.deposits[1].0.outpoint;
-    assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit2.prevout_txid.deref(), &outpoint.txid);
-    assert_eq!(deposit2.prevout_output_index, outpoint.vout);
-
-    // Let's make sure the sighashes still match
-    let sbtc_requests = SbtcRequests {
-        deposits: setup
-            .deposits
-            .iter()
-            .map(|(_, req, _)| req.clone())
-            .collect(),
-        withdrawals: Vec::new(),
-        signer_state: signer_btc_state(&ctx, &request, &btc_ctx).await,
-        accept_threshold: 2,
-        num_signers: 3,
-        sbtc_limits: SbtcLimits::unlimited(),
-        max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
-    };
-    let txs = sbtc_requests.construct_transactions().unwrap();
-    assert_eq!(txs.len(), 1);
-
-    let tx = &txs[0];
-    let sighashes = tx.construct_digests().unwrap();
-    assert_eq!(sighashes.signers, *signer.sighash);
-
-    assert_eq!(sighashes.deposits.len(), 2);
-    assert_eq!(sighashes.deposits[0].1, *deposit1.sighash);
-    assert_eq!(sighashes.deposits[1].1, *deposit2.sighash);
+    assert_matches::assert_matches!(validation_error, Error::BitcoinValidation(err) 
+        if err.error == BitcoinSweepErrorMsg::Deposit(InputValidationResult::CannotSignUtxo));
 
     testing::storage::drop_db(db).await;
 }
