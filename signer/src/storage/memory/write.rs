@@ -385,6 +385,41 @@ impl DbWrite for SharedStore {
 
         Ok(())
     }
+
+    async fn set_canonical_bitcoin_blockchain(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<(), Error> {
+        let mut store = self.lock().await;
+        store.version += 1;
+
+        store.canonical_bitcoin_blocks.clear();
+        // Then, recursively mark all blocks reachable from the chain tip as canonical
+        if let Some(block) = store.bitcoin_blocks.get(chain_tip).cloned() {
+            store.canonical_bitcoin_blocks.insert(*chain_tip, block);
+        }
+
+        let mut current_block_hash = *chain_tip;
+        while let Some(block) = store
+            .canonical_bitcoin_blocks
+            .get(&current_block_hash)
+            .cloned()
+        {
+            match store.bitcoin_blocks.get(&block.parent_hash).cloned() {
+                Some(parent) => {
+                    store
+                        .canonical_bitcoin_blocks
+                        .insert(block.parent_hash, parent);
+                    current_block_hash = block.parent_hash;
+                }
+                None => {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl DbWrite for InMemoryTransaction {
@@ -538,5 +573,12 @@ impl DbWrite for InMemoryTransaction {
         self.store
             .update_peer_connection(pub_key, peer_id, address)
             .await
+    }
+
+    async fn set_canonical_bitcoin_blockchain(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> Result<(), Error> {
+        self.store.set_canonical_bitcoin_blockchain(chain_tip).await
     }
 }

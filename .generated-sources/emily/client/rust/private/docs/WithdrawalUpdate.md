@@ -4,7 +4,7 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**expected_fulfillment_info** | [**models::ExpectedFulfillmentInfo**](ExpectedFulfillmentInfo.md) |  | 
+**expected_fulfillment_info** | Option<[**models::ExpectedFulfillmentInfo**](ExpectedFulfillmentInfo.md)> |  | [optional]
 **fulfillment** | Option<[**models::Fulfillment**](Fulfillment.md)> |  | [optional]
 **request_id** | **u64** | The id of the Stacks withdrawal request that initiated the sBTC operation. | 
 **status** | [**models::WithdrawalStatus**](WithdrawalStatus.md) |  | 

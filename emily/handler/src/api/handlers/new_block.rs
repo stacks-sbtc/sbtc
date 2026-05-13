@@ -19,7 +19,6 @@ use crate::api::models::common::Fulfillment;
 use crate::api::models::common::{DepositStatus, WithdrawalStatus};
 use crate::api::models::deposit::requests::{DepositUpdate, UpdateDepositsRequestBody};
 use crate::api::models::new_block::NewBlockEventRaw;
-use crate::api::models::withdrawal::ExpectedFulfillmentInfo;
 use crate::api::models::withdrawal::WithdrawalParameters;
 use crate::api::models::withdrawal::requests::{
     CreateWithdrawalRequestBody, UpdateWithdrawalsRequestBody, WithdrawalUpdate,
@@ -306,10 +305,7 @@ fn handle_withdrawal_accept(event: WithdrawalAcceptEvent) -> WithdrawalUpdate {
             btc_fee: event.fee,
             stacks_txid: hex::encode(event.txid.0),
         }),
-        expected_fulfillment_info: ExpectedFulfillmentInfo {
-            bitcoin_block_height: None,
-            bitcoin_txid: None,
-        },
+        expected_fulfillment_info: None,
         status_message: format!("Included in block {}", event.block_id.to_hex()),
     }
 }
@@ -363,10 +359,7 @@ fn handle_withdrawal_reject(event: WithdrawalRejectEvent) -> WithdrawalUpdate {
         request_id: event.request_id,
         status: WithdrawalStatus::Failed,
         status_message: "Rejected".to_string(),
-        expected_fulfillment_info: ExpectedFulfillmentInfo {
-            bitcoin_block_height: None,
-            bitcoin_txid: None,
-        },
+        expected_fulfillment_info: None,
     }
 }
 
@@ -386,9 +379,6 @@ where
 
 #[cfg(test)]
 mod test {
-
-    use crate::api::models::withdrawal::ExpectedFulfillmentInfo;
-
     use super::*;
     use bitcoin::{
         BlockHash, OutPoint, ScriptBuf, Txid,
@@ -432,10 +422,7 @@ mod test {
             status: WithdrawalStatus::Failed,
             fulfillment: None,
             status_message: "Rejected".to_string(),
-            expected_fulfillment_info: ExpectedFulfillmentInfo {
-                bitcoin_block_height: None,
-                bitcoin_txid: None,
-            },
+            expected_fulfillment_info: None,
         };
 
         let res = handle_withdrawal_reject(event);
@@ -470,10 +457,7 @@ mod test {
                 stacks_txid: event.txid.to_string(),
             }),
             status_message: format!("Included in block {}", event.block_id.to_hex()),
-            expected_fulfillment_info: ExpectedFulfillmentInfo {
-                bitcoin_block_height: None,
-                bitcoin_txid: None,
-            },
+            expected_fulfillment_info: None,
         };
 
         let res = handle_withdrawal_accept(event);

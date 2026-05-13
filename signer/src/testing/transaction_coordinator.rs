@@ -256,7 +256,7 @@ where
                 client
                     .expect_estimate_fee_rate()
                     .times(1)
-                    .returning(|| Box::pin(async { Ok(1.3) }));
+                    .returning(|_| Box::pin(async { Ok(1.3) }));
             })
             .await;
 
@@ -406,7 +406,7 @@ where
                 client
                     .expect_estimate_fee_rate()
                     .times(1)
-                    .returning(|| Box::pin(async { Ok(1.3) }));
+                    .returning(|_| Box::pin(async { Ok(1.3) }));
             })
             .await;
 
@@ -563,7 +563,7 @@ where
                 client
                     .expect_estimate_fee_rate()
                     .times(1)
-                    .returning(|| Box::pin(async { Ok(1.3) }));
+                    .returning(|_| Box::pin(async { Ok(1.3) }));
             })
             .await;
 

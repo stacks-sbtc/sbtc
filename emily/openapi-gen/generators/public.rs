@@ -9,6 +9,12 @@ use super::CorsSupport;
 #[openapi(
     // Add API key security scheme.
     modifiers(&CorsSupport, &AwsApiKey, &AwsLambdaIntegration),
+    // Add the servers attribute to the OpenAPI specification.
+    servers(
+        (url = "http://localhost:3031", description = "Local Emily server"),
+        (url = "https://sbtc-emily.com", description = "Production Emily server"),
+        (url = "https://temp.sbtc-emily-dev.com", description = "Testnet Emily server"),
+    ),
     // Paths to be included in the OpenAPI specification.
     paths(
         // Health check endpoints.

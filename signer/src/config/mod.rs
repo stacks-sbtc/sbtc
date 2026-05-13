@@ -139,15 +139,37 @@ pub struct BitcoinConfig {
     /// hashes (`getbestblockhash`).
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub chain_tip_polling_interval: std::time::Duration,
+
+    /// The maximum amount of time that the signer will wait for a response
+    /// for any RPC requests to the nodes configured in the `rpc_endpoints`
+    /// field.
+    #[serde(deserialize_with = "duration_seconds_deserializer")]
+    pub timeout: std::time::Duration,
+
+    /// A test-only optional fallback fee rate in sats/vbyte to use when the
+    /// initial fee rate is too high to construct any transaction package.
+    /// When set, this value is used directly as the retry fee rate.
+    /// When `None`, the signer estimates a lower fee rate by targeting a longer
+    /// confirmation window.
+    /// This is for tests only, it fails validation in mainnet.
+    pub fallback_fee: Option<f64>,
 }
 
 impl Validatable for BitcoinConfig {
-    fn validate(&self, _: &Settings) -> Result<(), ConfigError> {
+    fn validate(&self, cfg: &Settings) -> Result<(), ConfigError> {
         // At least one endpoint must be provided.
         if self.rpc_endpoints.is_empty() {
             return Err(ConfigError::Message(
                 "[bitcoin.rpc_endpoints] At least one Bitcoin RPC endpoint must be provided"
                     .to_string(),
+            ));
+        }
+
+        // All durations should be non-zero
+        let zero = std::time::Duration::ZERO;
+        if self.timeout == zero {
+            return Err(ConfigError::Message(
+                SignerConfigError::ZeroDurationForbidden("bitcoin_timeout").to_string(),
             ));
         }
 
@@ -173,6 +195,20 @@ impl Validatable for BitcoinConfig {
                 "[bitcoin.chain_tip_polling_interval] Maximum polling interval exceeded"
                     .to_string(),
             ));
+        }
+
+        if let Some(fee) = self.fallback_fee {
+            if cfg.signer.network.is_mainnet() {
+                return Err(ConfigError::Message(
+                    "[bitcoin.fallback_fee] Cannot be used in mainnet".to_string(),
+                ));
+            }
+
+            if fee <= 0.0 || !fee.is_normal() {
+                return Err(ConfigError::Message(
+                    "[bitcoin.fallback_fee] Must be a positive normal number".to_string(),
+                ));
+            }
         }
 
         Ok(())
@@ -575,6 +611,7 @@ impl Settings {
         cfg_builder = cfg_builder.set_default("signer.dkg_verification_window", 10)?;
         cfg_builder = cfg_builder.set_default("signer.stacks_fees_max_ustx", 1_500_000)?;
         cfg_builder = cfg_builder.set_default("bitcoin.chain_tip_polling_interval", 5)?;
+        cfg_builder = cfg_builder.set_default("bitcoin.timeout", 10)?;
 
         if let Some(path) = config_path {
             cfg_builder = cfg_builder.add_source(File::from(path.as_ref()));
@@ -628,6 +665,7 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
+    use more_asserts::assert_lt;
     use tempfile;
     use toml_edit::DocumentMut;
 
@@ -694,6 +732,8 @@ mod tests {
             settings.bitcoin.chain_tip_polling_interval,
             Duration::from_secs(5)
         );
+        assert_eq!(settings.bitcoin.timeout.as_secs(), 10);
+        assert_eq!(settings.bitcoin.fallback_fee, None);
         assert_eq!(
             settings.signer.event_observer.bind,
             "0.0.0.0:8801".parse::<SocketAddr>().unwrap()
@@ -976,6 +1016,75 @@ mod tests {
     }
 
     #[test]
+    fn sbtc_bitcoin_timeout() {
+        clear_env();
+
+        set_var("SIGNER_BITCOIN__TIMEOUT", "12345");
+
+        let settings = Settings::new_from_default_config().unwrap();
+        let timeout = settings.bitcoin.timeout.as_secs();
+
+        assert_eq!(timeout, 12345);
+    }
+
+    #[test]
+    fn default_config_toml_loads_bitcoin_fallback_fee() {
+        clear_env();
+
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(settings.bitcoin.fallback_fee, None);
+
+        set_var("SIGNER_BITCOIN__FALLBACK_FEE", "42.123");
+        let settings = Settings::new_from_default_config().unwrap();
+
+        let fallback_fee = settings.bitcoin.fallback_fee.expect("missing fallback_fee");
+        assert_lt!((fallback_fee - 42.123).abs(), 1e-10);
+    }
+
+    #[test_case::test_case("mainnet", "", true; "mainnet, empty")]
+    #[test_case::test_case("mainnet", "42", false; "mainnet, 42")]
+    #[test_case::test_case("testnet", "", true; "testnet, empty")]
+    #[test_case::test_case("testnet", "42", true; "testnet, 42")]
+    #[test_case::test_case("regtest", "", true; "regtest, empty")]
+    #[test_case::test_case("regtest", "42", true; "regtest, 42")]
+    fn bitcoin_fallback_fee_in_network(network: &str, fallback_fee: &str, is_valid: bool) {
+        clear_env();
+
+        set_var("SIGNER_SIGNER__NETWORK", network);
+        if !fallback_fee.is_empty() {
+            set_var("SIGNER_BITCOIN__FALLBACK_FEE", fallback_fee);
+        }
+
+        // For non regtest we need at least one seed peer
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://seed-1:4122");
+        // The deployer address must match the network type
+        let address = StacksAddress::burn_address(network == "mainnet");
+        set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
+
+        let settings = Settings::new_from_default_config();
+
+        if is_valid {
+            settings.expect("should be valid");
+        } else {
+            assert_matches!(settings, Err(ConfigError::Message(m)) if m.contains("fallback_fee") && m.contains("mainnet"));
+        }
+    }
+
+    #[test_case::test_case("-0.1"; "-0.1")]
+    #[test_case::test_case("nan"; "nan")]
+    #[test_case::test_case("inf"; "inf")]
+    #[test_case::test_case("-inf"; "-inf")]
+    #[test_case::test_case("0"; "0")]
+    fn bitcoin_fallback_fee_bad_number(fee: &str) {
+        clear_env();
+
+        set_var("SIGNER_BITCOIN__FALLBACK_FEE", fee);
+        let settings = Settings::new_from_default_config();
+
+        assert_matches!(settings, Err(ConfigError::Message(m)) if m.contains("fallback_fee") && m.contains("number"));
+    }
+
+    #[test]
     fn emily_with_environment() {
         clear_env();
 
@@ -1138,6 +1247,8 @@ mod tests {
         remove_parameter("signer", "dkg_max_duration");
         remove_parameter("signer", "max_deposits_per_bitcoin_tx");
 
+        remove_parameter("bitcoin", "timeout");
+
         remove_parameter("emily", "pagination_timeout");
         remove_parameter("emily", "timeout");
 
@@ -1161,6 +1272,8 @@ mod tests {
         assert_eq!(settings.signer.dkg_max_duration, Duration::from_secs(120));
 
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
+
+        assert_eq!(settings.bitcoin.timeout.as_secs(), 10);
         assert_eq!(settings.emily.timeout, Duration::from_secs(10));
     }
 

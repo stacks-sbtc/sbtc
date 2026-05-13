@@ -23,6 +23,7 @@ x-common-vars:
   - &STACKS_31_HEIGHT ${STACKS_31_HEIGHT:-233}
   - &STACKS_32_HEIGHT ${STACKS_32_HEIGHT:-234}
   - &STACKS_33_HEIGHT ${STACKS_33_HEIGHT:-235}
+  - &STACKS_34_HEIGHT ${STACKS_34_HEIGHT:-236}
   - &STACKING_CYCLES ${STACKING_CYCLES:-1} # number of cycles to stack-stx or stack-extend for
   - &POX_PREPARE_LENGTH ${POX_PREPARE_LENGTH:-5}
   - &POX_REWARD_LENGTH ${POX_REWARD_LENGTH:-20}
@@ -31,10 +32,6 @@ x-common-vars:
 
 # Templates
 # ------------------------------------------------------------------------------
-x-stacks-blockchain: &stacks-blockchain
-  image: blockstack/stacks-core:3.3.0.0.1@sha256:b7fd10e489c81da12d8e1b956dec5d35bf8fd98874a6d32127bdee19cad0a235
-  profiles:
-    - default
 
 x-postgres: &postgres
   image: postgres:16.6-bookworm@sha256:c965017e1d29eb03e18a11abc25f5e3cd78cb5ac799d495922264b8489d5a3a1
@@ -52,7 +49,19 @@ x-sbtc-signer: &sbtc-signer
     context: ../
     dockerfile: docker/sbtc/Dockerfile
     target: signer
-  entrypoint: "/bin/bash -c '/usr/local/bin/signer -c /signer-config.toml --migrate-db --output-format json'"
+  logging:
+    driver: fluentd
+    options:
+      fluentd-address: "127.0.0.1:24224"
+      fluentd-async: "true"
+      tag: "{{.Name}}"
+  entrypoint:
+    - "/usr/local/bin/signer"
+    - "--config"
+    - "/signer-config.toml"
+    - "--migrate-db"
+    - "--output-format"
+    - "json"
   environment: &sbtc-signer-environment
     RUST_LOG: info,signer=debug
     SIGNER_SIGNER__P2P__LISTEN_ON: tcp://0.0.0.0:4122
@@ -62,7 +71,9 @@ x-sbtc-signer: &sbtc-signer
     - sbtc-signer
 
 x-stacks-signer: &stacks-signer
-  <<: *stacks-blockchain
+  image: ghcr.io/stacks-network/stacks-signer:3.4.0.0.1.0@sha256:afe4332e967b4a509cc05b5f6d4f15389b7afa100398ebdc1b5ae8c15cac996c
+  profiles:
+    - default
   depends_on:
     - stacks-node
   volumes:
@@ -185,6 +196,7 @@ services:
     container_name: sbtc-signer-1
     depends_on:
       - postgres-1
+      - bitcoin-pruned
     environment:
       <<: *sbtc-signer-environment
       SIGNER_SIGNER__DB_ENDPOINT: postgresql://postgres:postgres@postgres-1:5432/signer
@@ -206,6 +218,7 @@ services:
     container_name: sbtc-signer-2
     depends_on:
       - postgres-2
+      - bitcoin-pruned
     environment:
       <<: *sbtc-signer-environment
       SIGNER_SIGNER__DB_ENDPOINT: postgresql://postgres:postgres@postgres-2:5432/signer
@@ -227,6 +240,7 @@ services:
     container_name: sbtc-signer-3
     depends_on:
       - postgres-3
+      - bitcoin-pruned
     environment:
       <<: *sbtc-signer-environment
       SIGNER_SIGNER__DB_ENDPOINT: postgresql://postgres:postgres@postgres-3:5432/signer
@@ -286,9 +300,9 @@ services:
   bitcoin:
     image: bitcoin/bitcoin:25.2
     ports:
-      - "127.0.0.1:18443:18443"
+      - "127.0.0.1:18442:18443"
     volumes:
-      - ./bitcoin/bitcoin.conf:/root/.bitcoin/bitcoin.conf
+      - ./bitcoin/bitcoin-mempool.conf:/root/.bitcoin/bitcoin.conf
     entrypoint:
       - /bin/bash
       - -c
@@ -303,6 +317,32 @@ services:
     profiles:
       - default
       - bitcoin-mempool
+      - bitcoin
+
+  bitcoin-pruned:
+    image: bitcoin/bitcoin:25.2
+    ports:
+      - "127.0.0.1:18443:18443"
+    depends_on:
+      bitcoin:
+        condition: service_healthy
+    volumes:
+      - ./bitcoin/bitcoin-pruned.conf:/root/.bitcoin/bitcoin.conf
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        bitcoind
+    healthcheck:
+      test: [ "CMD-SHELL", "bitcoin-cli -rpcwait getblockcount" ]
+      interval: 5s
+      timeout: 1s
+      retries: 3
+    profiles:
+      - default
+      - bitcoin-mempool
+      - bitcoin
 
   bitcoin-miner:
     image: bitcoin/bitcoin:25.2
@@ -329,7 +369,9 @@ services:
   # Stacks Blockchain.
   # ------------------
   stacks-node:
-    <<: *stacks-blockchain
+    image: ghcr.io/stacks-network/stacks-core:3.4.0.0.1@sha256:e6469f24086faad11c45977016c1f4340e836f5b8f34778c1b88eab7b6e7cb80
+    profiles:
+      - default
     depends_on:
       bitcoin:
         condition: service_healthy
@@ -360,6 +402,7 @@ services:
       STACKS_31_HEIGHT: *STACKS_31_HEIGHT
       STACKS_32_HEIGHT: *STACKS_32_HEIGHT
       STACKS_33_HEIGHT: *STACKS_33_HEIGHT
+      STACKS_34_HEIGHT: *STACKS_34_HEIGHT
       POX_PREPARE_LENGTH: *POX_PREPARE_LENGTH
       POX_REWARD_LENGTH: *POX_REWARD_LENGTH
       REWARD_RECIPIENT: *REWARD_RECIPIENT
@@ -474,7 +517,7 @@ services:
       - default
 
   stacks-api:
-    image: hirosystems/stacks-blockchain-api:8.9.0
+    image: hirosystems/stacks-blockchain-api:8.15.2@sha256:964d33f61d12ca3ad8993ae07321f5ceb9ea6ab460b9124e2e36977c525a4401
     container_name: stacks-api
     stop_grace_period: 5s
     ports:
@@ -503,7 +546,8 @@ services:
       - default
 
   stacks-explorer:
-    image: hirosystems/explorer:1.248.0
+    image: hirosystems/explorer:1.340.3@sha256:cf014d3c1e6a0ef6414b2a1d1b4198599c4e169330033919408bb69ef22c33b7
+    platform: linux/amd64
     container_name: stacks-explorer
     stop_grace_period: 5s
     ports:
@@ -528,8 +572,10 @@ services:
       - "127.0.0.1:60401:60401"
       - "127.0.0.1:3002:3002"
     depends_on:
-      - bitcoin
-      - bitcoin-miner
+      bitcoin:
+        condition: service_healthy
+      bitcoin-miner:
+        condition: service_started
     environment:
       BITCOIN_RPC_PORT: *BITCOIN_RPC_PORT
     entrypoint:
@@ -667,12 +713,8 @@ services:
     restart: always
     ports:
       - "127.0.0.1:9598:9598"
+      - "127.0.0.1:24224:24224"
     volumes:
       - ./observability/vector.toml:/etc/vector/vector.toml:ro
-      # This is needed for vector to read logs from other containers
-      - /var/run/docker.sock:/var/run/docker.sock
-    # This is needed for localhost networking
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     profiles:
       - observability

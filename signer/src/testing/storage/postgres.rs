@@ -36,4 +36,19 @@ impl PgStore {
         .await
         .map_err(Error::SqlxQuery)
     }
+
+    /// Returns the value of the is_canonical column for the given block
+    /// hash. If the given block hash is missing then an error is returned.
+    pub async fn is_block_canonical(
+        &self,
+        block_hash: &model::BitcoinBlockHash,
+    ) -> Result<Option<bool>, Error> {
+        sqlx::query_scalar(
+            "SELECT is_canonical FROM sbtc_signer.bitcoin_blocks WHERE block_hash = $1",
+        )
+        .bind(block_hash)
+        .fetch_one(self.pool())
+        .await
+        .map_err(Error::SqlxQuery)
+    }
 }

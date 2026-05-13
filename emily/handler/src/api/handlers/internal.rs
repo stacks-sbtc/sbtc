@@ -1,8 +1,8 @@
 //! Handlers for internal endpoints.
 
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
+use warp::http::StatusCode;
 
 use crate::api::models::chainstate::Chainstate;
 use crate::common::error::{Error, Inconsistency};

@@ -64,7 +64,8 @@ pub struct WithdrawalUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fulfillment: Option<Fulfillment>,
     /// Details of the process of fulfilling the withdrawal
-    pub expected_fulfillment_info: ExpectedFulfillmentInfo,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_fulfillment_info: Option<ExpectedFulfillmentInfo>,
 }
 
 impl WithdrawalUpdate {
@@ -104,7 +105,7 @@ impl WithdrawalUpdate {
             message: self.status_message,
             stacks_block_height: chainstate.stacks_block_height,
             stacks_block_hash: chainstate.stacks_block_hash,
-            expected_fulfillment_info: self.expected_fulfillment_info,
+            expected_fulfillment_info: self.expected_fulfillment_info.unwrap_or_default(),
         };
         // Return the validated update.
         Ok(ValidatedWithdrawalUpdate {

@@ -7,9 +7,11 @@ use std::str::FromStr as _;
 use bitcoin::hashes::Hash as _;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
+use sqlx::Row as _;
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
 use sqlx::postgres::PgArgumentBuffer;
+use sqlx::postgres::PgRow;
 use sqlx::postgres::PgTypeInfo;
 use sqlx::postgres::types::Oid;
 use time::OffsetDateTime;
@@ -30,6 +32,7 @@ use crate::storage::model::TaprootScriptHash;
 
 use super::model::DbMultiaddr;
 use super::model::DbPeerId;
+use super::model::DepositRequest;
 use super::model::Timestamp;
 
 /// The PostgreSQL epoch is 2000-01-01 00:00:00 UTC
@@ -506,4 +509,46 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DbMultiaddr {
             .map(DbMultiaddr::from)
             .map_err(|e| format!("Failed to parse Multiaddr from database string: {e}").into())
     }
+}
+
+// FromRow implementations
+
+impl<'a> sqlx::FromRow<'a, PgRow> for DepositRequest {
+    fn from_row(row: &'a PgRow) -> sqlx::Result<Self> {
+        let output_index: u32 = row
+            .try_get::<i32, _>("output_index")
+            .and_then(|value| try_from_t::<i32, u32>(value, "output_index"))?;
+        let amount: u64 = row
+            .try_get::<i64, _>("amount")
+            .and_then(|value| try_from_t::<i64, u64>(value, "amount"))?;
+        let lock_time: u32 = row
+            .try_get::<i64, _>("lock_time")
+            .and_then(|value| try_from_t::<i64, u32>(value, "lock_time"))?;
+        let max_fee_bytes: [u8; 8] = row.try_get("max_fee")?;
+
+        Ok(DepositRequest {
+            txid: row.try_get("txid")?,
+            output_index,
+            spend_script: row.try_get("spend_script")?,
+            reclaim_script_hash: row.try_get("reclaim_script_hash")?,
+            recipient: row.try_get("recipient")?,
+            amount,
+            max_fee: u64::from_be_bytes(max_fee_bytes),
+            lock_time,
+            signers_public_key: row.try_get("signers_public_key")?,
+            sender_script_pub_keys: row.try_get("sender_script_pub_keys")?,
+        })
+    }
+}
+
+/// Helper function to convert the value from the database into another
+/// type, but return a sqlx error if the conversion fails.
+fn try_from_t<T, U>(value: T, name: &str) -> Result<U, sqlx::Error>
+where
+    U: TryFrom<T>,
+{
+    U::try_from(value).map_err(|e| sqlx::Error::ColumnDecode {
+        index: name.to_string(),
+        source: sqlx::__spec_error!(e),
+    })
 }

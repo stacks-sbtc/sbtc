@@ -5,3 +5,6 @@ packages:
   - 'emily/openapi-gen'
   - 'devenv/local/docker-compose/stacking'
   - 'ledger-cltv-register'
+  - 'docker/stacker/stacking'
+
+minimumReleaseAge: 10080 # 1 week

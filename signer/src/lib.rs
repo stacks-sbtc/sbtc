@@ -69,6 +69,29 @@ pub const SIGNER_CHANNEL_CAPACITY: usize = 1024;
 /// for the signers UTXO.
 pub const MAX_REORG_BLOCK_COUNT: u64 = 10;
 
+/// The maximum fee rate, in sats per vbyte, for a bitcoin transaction.
+/// Transactions with a fee rate that exceeds this value will be rejected.
+///
+/// This value is about two times the max fee rate observed on bitcoin
+/// mainnet.
+pub const MAX_BITCOIN_FEE_RATE: f64 = 1000.0;
+
+/// The minimum fee rate, in sats per vbyte, for a bitcoin transaction.
+/// Transactions with a fee rate below this value will be rejected.
+///
+/// This value is below the default of bitcoin core's `minrelaytxfee`
+/// setting, which is 1.0 sats/vB in bitcoin-core v25–v29 and was lowered
+/// to 0.1 sats/vB in v30. We set it low to allow the sBTC signer network
+/// to easily accommodate changes in our bitcoin node's mempool policy
+/// without requiring a change to the signer binary.
+///
+/// <https://bitcoincore.org/en/releases/30.0/>
+pub const MIN_BITCOIN_FEE_RATE: f64 = 0.001;
+
+/// The range of valid fee rates for a bitcoin transaction.
+pub const BITCOIN_FEE_RATE_RANGE: std::ops::RangeInclusive<f64> =
+    MIN_BITCOIN_FEE_RATE..=MAX_BITCOIN_FEE_RATE;
+
 /// The maximum number of sweep transactions that the signers can confirm
 /// per block.
 ///
@@ -128,6 +151,9 @@ pub const WITHDRAWAL_EXPIRY_BUFFER: u64 = 6;
 /// <https://github.com/bitcoin/bitcoin/blob/v25.0/src/policy/policy.h#L60-L61>
 pub const MAX_MEMPOOL_PACKAGE_SIZE: u64 = 101000;
 
+/// This is the maximum size of a bitcoin block in virtual bytes.
+pub const MAX_BITCOIN_BLOCK_VSIZE: u64 = 1_000_000;
+
 /// This is an upper bound on the number of signer state machines that we
 /// "could" need if we wanted to sign all inputs in parallel and running
 /// DKG.
@@ -145,6 +171,39 @@ pub const MAX_SIGNER_STATE_MACHINES: u64 = MAX_MEMPOOL_PACKAGE_SIZE
 /// should be the smallest vsize that a signed taproot input could have on
 /// bitcoin.
 pub const MIN_BITCOIN_INPUT_VSIZE: u64 = 58;
+
+/// The `max_transmit_size` configured on our libp2p-gossipsub behaviour.
+/// This is the value passed to
+/// [`gossipsub::ConfigBuilder::max_transmit_size`], and it controls the
+/// maximum size of a published message, as well as the maximum size of a
+/// received message.
+///
+/// ## Publish side
+///
+/// `Behaviour::publish` checks `data.len() > max_transmit_size` before
+/// queuing the message. The check is against the raw application payload,
+/// not the final wire frame. So our encoded `Signed<SignerMessage>` bytes
+/// must stay within this limit.
+///
+/// Source (libp2p-gossipsub 0.49.3):
+/// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/behaviour.rs#L574-L595>
+///
+/// ## Receive side
+///
+/// Inbound gossipsub frames are decoded by `quick-protobuf-codec`, whose
+/// `max_len` is also set from `max_transmit_size`. This acts as a
+/// frame-level limit: any single RPC frame (which carries one published
+/// message) exceeding `max_len` is rejected by the codec before gossipsub
+/// ever sees it. This check is against the full libp2p wire message size,
+/// not just the part of the message that we've encoded. So our messages
+/// need to stay well below the limit because libp2p adds in some
+/// additional data.
+///
+/// Source (quick-protobuf-codec 0.3.1, decode rejects oversized frames):
+/// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/protocol.rs#L134-L146>
+/// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/protocol.rs#L184-L195>
+/// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/misc/quick-protobuf-codec/src/lib.rs#L74-L89>
+pub const GOSSIPSUB_MAX_TRANSMIT_SIZE: usize = 65536;
 
 // These are all build info variables. Many of them are set in build.rs.
 

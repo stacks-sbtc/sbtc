@@ -13,13 +13,13 @@ async fn test_dynamic_context() {
     assert_eq!(version, "local-instance");
 
     // Inject a custom value to test emily dynamic context
-    let mut headers = reqwest_012::header::HeaderMap::new();
+    let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         "x-context-version",
-        reqwest_012::header::HeaderValue::from_static("custom-version"),
+        reqwest::header::HeaderValue::from_static("custom-version"),
     );
 
-    configuration.client = reqwest_012::ClientBuilder::new()
+    configuration.client = reqwest::ClientBuilder::new()
         .default_headers(headers)
         .build()
         .unwrap();

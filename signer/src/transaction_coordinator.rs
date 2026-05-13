@@ -6,22 +6,25 @@
 //! For more details, see the [`TxCoordinatorEventLoop`] documentation.
 
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
 
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use futures::Stream;
 use futures::StreamExt as _;
-use futures::future::try_join_all;
 use sha2::Digest as _;
 
+use crate::BITCOIN_FEE_RATE_RANGE;
+use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
+use crate::MAX_BITCOIN_FEE_RATE;
+use crate::MIN_BITCOIN_FEE_RATE;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::bitcoin::BitcoinInteract as _;
-use crate::bitcoin::TransactionLookupHint;
+use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo;
-use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::context::Context;
 use crate::context::P2PEvent;
@@ -50,7 +53,6 @@ use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
 use crate::stacks::api::FeePriority;
-use crate::stacks::api::RejectionReason;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract as _;
 use crate::stacks::api::SubmitTxResponse;
@@ -79,6 +81,33 @@ use wsts::net::SignatureType;
 use wsts::state_machine::OperationResult as WstsOperationResult;
 use wsts::state_machine::StateMachine as _;
 use wsts::state_machine::coordinator::State as WstsCoordinatorState;
+
+/// The rejection reason for a transaction that is rejected from the mempool
+/// because of a conflicting nonce.
+const REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL: &str = "ConflictingNonceInMempool";
+
+/// The target confirmation block used in case of package construction retry.
+///
+/// Target a confirmation block that will not impact the requests cancellation.
+/// This is a best effort approach, it will not guarantee that the sweep we are
+/// constructing will not be in the mempool when the requests expire.
+/// If that happens, users will need to either pay more fees to RBF our sweep
+/// (for deposits reclaim) or wait for a new sweep from us. Note that this can
+/// happen regardless of what fee we use to construct the sweep.
+const FEE_RETRY_TARGET_BLOCKS: u16 = {
+    let taget_block = if WITHDRAWAL_EXPIRY_BUFFER < DEPOSIT_LOCKTIME_BLOCK_BUFFER as u64 {
+        // This is safe, as DEPOSIT_LOCKTIME_BLOCK_BUFFER is a u16
+        WITHDRAWAL_EXPIRY_BUFFER as u16
+    } else {
+        DEPOSIT_LOCKTIME_BLOCK_BUFFER
+    };
+
+    // `estimatesmartfee` RPC expects the confirmation target to be within [1, 1008].
+    assert!(taget_block >= 1);
+    assert!(taget_block <= 1008);
+
+    taget_block
+};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction coordinator event loop
@@ -239,7 +268,7 @@ where
                     }
                     tracing::trace!("sending tenure completed signal");
                     self.context
-                        .signal(TxCoordinatorEvent::TenureCompleted.into())?;
+                        .signal(TxCoordinatorEvent::TenureCompleted(chain_tip).into())?;
                 }
                 SignerSignal::Event(_) => {}
             }
@@ -536,7 +565,7 @@ where
                 .map(|tx| (&tx.requests).into())
                 .collect(),
             fee_rate: signer_btc_state.fee_rate,
-            last_fees: signer_btc_state.last_fees,
+            last_fees: signer_btc_state.last_fees.map(Into::into),
         };
 
         let presign_ack_filter = |event: &SignerSignal| {
@@ -668,7 +697,7 @@ where
 
         // If `get_pending_requests()` returns `Ok(None)` then there are no
         // eligible requests to service; we can exit early.
-        let Some(pending_requests) = pending_requests_fut.await? else {
+        let Some(mut pending_requests) = pending_requests_fut.await? else {
             tracing::debug!("no requests to handle on bitcoin");
             return Ok(());
         };
@@ -680,7 +709,32 @@ where
         );
 
         // Construct the transaction package and store it in the database.
-        let transaction_package = pending_requests.construct_transactions()?;
+        // We first try using the fee rate from Bitcoin (targeting 1 block
+        // confirmation), then if that's too high to construct any package we
+        // retry once with a lower fee rate to avoid wasting the tenure.
+        let mut transaction_package = pending_requests.construct_transactions()?;
+
+        if transaction_package.is_empty() {
+            let fallback_fee = self.context.config().bitcoin.fallback_fee;
+
+            let retry_fee_rate = match fallback_fee {
+                Some(fee) => fee,
+                None => {
+                    self.estimate_bitcoin_tx_fee(FEE_RETRY_TARGET_BLOCKS)
+                        .await?
+                }
+            };
+
+            if retry_fee_rate < pending_requests.signer_state.fee_rate {
+                tracing::debug!(
+                    original_fee_rate = %pending_requests.signer_state.fee_rate,
+                    %retry_fee_rate,
+                    "empty request package, retrying with lower fee rate"
+                );
+                pending_requests.signer_state.fee_rate = retry_fee_rate;
+                transaction_package = pending_requests.construct_transactions()?;
+            }
+        }
 
         // Send the pre-sign request to the signers and wait for their
         // acknowledgments.
@@ -1642,7 +1696,7 @@ where
             .as_signal_stream(signed_message_filter)
             .filter_map(Self::to_signed_message);
 
-        let msg = message::WstsMessage { id, inner: outbound.msg };
+        let msg = message::WstsMessage { id, inner: outbound };
         self.send_message(msg, bitcoin_chain_tip).await?;
 
         let max_duration = self.signing_round_max_duration;
@@ -1689,7 +1743,7 @@ where
             .map_err(Error::wsts_coordinator)?;
 
         let id = WstsMessageId::Dkg(chain_tip.block_hash.into_bytes());
-        let msg = message::WstsMessage { id, inner: outbound.msg };
+        let msg = message::WstsMessage { id, inner: outbound };
 
         // We create a signal stream before sending a message so that there
         // is no race condition with the steam and the getting a response.
@@ -1731,7 +1785,12 @@ where
         S: Stream<Item = Signed<SignerMessage>>,
         Coordinator: WstsCoordinator,
     {
-        let signer_set = self.context.config().signer.bootstrap_signing_set.clone();
+        // We only allow the coordinator to send us certain kinds of
+        // messages. So later, we need to check whether the sender is the
+        // coordinator, and for that we need to use the "coordinator signer
+        // set", which may differ from the set of signers sending us
+        // messages right now.
+        let signer_set = self.context.coordinator_signer_set();
         tokio::pin!(signal_stream);
 
         // Let's get the next message from the network or the
@@ -1773,7 +1832,7 @@ where
                 continue;
             }
 
-            let (outbound_packet, operation_result) = match coordinator.process_message(&msg) {
+            let (outbound_message, operation_result) = match coordinator.process_message(&msg) {
                 Ok(val) => val,
                 Err(err) => {
                     tracing::warn!(?msg, reason = %err, "ignoring message");
@@ -1781,8 +1840,8 @@ where
                 }
             };
 
-            if let Some(packet) = outbound_packet {
-                let msg = message::WstsMessage { id, inner: packet.msg };
+            if let Some(message) = outbound_message {
+                let msg = message::WstsMessage { id, inner: message };
                 self.send_message(msg, bitcoin_chain_tip).await?;
             }
 
@@ -1799,7 +1858,7 @@ where
 
     fn authenticate_message(
         msg: &wsts::net::Message,
-        public_keys: &hashbrown::HashMap<u32, p256k1::point::Point>,
+        public_keys: &HashMap<u32, p256k1::point::Point>,
         public_key_point: p256k1::point::Point,
         sender_is_coordinator: bool,
     ) -> bool {
@@ -1860,15 +1919,15 @@ where
     /// Determine if this signer is the signer set's coordinator for the
     /// specified bitcoin block hash.
     ///
-    /// The coordinator is decided using the hash of the bitcoin chain tip.
-    /// We don't use the chain tip directly because it typically starts
-    /// with a lot of leading zeros.
+    /// The coordinator is decided using the hash of the bitcoin chain tip
+    /// and signer set info from the registry if present. We don't use the
+    /// chain tip directly because it typically starts with a lot of
+    /// leading zeros.
     pub fn is_coordinator(&self, bitcoin_chain_tip: &model::BitcoinBlockHash) -> bool {
-        given_key_is_coordinator(
-            self.signer_public_key(),
-            bitcoin_chain_tip,
-            &self.context.config().signer.bootstrap_signing_set,
-        )
+        let signer_public_keys = self.context.coordinator_signer_set();
+
+        let signer_public_key = self.signer_public_key();
+        given_key_is_coordinator(signer_public_key, bitcoin_chain_tip, &signer_public_keys)
     }
 
     /// Constructs a new [`utxo::SignerBtcState`] based on the current market
@@ -1880,7 +1939,8 @@ where
         aggregate_key: &PublicKey,
     ) -> Result<utxo::SignerBtcState, Error> {
         let bitcoin_client = self.context.get_bitcoin_client();
-        let fee_rate = bitcoin_client.estimate_fee_rate().await?;
+        // Target next block confirmation
+        let fee_rate = self.estimate_bitcoin_tx_fee(1).await?;
 
         // Retrieve the signer's current UTXO.
         let utxo = self
@@ -1890,7 +1950,9 @@ where
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
 
-        let last_fees = self.assess_mempool_sweep_transaction_fees(&utxo).await?;
+        // We still need to send these to the other signers, since they may
+        // not have upgraded their binaries yet.
+        let last_fees = assess_mempool_sweep_transaction_fees(&bitcoin_client, &utxo).await?;
 
         Ok(utxo::SignerBtcState {
             fee_rate,
@@ -2364,107 +2426,35 @@ where
         PublicKey::from_private_key(&self.private_key)
     }
 
-    /// Assesses the total fees paid for any outstanding sweep transactions in
-    /// the mempool which may need to be RBF'd. If there are no sweep
-    /// transactions which are spending the signer's UTXO, then this function
-    /// will return [`None`].
+    /// Estimate the fee rate for a bitcoin transaction targeting
+    /// confirmation within `num_blocks` blocks.
     ///
-    /// TODO: This method currently blindly assumes that the mempool transactions
-    /// are correct. Maybe we need some validation?
-    #[tracing::instrument(skip_all, fields(signer_utxo = %signer_utxo.outpoint))]
-    pub async fn assess_mempool_sweep_transaction_fees(
-        &self,
-        signer_utxo: &utxo::SignerUtxo,
-    ) -> Result<Option<Fees>, Error> {
-        let bitcoin_client = self.context.get_bitcoin_client();
-
-        // Find the mempool transactions that are spending the provided UTXO.
-        let mempool_txs_spending_utxo = bitcoin_client
-            .find_mempool_transactions_spending_output(&signer_utxo.outpoint)
+    /// # Notes
+    ///
+    /// - This function includes a defensive check against bitcoin-core
+    ///   returning a bogus fee rate.
+    /// - NaN fee rates returned by bitcoin-core are set to 1.0.
+    #[tracing::instrument(skip_all, fields(%num_blocks))]
+    async fn estimate_bitcoin_tx_fee(&self, num_blocks: u16) -> Result<f64, Error> {
+        let mut fee_rate = self
+            .context
+            .get_bitcoin_client()
+            .estimate_fee_rate(num_blocks)
             .await?;
 
-        // If no transactions are found, we have nothing to do.
-        if mempool_txs_spending_utxo.is_empty() {
-            tracing::debug!(
-                outpoint = %signer_utxo.outpoint,
-                "no mempool transactions found spending signer output; nothing to do"
-            );
-            return Ok(None);
+        if fee_rate.is_nan() {
+            // This really shouldn't happen, but if it does there is
+            // probably a bug in bitcoin-core so we want to know about it.
+            tracing::error!(%fee_rate, "bitcoin-core returned a NaN fee rate, using 1");
+            fee_rate = 1.0;
         }
 
-        tracing::debug!(
-            outpoint = %signer_utxo.outpoint,
-            "found mempool transactions spending signer output; assessing fees"
-        );
+        if !BITCOIN_FEE_RATE_RANGE.contains(&fee_rate) {
+            tracing::warn!(%fee_rate, "invalid fee rate, clamping it");
+            fee_rate = fee_rate.clamp(MIN_BITCOIN_FEE_RATE, MAX_BITCOIN_FEE_RATE);
+        }
 
-        // If we have some transactions, we need to find the one that pays the
-        // highest fee. This is the transaction that we will use as the root of
-        // the sweep package. Note that even if only one transaction was
-        // returned above, we still need to get the fee for it, which is why
-        // there's no special logic for one vs multiple.
-        //
-        // This can technically error if the mempool transactions are not found,
-        // but it shouldn't happen since we got the transaction ids from
-        // bitcoin-core itself.
-        let best_sweep_root = try_join_all(mempool_txs_spending_utxo.iter().map(|txid| {
-            let bitcoin_client = bitcoin_client.clone();
-            async move {
-                bitcoin_client
-                    .get_transaction_fee(txid, Some(TransactionLookupHint::Mempool))
-                    .await
-                    .map(|fee| (txid, fee))
-            }
-        }))
-        .await?
-        .into_iter()
-        .max_by_key(|(_, fees)| fees.fee);
-
-        // Since we got the transaction ids from bitcoin-core, these should
-        // not be missing, but we double-check here just in case (it could
-        // happen that the client has failed-over to the next node which isn't
-        // in sync with the previous one, for example).
-        let Some((best_sweep_root_txid, fees)) = best_sweep_root else {
-            tracing::warn!(
-                outpoint = %signer_utxo.outpoint,
-                "no fees found for mempool transactions spending signer output"
-            );
-            return Ok(None);
-        };
-
-        // Retrieve all descendant transactions of the best sweep root.
-        let descendant_txids = bitcoin_client
-            .find_mempool_descendants(best_sweep_root_txid)
-            .await?;
-
-        // Retrieve fees for all descendant transactions. If there were no
-        // descendants then this will just result in an empty list.
-        let descendant_fees = try_join_all(descendant_txids.iter().map(|txid| {
-            let bitcoin_client = bitcoin_client.clone();
-            async move {
-                bitcoin_client
-                    .get_transaction_fee(txid, Some(TransactionLookupHint::Mempool))
-                    .await
-            }
-        }))
-        .await?;
-
-        // Sum the fees of the best sweep root and its descendants, while also
-        // summing the vsize of the transactions for fee-rate calculation later.
-        // If there were no descendants then this will just be the fee and size
-        // from the best root sweep transaction.
-        let (total_fees, total_vsize) = descendant_fees
-            .into_iter()
-            .fold((fees.fee, fees.vsize), |acc, fees| {
-                (acc.0 + fees.fee, acc.1 + fees.vsize)
-            });
-
-        // Calculate the fee rate based on the total fees and vsizes of the
-        // transactions which we've found. Since this is returning transactions
-        // from bitcoin-core, we should have valid fees and sizes, so we don't
-        // need to check for division by zero.
-        let rate = total_fees as f64 / total_vsize as f64;
-
-        Ok(Some(Fees { total: total_fees, rate }))
+        Ok(fee_rate)
     }
 
     /// Estimate transaction fees for a Stacks contract call. This function
@@ -2644,10 +2634,8 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
     match error {
         // For `ConflictingNonceInMempool` we don't want to decrement the nonce
         // to avoid failing also the following submissions
-        Error::StacksTxRejection(TxRejection {
-            reason: RejectionReason::ConflictingNonceInMempool,
-            ..
-        }) => (),
+        Error::StacksTxRejection(TxRejection { reason, .. })
+            if reason == REJECTION_REASON_CONFLICTING_NONCE_IN_MEMPOOL => {}
         _ => wallet.set_nonce(wallet.get_nonce().saturating_sub(1)),
     }
 }
@@ -2856,6 +2844,66 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+    }
+
+    /// Check that is_coordinator uses the registry for figuring out who
+    /// the cooridnator is and falls back to the config if the registry has
+    /// no signer set info.
+    #[tokio::test]
+    async fn is_coordinator_uses_registry_for_coordinator() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 1;
+                settings.signer.bootstrap_signing_set =
+                    std::iter::once(settings.signer.public_key()).collect();
+            })
+            .build();
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+
+        let ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: ctx.config().signer.private_key,
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(10),
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        // We should always be the coordinator since the registry is unset
+        // and we're the only signer in the bootstrap signing set.
+        assert!(ev.context.state().registry_signer_set_info().is_none());
+
+        for _ in 0..100 {
+            let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+            assert!(ev.is_coordinator(&chain_tip1.block_hash));
+        }
+
+        // Now let's set the signer set in the registry to some random
+        // signer set without our key. Now we should never be the
+        // coordinator.
+        let signer_set_info = crate::stacks::api::SignerSetInfo {
+            aggregate_key: Faker.fake_with_rng(&mut rng),
+            signer_set: std::iter::repeat_with(|| Faker.fake_with_rng(&mut rng))
+                .take(2)
+                .collect(),
+            signatures_required: 2,
+        };
+
+        ctx.state().update_registry_signer_set_info(signer_set_info);
+
+        // If we were part of the signing set, there is a 2^(-128) chance
+        // that this check would pass.
+        for _ in 0..128 {
+            let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
+            assert!(!ev.is_coordinator(&chain_tip1.block_hash));
+        }
     }
 
     #[tokio::test]

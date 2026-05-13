@@ -276,16 +276,6 @@ impl TestSweepSetup {
         }
     }
 
-    /// Return the expected deposit request that our internal EmilyClient
-    /// should return for the deposit here.
-    pub fn emily_deposit_request(&self) -> CreateDepositRequest {
-        CreateDepositRequest {
-            outpoint: self.deposit_info.outpoint,
-            reclaim_script: self.deposit_info.reclaim_script.clone(),
-            deposit_script: self.deposit_info.deposit_script.clone(),
-        }
-    }
-
     /// Store a stacks genesis block that is on the canonical Stacks
     /// blockchain identified by the sweep chain tip.
     pub async fn store_stacks_genesis_block(&self, db: &PgStore) {
@@ -485,41 +475,6 @@ pub async fn fill_signers_utxo<R: rand::RngCore + ?Sized>(
     aggregate_key: &PublicKey,
     mut rng: &mut R,
 ) {
-    // Create a Bitcoin transaction simulating holding a simulated signer
-    // UTXO.
-    let mut signer_utxo_tx = signer::testing::dummy::tx(&Faker, &mut rng);
-    signer_utxo_tx.output.insert(
-        0,
-        bitcoin::TxOut {
-            value: bitcoin::Amount::from_btc(5.0).unwrap(),
-            script_pubkey: aggregate_key.signers_script_pubkey(),
-        },
-    );
-    let signer_utxo_txid = signer_utxo_tx.compute_txid();
-
-    let utxo_input = model::TxPrevout {
-        txid: signer_utxo_txid.into(),
-        prevout_type: model::TxPrevoutType::SignersInput,
-        ..Faker.fake_with_rng(&mut rng)
-    };
-
-    let utxo_output = model::TxOutput {
-        txid: signer_utxo_txid.into(),
-        output_type: model::TxOutputType::Donation,
-        script_pubkey: aggregate_key.signers_script_pubkey().into(),
-        ..Faker.fake_with_rng(&mut rng)
-    };
-
-    // Write the Bitcoin block and transaction to the database.
-    db.write_bitcoin_block(&bitcoin_block).await.unwrap();
-    db.write_bitcoin_transaction(&model::BitcoinTxRef {
-        block_hash: bitcoin_block.block_hash,
-        txid: signer_utxo_txid.into(),
-    })
-    .await
-    .unwrap();
-    db.write_tx_prevout(&utxo_input).await.unwrap();
-    db.write_tx_output(&utxo_output).await.unwrap();
     // Create a Bitcoin transaction simulating holding a simulated signer
     // UTXO.
     let mut signer_utxo_tx = signer::testing::dummy::tx(&Faker, &mut rng);
@@ -862,6 +817,19 @@ impl TestSweepSetup2 {
         }
     }
 
+    /// Return the expected deposit request that our internal EmilyClient
+    /// should return for the deposit here.
+    pub fn emily_deposit_requests(&self) -> Vec<CreateDepositRequest> {
+        self.deposits
+            .iter()
+            .map(|(info, _, _)| CreateDepositRequest {
+                outpoint: info.outpoint,
+                reclaim_script: info.reclaim_script.clone(),
+                deposit_script: info.deposit_script.clone(),
+            })
+            .collect()
+    }
+
     pub fn deposit_outpoints(&self) -> Vec<OutPoint> {
         self.deposits
             .iter()
@@ -938,9 +906,9 @@ impl TestSweepSetup2 {
         let last_fees = txids
             .iter()
             .filter_map(|txid| self.client.get_mempool_entry(txid).unwrap())
-            .map(|entry| Fees {
-                total: entry.fees.base.to_sat(),
-                rate: entry.fees.base.to_sat() as f64 / entry.vsize as f64,
+            .map(|entry| {
+                let total = entry.fees.base.to_sat();
+                Fees::new_unchecked(total, entry.vsize)
             })
             .max_by_key(|fees| fees.total);
 
@@ -1245,7 +1213,7 @@ impl TestSweepSetup2 {
             num_parties: num_signers,
             threshold: self.signatures_required as u32,
             group_key: aggregate_key.into(),
-            parties: vec![Unit.fake_with_rng(&mut OsRng)],
+            party_state: Unit.fake_with_rng(&mut OsRng),
         };
         let encoded = private_shares.encode_to_vec();
         let signer_private_key = self.signers.private_key().to_bytes();
@@ -1300,7 +1268,7 @@ pub async fn new_emily_setup() -> (EmilyClient, EmilyTables) {
         ..Default::default()
     };
 
-    let mut headers = reqwest_012::header::HeaderMap::new();
+    let mut headers = reqwest::header::HeaderMap::new();
     for (shortname, table_name) in [
         ("deposit", &tables.deposit),
         ("withdrawal", &tables.withdrawal),
@@ -1309,12 +1277,12 @@ pub async fn new_emily_setup() -> (EmilyClient, EmilyTables) {
         ("throttle", &tables.throttle),
     ] {
         headers.insert(
-            reqwest_012::header::HeaderName::from_str(&format!("x-context-{shortname}")).unwrap(),
-            reqwest_012::header::HeaderValue::from_str(table_name).unwrap(),
+            reqwest::header::HeaderName::from_str(&format!("x-context-{shortname}")).unwrap(),
+            reqwest::header::HeaderValue::from_str(table_name).unwrap(),
         );
     }
 
-    configuration.client = reqwest_012::ClientBuilder::new()
+    configuration.client = reqwest::ClientBuilder::new()
         .default_headers(headers)
         .build()
         .unwrap();
