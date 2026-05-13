@@ -21,6 +21,7 @@ use signer::context::Context;
 use signer::context::SbtcLimits;
 use signer::message::BitcoinPreSignRequest;
 use signer::storage::DbRead as _;
+use signer::storage::model;
 use signer::storage::model::TxPrevoutType;
 use signer::testing;
 use signer::testing::context::TestContext;
@@ -518,8 +519,13 @@ async fn swept_withdrawals_fail_validation() {
     testing::storage::drop_db(db).await;
 }
 
+/// Test that a deposit input that this signer cannot sign for does not
+/// invalidate the entire transaction. The tx is still considered valid,
+/// the other inputs (signer + signable deposits) get persisted, and the
+/// unsignable input is silently dropped from the row set so this signer
+/// never commits to producing a signature for it.
 #[tokio::test]
-async fn cannot_sign_deposit_is_not_ok() {
+async fn cannot_sign_deposit_is_ok() {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
@@ -614,13 +620,81 @@ async fn cannot_sign_deposit_is_not_ok() {
         aggregate_key,
     };
 
-    let validation_error = request
+    let validation_data = request
         .construct_package_sighashes(&ctx, &btc_ctx)
         .await
-        .unwrap_err();
+        .unwrap();
 
-    assert_matches::assert_matches!(validation_error, Error::BitcoinValidation(err) 
-        if matches!(*err, BitcoinValidationError::Deposit(InputValidationResult::CannotSignUtxo, _)));
+    // There are a few invariants that we uphold for our validation data.
+    // These are things like "the transaction ID per package must be the
+    // same", we check for them here.
+    validation_data.assert_invariants();
+    // We only had a package with one set of requests that were being
+    // handled.
+    assert_eq!(validation_data.len(), 1);
+
+    // We didn't give any withdrawals so the outputs vector should be
+    // empty (it only has signer outputs).
+    let set = &validation_data[0];
+    assert!(set.to_withdrawal_rows().is_empty());
+
+    // `to_input_rows` emits a row for every input in the tx with the
+    // per-input signing decision attached. The unsignable deposit is
+    // tagged `will_sign = CannotSignUtxo`; the storage boundary in
+    // `handle_bitcoin_pre_sign_request` filters those before writing, so
+    // the unsignable row never reaches the database.
+    let input_rows = set.to_input_rows();
+    assert_eq!(input_rows.len(), 3);
+
+    let signer = &input_rows[0];
+    assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
+    assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
+    assert_eq!(signer.prevout_output_index, setup.donation.vout);
+    assert_eq!(signer.will_sign, model::WillSign::Yes);
+
+    // setup.deposits[0] is the unsignable one (can_sign = false above);
+    // setup.deposits[1] is the signable one. They're emitted in outpoint
+    // order, which matches setup.deposits because we sorted it.
+    let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
+    let outpoint1 = setup.deposits[0].0.outpoint;
+    assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(deposit1.prevout_txid.deref(), &outpoint1.txid);
+    assert_eq!(deposit1.prevout_output_index, outpoint1.vout);
+    assert_eq!(deposit1.will_sign, model::WillSign::CannotSignUtxo);
+
+    let outpoint2 = setup.deposits[1].0.outpoint;
+    assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(deposit2.prevout_txid.deref(), &outpoint2.txid);
+    assert_eq!(deposit2.prevout_output_index, outpoint2.vout);
+    assert_eq!(deposit2.will_sign, model::WillSign::Yes);
+
+    // The sighashes attached to the rows must match the sighashes a
+    // coordinator would produce from the same requests — both rows,
+    // including the unsignable one (the input is still in the tx; we
+    // just don't sign it).
+    let sbtc_requests = SbtcRequests {
+        deposits: setup
+            .deposits
+            .iter()
+            .map(|(_, req, _)| req.clone())
+            .collect(),
+        withdrawals: Vec::new(),
+        signer_state: signer_btc_state(&ctx, &request, &btc_ctx).await,
+        accept_threshold: 2,
+        num_signers: 3,
+        sbtc_limits: SbtcLimits::unlimited(),
+        max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
+    };
+    let txs = sbtc_requests.construct_transactions().unwrap();
+    assert_eq!(txs.len(), 1);
+
+    let tx = &txs[0];
+    let sighashes = tx.construct_digests().unwrap();
+    assert_eq!(sighashes.signers, *signer.sighash);
+
+    assert_eq!(sighashes.deposits.len(), 2);
+    assert_eq!(sighashes.deposits[0].1, *deposit1.sighash);
+    assert_eq!(sighashes.deposits[1].1, *deposit2.sighash);
 
     testing::storage::drop_db(db).await;
 }

@@ -1022,6 +1022,7 @@ impl TestSweepSetup2 {
             aggregate_key: self.signers.aggregate_key().into(),
             prevout_type: model::TxPrevoutType::SignersInput,
             sighash: Faker.fake_with_rng(&mut OsRng),
+            will_sign: model::WillSign::Yes,
         };
         db.write_bitcoin_txs_sighashes(&[sighash]).await.unwrap();
 
@@ -1034,6 +1035,7 @@ impl TestSweepSetup2 {
                 aggregate_key: request.signers_public_key.into(),
                 prevout_type: model::TxPrevoutType::SignersInput,
                 sighash: Faker.fake_with_rng(&mut OsRng),
+                will_sign: model::WillSign::Yes,
             };
             db.write_bitcoin_txs_sighashes(&[sighash]).await.unwrap();
         }

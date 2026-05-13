@@ -470,8 +470,16 @@ where
             .construct_package_sighashes(&self.context, &btc_ctx)
             .await?;
 
-        let deposits_sighashes: Vec<model::BitcoinTxSigHash> =
-            sighashes.iter().flat_map(|s| s.to_input_rows()).collect();
+        // We only persist sighashes that this signer will actually sign.
+        // Rows for inputs we can't sign (locked by a key we aren't a part
+        // of, or unverified DKG shares) are dropped at this boundary so
+        // the database stays in sync with the storage invariant: a row
+        // exists iff `will_sign == Yes`.
+        let deposits_sighashes: Vec<model::BitcoinTxSigHash> = sighashes
+            .iter()
+            .flat_map(|s| s.to_input_rows())
+            .filter(|row| matches!(row.will_sign, model::WillSign::Yes))
+            .collect();
 
         let withdrawals_outputs: Vec<model::BitcoinWithdrawalOutput> = sighashes
             .iter()

@@ -522,6 +522,7 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
         aggregate_key: setup.signers.aggregate_key().into(),
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([23; 32]).into(),
+        will_sign: model::WillSign::Yes,
     };
     db.write_bitcoin_txs_sighashes(&[signer_tx_sighash])
         .await

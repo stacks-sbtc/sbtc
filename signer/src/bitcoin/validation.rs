@@ -32,6 +32,7 @@ use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::SignerVotes;
 use crate::storage::model::TaprootScriptHash;
+use crate::storage::model::WillSign;
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 
 use super::utxo::DepositRequest;
@@ -441,9 +442,9 @@ impl BitcoinTxValidationData {
     /// 3. That the signer is a party to signing set that controls the
     ///    public key locking the transaction output.
     pub fn to_input_rows(&self) -> Vec<BitcoinTxSigHash> {
-        // We only persist sighashes for transactions that we will sign. If
-        // the transaction is invalid we won't sign anything, so skip it
-        // entirely.
+        // If the transaction is invalid we won't sign anything, so skip
+        // it entirely. The caller filters by `will_sign` before writing,
+        // so rows with `will_sign != Yes` won't reach storage either way.
         if !self.is_valid_tx() {
             return Vec::new();
         }
@@ -451,15 +452,20 @@ impl BitcoinTxValidationData {
         // just a sanity check
         debug_assert_eq!(self.deposit_sighashes.len(), self.reports.deposits.len());
 
-        // We know the signers' input is valid. We started by fetching it
-        // from our database, so we know it is unspent and valid. Later,
-        // each of the signer's inputs were created as part of a
-        // transaction chain, so each one is unspent and locked by the
-        // signers' "aggregate" private key.
-        [self.signer_sighash]
+        let sign_statuses = self
+            .reports
+            .deposits
+            .iter()
+            .map(|(_, report)| report.will_sign());
+
+        // For each deposit input we emit a row tagged with the signability
+        // decision. Rows with `will_sign != Yes` are still returned so
+        // that callers see the per-input outcome; the storage layer
+        // filters them out before persisting.
+        [(self.signer_sighash, WillSign::Yes)]
             .into_iter()
-            .chain(self.deposit_sighashes.iter().copied())
-            .map(|sighash| BitcoinTxSigHash {
+            .chain(self.deposit_sighashes.iter().copied().zip(sign_statuses))
+            .map(|(sighash, will_sign)| BitcoinTxSigHash {
                 txid: sighash.txid.into(),
                 sighash: sighash.sighash.into(),
                 chain_tip: self.chain_tip,
@@ -467,6 +473,7 @@ impl BitcoinTxValidationData {
                 prevout_txid: sighash.outpoint.txid.into(),
                 prevout_output_index: sighash.outpoint.vout,
                 prevout_type: sighash.prevout_type,
+                will_sign,
             })
             .collect()
     }
@@ -501,15 +508,16 @@ impl BitcoinTxValidationData {
     }
 
     /// Check whether the transaction is valid. This determines whether
-    /// this signer will sign any of the sighashes for the transaction.
+    /// this signer will participate in the signing rounds for this
+    /// transaction at all.
     ///
-    /// All non-fee validation failures cause `fetch_all_reports` to bail
-    /// before we get here, so the only failures this can observe are
-    /// fee-related (assessed fee exceeds the request's max fee, etc.).
+    /// A transaction is invalid if any request fails core validation
+    /// (status, amounts, votes, lock-time, expiry) or if any input/output
+    /// fails the fee check. Signability of individual inputs (a separate
+    /// concern handled by [`DepositRequestReport::will_sign`])
+    /// does NOT affect tx validity — unsignable inputs are still part of
+    /// the tx, they're just emitted with `will_sign != Yes`.
     pub fn is_valid_tx(&self) -> bool {
-        // A transaction is invalid if it is not servicing any deposit or
-        // withdrawal requests. Doing so costs fees and the signers do not
-        // gain anything by permitting such a transaction.
         self.validate().is_ok()
     }
 
@@ -580,55 +588,48 @@ impl SbtcReports {
 }
 
 /// The responses for validation of a sweep transaction on bitcoin.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, sqlx::Type, strum::Display)]
-#[sqlx(type_name = "TEXT", rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, thiserror::Error)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum InputValidationResult {
     /// The deposit request amount is below the allowed per-deposit minimum.
+    #[error("amount too low")]
     AmountTooLow,
     /// The deposit request amount, less the fees, would be rejected from
     /// the smart contract during the complete-deposit contract call.
+    #[error("mint amount below dust limit")]
     MintAmountBelowDustLimit,
     /// The deposit request amount exceeds the allowed per-deposit cap.
+    #[error("amount too high")]
     AmountTooHigh,
     /// The assessed fee exceeds the max-fee in the deposit request.
+    #[error("fee too high")]
     FeeTooHigh,
-    /// The signer is not part of the signer set that generated the
-    /// aggregate public key used to lock the deposit funds.
-    ///
-    /// TODO: For v1 every signer should be able to sign for all deposits,
-    /// but for v2 this will not be the case. So we'll need to decide
-    /// whether a particular deposit cannot be signed by a particular
-    /// signers means that the entire transaction is rejected from that
-    /// signer.
-    CannotSignUtxo,
     /// The deposit transaction has been confirmed on a bitcoin block
     /// that is not part of the canonical bitcoin blockchain.
+    #[error("transaction not on best chain")]
     TxNotOnBestChain,
     /// The deposit UTXO has already been spent.
+    #[error("deposit utxo spent")]
     DepositUtxoSpent,
-    /// The DKG shares associated with the aggregate key locking the
-    /// deposit spend path of the deposit UTXO has failed verification.
-    DkgSharesVerifyFailed,
-    /// The DKG shares associated with the aggregate key locking the
-    /// deposit spend path has not been verified. We are not sure whether
-    /// the signers can produce a signature for these shares.
-    DkgSharesUnverified,
     /// Given the current time and block height, it would be imprudent to
     /// attempt to sweep in a deposit request with the given lock-time.
+    #[error("lock time expiry")]
     LockTimeExpiry,
     /// The signer does not have a record of their vote on the deposit
     /// request in their database.
+    #[error("no vote")]
     NoVote,
     /// The signer has rejected the deposit request.
+    #[error("we have rejected the request")]
     RejectedRequest,
     /// The signer does not have a record of the deposit request in their
     /// database.
+    #[error("unknown deposit request")]
     Unknown,
     /// The locktime in the reclaim script is in time units and that is not
     /// supported. This shouldn't happen, since we will not put it in our
     /// database is this is the case.
+    #[error("unsupported lock time type")]
     UnsupportedLockTime,
 }
 
@@ -640,42 +641,50 @@ impl InputValidationResult {
 
 /// The responses for validation of the outputs of a sweep transaction on
 /// bitcoin.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, sqlx::Type, strum::Display)]
-#[sqlx(type_name = "TEXT", rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, thiserror::Error)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum WithdrawalValidationResult {
     /// The withdrawal request amount exceeds the allowed per-withdrawal cap
+    #[error("amount too high")]
     AmountTooHigh,
     /// The withdrawal request amount is below the bitcoin dust amount.
+    #[error("the withdrawal request amount is below the dust amount limit")]
     AmountIsDust,
     /// The assessed fee exceeds the max-fee in the withdrawal request.
+    #[error("the assessed fee exceeds the max-fee in the withdrawal request")]
     FeeTooHigh,
     /// The signer does not have a record of their vote on the withdrawal
     /// request in their database.
+    #[error("no vote")]
     NoVote,
     /// The withdrawal request has expired. This means that too many
     /// bitcoin blocks have been observed since observing the Stacks
     /// block that confirmed the transaction creating the withdrawal
     /// request.
+    #[error("the withdrawal request has expired")]
     RequestExpired,
     /// The withdrawal request has already been fulfilled by a sweep
     /// transaction that has been confirmed on the canonical bitcoin
     /// blockchain.
+    #[error("the withdrawal request has already been fulfilled by a sweep transaction")]
     RequestFulfilled,
     /// The withdrawal request is not deemed final. This means that not
     /// enough bitcoin blocks have been observed since observing the Stacks
     /// block that confirmed the transaction creating the withdrawal
     /// request.
+    #[error("the withdrawal request is not deemed final")]
     RequestNotFinal,
     /// The signer has rejected the withdrawal request.
+    #[error("we have rejected the request")]
     RequestRejected,
     /// The transaction that created the withdrawal request has been
     /// confirmed by a stacks block that is not part of the canonical
     /// Stacks blockchain.
+    #[error("this withdrawal request is not on the canonical Stacks blockchain")]
     TxNotOnBestChain,
     /// The signer does not have a record of the withdrawal request in
     /// their database.
+    #[error("unknown withdrawal request")]
     Unknown,
 }
 
@@ -712,10 +721,10 @@ pub enum BitcoinValidationError {
     #[error("no requests")]
     NoRequests,
     /// The error has something to do with the inputs.
-    #[error("deposit error: {0}")]
+    #[error("deposit error for outpoint {1}: {0}")]
     Deposit(InputValidationResult, OutPoint),
     /// The error has something to do with the outputs.
-    #[error("withdrawal error: {0}")]
+    #[error("withdrawal error for request {1}: {0}")]
     Withdrawal(WithdrawalValidationResult, QualifiedRequestId),
 }
 
@@ -844,30 +853,12 @@ impl DepositRequestReport {
             Some(false) => return Err(InputValidationResult::RejectedRequest),
         }
 
-        match self.can_sign {
-            Some(true) => (),
-            // In this case we know that we cannot sign for the deposit
-            // because it is locked with a public key where the current
-            // signer is not part of the signing set.
-            Some(false) => return Err(InputValidationResult::CannotSignUtxo),
-            // We shouldn't ever get None here, since we know that we can
-            // accept the request. We do the check for whether we can sign
-            // the request at that the same time as the can_accept check.
-            None => return Err(InputValidationResult::NoVote),
-        }
-
-        // We do not sign for inputs where we have not verified the
-        // aggregate key locking the UTXO. If our shares have not been
-        // verified then sending signature shares could be harmful overall.
-        match self.dkg_shares_status {
-            Some(DkgSharesStatus::Verified) => {}
-            Some(DkgSharesStatus::Unverified) => {
-                return Err(InputValidationResult::DkgSharesUnverified);
-            }
-            Some(DkgSharesStatus::Failed) => {
-                return Err(InputValidationResult::DkgSharesVerifyFailed);
-            }
-            None => return Err(InputValidationResult::CannotSignUtxo),
+        if self.can_sign.is_none() {
+            // We shouldn't ever get here, since `can_accept` and
+            // `can_sign` are written together for each signer's vote.
+            // Still, we treat it defensively as a "no vote" where the rest
+            // of the signability check are done by `will_sign`.
+            return Err(InputValidationResult::NoVote);
         }
 
         Ok(())
@@ -907,6 +898,25 @@ impl DepositRequestReport {
     {
         self.validate_without_fee(chain_tip_height, sbtc_limits)?;
         self.validate_assessed_fee(tx, tx_fee)
+    }
+
+    /// Whether this signer will sign for this deposit input, and if not,
+    /// why. The request itself is assumed to have already passed
+    /// validation — this only inspects the signer-specific state (whether
+    /// the signer is part of the signing set, and the verification status
+    /// of the DKG shares locking the UTXO).
+    pub fn will_sign(&self) -> WillSign {
+        // Defensive: if validation hasn't run yet and `can_sign` is None,
+        // we don't know enough to sign — treat as not part of the set.
+        if self.can_sign != Some(true) {
+            return WillSign::CannotSignUtxo;
+        }
+        match self.dkg_shares_status {
+            Some(DkgSharesStatus::Verified) => WillSign::Yes,
+            Some(DkgSharesStatus::Unverified) => WillSign::DkgSharesUnverified,
+            Some(DkgSharesStatus::Failed) => WillSign::DkgSharesVerifyFailed,
+            None => WillSign::CannotSignUtxo,
+        }
     }
 
     /// As deposit request.
@@ -1158,24 +1168,6 @@ mod tests {
     #[test_case(DepositReportErrorMapping {
         report: DepositRequestReport {
             status: DepositConfirmationStatus::Confirmed(0u64.into(), BitcoinBlockHash::from([0; 32])),
-            can_sign: Some(false),
-            can_accept: Some(true),
-            amount: 100_000_000,
-            max_fee: u64::MAX,
-            lock_time: LockTime::from_height(u16::MAX),
-            outpoint: OutPoint::null(),
-            deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
-        },
-        status: Err(InputValidationResult::CannotSignUtxo),
-        chain_tip_height: 2u64.into(),
-        limits: SbtcLimits::new_per_deposit(0, u64::MAX),
-    } ; "cannot-sign-for-deposit")]
-    #[test_case(DepositReportErrorMapping {
-        report: DepositRequestReport {
-            status: DepositConfirmationStatus::Confirmed(0u64.into(), BitcoinBlockHash::from([0; 32])),
             can_sign: Some(true),
             can_accept: Some(false),
             amount: 100_000_000,
@@ -1407,60 +1399,6 @@ mod tests {
         chain_tip_height: 2u64.into(),
         limits: SbtcLimits::new_per_deposit(100_000_000, u64::MAX),
     } ; "amount-too-low")]
-    #[test_case(DepositReportErrorMapping {
-        report: DepositRequestReport {
-            status: DepositConfirmationStatus::Confirmed(0u64.into(), BitcoinBlockHash::from([0; 32])),
-            can_sign: Some(true),
-            can_accept: Some(true),
-            amount: 100_000_000,
-            max_fee: u64::MAX,
-            lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
-            outpoint: OutPoint::null(),
-            deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Unverified),
-        },
-        status: Err(InputValidationResult::DkgSharesUnverified),
-        chain_tip_height: 2u64.into(),
-        limits: SbtcLimits::new_per_deposit(0, u64::MAX),
-    } ; "unverified-dkg-shares")]
-    #[test_case(DepositReportErrorMapping {
-        report: DepositRequestReport {
-            status: DepositConfirmationStatus::Confirmed(0u64.into(), BitcoinBlockHash::from([0; 32])),
-            can_sign: Some(true),
-            can_accept: Some(true),
-            amount: 100_000_000,
-            max_fee: u64::MAX,
-            lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
-            outpoint: OutPoint::null(),
-            deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Failed),
-        },
-        status: Err(InputValidationResult::DkgSharesVerifyFailed),
-        chain_tip_height: 2u64.into(),
-        limits: SbtcLimits::new_per_deposit(0, u64::MAX),
-    } ; "dkg-shares-failed-verification")]
-    #[test_case(DepositReportErrorMapping {
-        report: DepositRequestReport {
-            status: DepositConfirmationStatus::Confirmed(0u64.into(), BitcoinBlockHash::from([0; 32])),
-            can_sign: Some(true),
-            can_accept: Some(true),
-            amount: 100_000_000,
-            max_fee: u64::MAX,
-            lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
-            outpoint: OutPoint::null(),
-            deposit_script: ScriptBuf::new(),
-            reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: None,
-        },
-        status: Err(InputValidationResult::CannotSignUtxo),
-        chain_tip_height: 2u64.into(),
-        limits: SbtcLimits::new_per_deposit(0, u64::MAX),
-    } ; "no-dkg-shares-status")]
     fn deposit_report_validation(mapping: DepositReportErrorMapping) {
         let mut tx = crate::testing::btc::base_signer_transaction();
         tx.input.push(TxIn {
@@ -1476,6 +1414,62 @@ mod tests {
                 .validate(mapping.chain_tip_height, &tx, TX_FEE, &mapping.limits);
 
         assert_eq!(status, mapping.status);
+    }
+
+    fn signability_report(
+        can_sign: Option<bool>,
+        dkg_shares_status: Option<DkgSharesStatus>,
+    ) -> DepositRequestReport {
+        DepositRequestReport {
+            status: DepositConfirmationStatus::Confirmed(
+                0u64.into(),
+                BitcoinBlockHash::from([0; 32]),
+            ),
+            can_sign,
+            can_accept: Some(true),
+            amount: 100_000_000,
+            max_fee: u64::MAX,
+            lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
+            outpoint: OutPoint::null(),
+            deposit_script: ScriptBuf::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
+            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
+            dkg_shares_status,
+        }
+    }
+
+    #[test_case(
+        signability_report(Some(true), Some(DkgSharesStatus::Verified)),
+        WillSign::Yes;
+        "signable"
+    )]
+    #[test_case(
+        signability_report(Some(false), Some(DkgSharesStatus::Verified)),
+        WillSign::CannotSignUtxo;
+        "not-part-of-signing-set"
+    )]
+    #[test_case(
+        signability_report(Some(true), Some(DkgSharesStatus::Unverified)),
+        WillSign::DkgSharesUnverified;
+        "dkg-shares-unverified"
+    )]
+    #[test_case(
+        signability_report(Some(true), Some(DkgSharesStatus::Failed)),
+        WillSign::DkgSharesVerifyFailed;
+        "dkg-shares-failed-verification"
+    )]
+    #[test_case(
+        signability_report(Some(true), None),
+        WillSign::CannotSignUtxo;
+        "no-dkg-shares-status"
+    )]
+    #[test_case(
+        signability_report(None, Some(DkgSharesStatus::Verified)),
+        WillSign::CannotSignUtxo;
+        "no-vote-defensive"
+    )]
+    fn deposit_report_signability(report: DepositRequestReport, expected: WillSign) {
+        assert_eq!(report.will_sign(), expected);
     }
 
     /// A helper struct to aid in testing of deposit validation.

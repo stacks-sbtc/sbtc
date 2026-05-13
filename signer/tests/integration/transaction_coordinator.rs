@@ -5357,6 +5357,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
             aggregate_key: aggregate_key.into(),
             chain_tip: bitcoin_chain_tip.block_hash,
             sighash: bitcoin::TapSighash::from_byte_array([1; 32]).into(),
+            will_sign: model::WillSign::Yes,
         };
         db.write_bitcoin_txs_sighashes(&[sighash]).await.unwrap();
     }
