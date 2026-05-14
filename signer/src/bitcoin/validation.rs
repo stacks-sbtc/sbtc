@@ -38,6 +38,7 @@ use super::utxo::DepositRequest;
 use super::utxo::RequestRef;
 use super::utxo::Requests;
 use super::utxo::SignatureHash;
+use super::utxo::SignerUtxo;
 use super::utxo::UnsignedTransaction;
 use super::utxo::WithdrawalRequest;
 
@@ -317,9 +318,8 @@ impl BitcoinPreSignRequest {
         let mut outputs = Vec::new();
 
         for requests in self.request_package.iter() {
-            let (output, new_signer_state) = self
-                .construct_tx_sighashes(ctx, btc_ctx, requests, signer_state, &cache)
-                .await?;
+            let (output, new_signer_state) =
+                self.construct_tx_sighashes(&limits, btc_ctx, requests, signer_state, &cache)?;
             signer_state = new_signer_state;
             outputs.push(output);
         }
@@ -333,17 +333,14 @@ impl BitcoinPreSignRequest {
     /// This function returns the new signer bitcoin state if we were to
     /// sign and confirmed the bitcoin transaction created using the given
     /// inputs and outputs.
-    async fn construct_tx_sighashes<'a, C>(
+    fn construct_tx_sighashes<'a>(
         &self,
-        ctx: &C,
+        limits: &SbtcLimits,
         btc_ctx: &BitcoinTxContext,
         requests: &'a TxRequestIds,
         signer_state: SignerBtcState,
         cache: &ValidationCache<'a>,
-    ) -> Result<(BitcoinTxValidationData, SignerBtcState), Error>
-    where
-        C: Context + Send + Sync,
-    {
+    ) -> Result<(BitcoinTxValidationData, SignerBtcState), Error> {
         let mut deposits = Vec::with_capacity(requests.deposits.len());
         let mut withdrawals = Vec::with_capacity(requests.withdrawals.len());
 
@@ -372,11 +369,9 @@ impl BitcoinPreSignRequest {
             withdrawals,
             signer_state,
         };
+        let out = BitcoinTxValidationData::try_new(reports, btc_ctx, limits)?;
         let mut signer_state = signer_state;
-        let tx = reports.create_transaction()?;
-        let sighashes = tx.construct_digests()?;
-
-        signer_state.utxo = tx.new_signer_utxo();
+        signer_state.utxo = out.utxo;
         // The first transaction is the only one whose input UTXOs that
         // have all been confirmed. Moreover, the fees that it sets aside
         // are enough to make up for the remaining transactions in the
@@ -384,18 +379,6 @@ impl BitcoinPreSignRequest {
         // their fees anymore in order for them to be accepted by the
         // network.
         signer_state.last_fees = None;
-        let out = BitcoinTxValidationData {
-            signer_sighash: sighashes.signer_sighash(),
-            deposit_sighashes: sighashes.deposit_sighashes(),
-            chain_tip: btc_ctx.chain_tip,
-            tx: tx.tx.clone(),
-            tx_fee: Amount::from_sat(tx.tx_fee),
-            reports,
-            chain_tip_height: btc_ctx.chain_tip_height,
-            sbtc_limits: ctx.state().get_current_limits(),
-        };
-
-        out.validate()?;
 
         Ok((out, signer_state))
     }
@@ -426,8 +409,8 @@ impl std::fmt::Display for WillSign {
         match self {
             WillSign::Yes => write!(f, "will sign"),
             WillSign::CannotSignUtxo => write!(f, "cannot sign utxo"),
-            WillSign::DkgSharesUnverified => write!(f, "dkg shares unverified"),
-            WillSign::DkgSharesVerifyFailed => write!(f, "dkg shares verify failed"),
+            WillSign::DkgSharesUnverified => write!(f, "dkg shares are unverified"),
+            WillSign::DkgSharesVerifyFailed => write!(f, "dkg shares failed to verify"),
         }
     }
 }
@@ -452,11 +435,40 @@ pub struct BitcoinTxValidationData {
     pub tx_fee: Amount,
     /// the chain tip height.
     pub chain_tip_height: BitcoinBlockHeight,
-    /// The current sBTC limits.
-    pub sbtc_limits: SbtcLimits,
+    /// The signer's UTXO.
+    pub utxo: SignerUtxo,
 }
 
 impl BitcoinTxValidationData {
+    /// Try to create a new [`BitcoinTxValidationData`] from the given
+    /// reports and bitcoin context.
+    fn try_new(
+        reports: SbtcReports,
+        btc_ctx: &BitcoinTxContext,
+        limits: &SbtcLimits,
+    ) -> Result<Self, Error> {
+        let tx = reports.create_transaction()?;
+        let sighashes = tx.construct_digests()?;
+
+        let me = Self {
+            signer_sighash: sighashes.signer_sighash(),
+            deposit_sighashes: sighashes.deposit_sighashes(),
+            chain_tip: btc_ctx.chain_tip,
+            tx: tx.tx.clone(),
+            tx_fee: Amount::from_sat(tx.tx_fee),
+            utxo: tx.new_signer_utxo(),
+            reports,
+            chain_tip_height: btc_ctx.chain_tip_height,
+        };
+
+        me.validate(limits)?;
+
+        // just a sanity check
+        debug_assert_eq!(me.deposit_sighashes.len(), me.reports.deposits.len());
+
+        Ok(me)
+    }
+
     /// Construct the sighashes for the inputs of the associated
     /// transaction.
     ///
@@ -472,15 +484,6 @@ impl BitcoinTxValidationData {
     /// 3. That this signer is a party to signing set that controls the
     ///    public key locking the transaction output.
     pub fn to_input_rows(&self) -> Vec<BitcoinTxSigHash> {
-        // If the transaction is invalid we won't sign anything, so skip
-        // it entirely.
-        if !self.is_valid_tx() {
-            return Vec::new();
-        }
-
-        // just a sanity check
-        debug_assert_eq!(self.deposit_sighashes.len(), self.reports.deposits.len());
-
         // We might not be able to sign for some of the deposit inputs, and
         // we only want to write rows to the database if we will sign for
         // the input. So we filter out the inputs that we cannot sign for
@@ -520,10 +523,6 @@ impl BitcoinTxValidationData {
     /// withdrawal serviced by this transaction. Returns an empty vec if
     /// the transaction is invalid (and so we will not sign).
     pub fn to_withdrawal_rows(&self) -> Vec<BitcoinWithdrawalOutput> {
-        if !self.is_valid_tx() {
-            return Vec::new();
-        }
-
         let bitcoin_txid = self.tx.compute_txid().into();
 
         // If we ever construct a transaction with more than u32::MAX then
@@ -556,12 +555,7 @@ impl BitcoinTxValidationData {
     /// affect tx validity — unsignable inputs are still part of the tx;
     /// they're just skipped (and logged) by `to_input_rows`, so the row
     /// is never persisted and this signer doesn't commit to signing it.
-    pub fn is_valid_tx(&self) -> bool {
-        self.validate().is_ok()
-    }
-
-    /// Validate the transaction and return an error if it is invalid.
-    fn validate(&self) -> Result<(), Error> {
+    fn validate(&self, limits: &SbtcLimits) -> Result<(), Error> {
         // A transaction is invalid if it is not servicing any deposit or
         // withdrawal requests. Doing so costs fees and the signers do not
         // gain anything by permitting such a transaction.
@@ -573,18 +567,16 @@ impl BitcoinTxValidationData {
         let chain_tip_height = self.chain_tip_height;
         let tx = &self.tx;
         let tx_fee = self.tx_fee;
-        let sbtc_limits = &self.sbtc_limits;
 
         for (_, report) in self.reports.deposits.iter() {
-            if let Err(error) = report.validate(chain_tip_height, tx, tx_fee, sbtc_limits) {
+            if let Err(error) = report.validate(chain_tip_height, tx, tx_fee, limits) {
                 return Err(error.into_error(report.outpoint));
             }
         }
 
         for (index, (_, report)) in self.reports.withdrawals.iter().enumerate() {
             let output_index = index + 2;
-            if let Err(error) =
-                report.validate(chain_tip_height, output_index, tx, tx_fee, sbtc_limits)
+            if let Err(error) = report.validate(chain_tip_height, output_index, tx, tx_fee, limits)
             {
                 return Err(error.into_error(report.id.clone()));
             }
