@@ -44,11 +44,33 @@ use super::utxo::WithdrawalRequest;
 
 /// Cached validation data to avoid repeated DB queries
 #[derive(Default)]
-struct ValidationCache<'a> {
-    deposit_reports: HashMap<&'a OutPoint, (DepositRequestReport, SignerVotes)>,
-    withdrawal_reports: HashMap<&'a QualifiedRequestId, (WithdrawalRequestReport, SignerVotes)>,
+struct ValidationCache {
+    deposit_reports: HashMap<OutPoint, (DepositRequest, DepositRequestReport)>,
+    withdrawal_reports: HashMap<QualifiedRequestId, (WithdrawalRequest, WithdrawalRequestReport)>,
 }
 
+impl ValidationCache {
+    fn try_insert_deposit(
+        &mut self,
+        report: DepositRequestReport,
+        votes: SignerVotes,
+    ) -> Result<(), Error> {
+        self.deposit_reports
+            .insert(report.outpoint, (report.to_deposit_request(&votes), report));
+        Ok(())
+    }
+    fn try_insert_withdrawal(
+        &mut self,
+        report: WithdrawalRequestReport,
+        votes: SignerVotes,
+    ) -> Result<(), Error> {
+        self.withdrawal_reports.insert(
+            report.id.clone(),
+            (report.to_withdrawal_request(&votes), report),
+        );
+        Ok(())
+    }
+}
 /// The necessary information for validating a bitcoin transaction.
 #[derive(Debug, Clone)]
 pub struct BitcoinTxContext {
@@ -160,7 +182,7 @@ impl BitcoinPreSignRequest {
         &self,
         ctx: &C,
         btc_ctx: &BitcoinTxContext,
-    ) -> Result<ValidationCache<'_>, Error>
+    ) -> Result<ValidationCache, Error>
     where
         C: Context + Send + Sync,
     {
@@ -198,7 +220,7 @@ impl BitcoinPreSignRequest {
                     .get_deposit_request_signer_votes(&txid, output_index, &btc_ctx.aggregate_key)
                     .await?;
 
-                cache.deposit_reports.insert(outpoint, (report, votes));
+                cache.try_insert_deposit(report, votes)?;
             }
 
             // Fetch all withdrawal reports and votes
@@ -222,16 +244,14 @@ impl BitcoinPreSignRequest {
                     .get_withdrawal_request_signer_votes(qualified_id, &btc_ctx.aggregate_key)
                     .await?;
 
-                cache
-                    .withdrawal_reports
-                    .insert(qualified_id, (report, votes));
+                cache.try_insert_withdrawal(report, votes)?;
             }
         }
         Ok(cache)
     }
 
     fn assert_request_amount_limits(
-        cache: &ValidationCache<'_>,
+        cache: &ValidationCache,
         limits: &SbtcLimits,
     ) -> Result<(), Error> {
         let max_mintable = limits.max_mintable_cap().to_sat();
@@ -292,7 +312,7 @@ impl BitcoinPreSignRequest {
         // Let's do basic validation of the request object itself.
         self.pre_validation()?;
         let db = ctx.get_storage();
-        let cache = self.fetch_all_reports(ctx, btc_ctx).await?;
+        let mut cache = self.fetch_all_reports(ctx, btc_ctx).await?;
 
         // We now check that the withdrawal amounts adhere to the rolling
         // limits. We check the individual withdrawal caps later.
@@ -319,7 +339,7 @@ impl BitcoinPreSignRequest {
 
         for requests in self.request_package.iter() {
             let (output, new_signer_state) =
-                self.construct_tx_sighashes(&limits, btc_ctx, requests, signer_state, &cache)?;
+                self.construct_tx_sighashes(&limits, btc_ctx, requests, signer_state, &mut cache)?;
             signer_state = new_signer_state;
             outputs.push(output);
         }
@@ -333,33 +353,33 @@ impl BitcoinPreSignRequest {
     /// This function returns the new signer bitcoin state if we were to
     /// sign and confirmed the bitcoin transaction created using the given
     /// inputs and outputs.
-    fn construct_tx_sighashes<'a>(
+    fn construct_tx_sighashes(
         &self,
         limits: &SbtcLimits,
         btc_ctx: &BitcoinTxContext,
-        requests: &'a TxRequestIds,
+        requests: &TxRequestIds,
         signer_state: SignerBtcState,
-        cache: &ValidationCache<'a>,
+        cache: &mut ValidationCache,
     ) -> Result<(BitcoinTxValidationData, SignerBtcState), Error> {
         let mut deposits = Vec::with_capacity(requests.deposits.len());
         let mut withdrawals = Vec::with_capacity(requests.withdrawals.len());
 
         for outpoint in requests.deposits.iter() {
-            let (report, votes) = cache
+            let (request, report) = cache
                 .deposit_reports
-                .get(outpoint)
+                .remove(outpoint)
                 // This should never happen because we have already validated that we have all the reports.
                 .ok_or_else(|| InputValidationResult::Unknown.into_error(*outpoint))?;
-            deposits.push((report.to_deposit_request(votes), report.clone()));
+            deposits.push((request, report));
         }
 
         for id in requests.withdrawals.iter() {
-            let (report, votes) = cache
+            let (request, report) = cache
                 .withdrawal_reports
-                .get(id)
+                .remove(id)
                 // This should never happen because we have already validated that we have all the reports.
                 .ok_or_else(|| WithdrawalValidationResult::Unknown.into_error(id.clone()))?;
-            withdrawals.push((report.to_withdrawal_request(votes), report.clone()));
+            withdrawals.push((request, report));
         }
 
         deposits.sort_by_key(|(request, _)| request.outpoint);
@@ -2225,7 +2245,12 @@ mod tests {
 
         cache.deposit_reports = deposit_reports
             .iter()
-            .map(|(report, votes)| (&report.outpoint, (report.clone(), votes.clone())))
+            .map(|(report, votes)| {
+                (
+                    report.outpoint,
+                    (report.to_deposit_request(&votes), report.clone()),
+                )
+            })
             .collect();
 
         // Create request and validate
@@ -2356,7 +2381,12 @@ mod tests {
 
         cache.withdrawal_reports = withdrawal_reports
             .iter()
-            .map(|(report, votes)| (&report.id, (report.clone(), votes.clone())))
+            .map(|(report, votes)| {
+                (
+                    report.id.clone(),
+                    (report.to_withdrawal_request(&votes), report.clone()),
+                )
+            })
             .collect();
 
         // Create request and validate
