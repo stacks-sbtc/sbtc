@@ -32,7 +32,6 @@ use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::SignerVotes;
 use crate::storage::model::TaprootScriptHash;
-use crate::storage::model::WillSign;
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 
 use super::utxo::DepositRequest;
@@ -402,6 +401,37 @@ impl BitcoinPreSignRequest {
     }
 }
 
+/// Whether this signer will sign a particular sighash, and the reason if
+/// not. This is narrower than [`InputValidationResult`]: by the time we
+/// build a [`BitcoinTxSigHash`], the request has already passed
+/// validation, so the only remaining question is signability.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub enum WillSign {
+    /// The signer will sign the sighash.
+    Yes,
+    /// The signer is not part of the signing set that controls the
+    /// aggregate key locking the deposit funds.
+    CannotSignUtxo,
+    /// The DKG shares associated with the aggregate key locking the
+    /// deposit have not yet been verified.
+    DkgSharesUnverified,
+    /// The DKG shares associated with the aggregate key locking the
+    /// deposit failed verification.
+    DkgSharesVerifyFailed,
+}
+
+impl std::fmt::Display for WillSign {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WillSign::Yes => write!(f, "will sign"),
+            WillSign::CannotSignUtxo => write!(f, "cannot sign utxo"),
+            WillSign::DkgSharesUnverified => write!(f, "dkg shares unverified"),
+            WillSign::DkgSharesVerifyFailed => write!(f, "dkg shares verify failed"),
+        }
+    }
+}
+
 /// An intermediate struct to aid in computing validation of deposits and
 /// withdrawals and transforming the computed sighash into a
 /// [`BitcoinTxSigHash`].
@@ -431,20 +461,19 @@ impl BitcoinTxValidationData {
     /// transaction.
     ///
     /// This function coalesces the information contained in this struct
-    /// into a list of sighashes and a summary of how validation went for
-    /// each of them. Signing a sighash depends on
+    /// into a list of sighashes that we will sign for. Signing a sighash
+    /// depends on
     /// 1. The entire transaction passing an "aggregate" validation. This
     ///    means that each input and output is unfulfilled, and doesn't
     ///    violate protocol rules, such as max fees, lock-time rules, and
     ///    so on.
-    /// 2. That the signer has not rejected/blocked any of the deposits or
+    /// 2. That this signer has not rejected/blocked any of the deposits or
     ///    withdrawals in the transaction.
-    /// 3. That the signer is a party to signing set that controls the
+    /// 3. That this signer is a party to signing set that controls the
     ///    public key locking the transaction output.
     pub fn to_input_rows(&self) -> Vec<BitcoinTxSigHash> {
         // If the transaction is invalid we won't sign anything, so skip
-        // it entirely. The caller filters by `will_sign` before writing,
-        // so rows with `will_sign != Yes` won't reach storage either way.
+        // it entirely.
         if !self.is_valid_tx() {
             return Vec::new();
         }
@@ -452,20 +481,30 @@ impl BitcoinTxValidationData {
         // just a sanity check
         debug_assert_eq!(self.deposit_sighashes.len(), self.reports.deposits.len());
 
-        let sign_statuses = self
-            .reports
-            .deposits
+        // We might not be able to sign for some of the deposit inputs, and
+        // we only want to write rows to the database if we will sign for
+        // the input. So we filter out the inputs that we cannot sign for
+        let deposit_sighashes = self
+            .deposit_sighashes
             .iter()
-            .map(|(_, report)| report.will_sign());
+            .zip(self.reports.deposits.iter())
+            .filter_map(|(sighash, (_, report))| match report.will_sign() {
+                WillSign::Yes => Some(sighash),
+                reason => {
+                    tracing::warn!(
+                        outpoint = %sighash.outpoint,
+                        %reason,
+                        "skipping deposit input: this signer will not sign for it"
+                    );
+                    None
+                }
+            });
 
-        // For each deposit input we emit a row tagged with the signability
-        // decision. Rows with `will_sign != Yes` are still returned so
-        // that callers see the per-input outcome; the storage layer
-        // filters them out before persisting.
-        [(self.signer_sighash, WillSign::Yes)]
-            .into_iter()
-            .chain(self.deposit_sighashes.iter().copied().zip(sign_statuses))
-            .map(|(sighash, will_sign)| BitcoinTxSigHash {
+        // The signers' input is always signable — it's our own UTXO,
+        // unspent and locked by the signers' aggregate key.
+        std::iter::once(&self.signer_sighash)
+            .chain(deposit_sighashes)
+            .map(|sighash| BitcoinTxSigHash {
                 txid: sighash.txid.into(),
                 sighash: sighash.sighash.into(),
                 chain_tip: self.chain_tip,
@@ -473,7 +512,6 @@ impl BitcoinTxValidationData {
                 prevout_txid: sighash.outpoint.txid.into(),
                 prevout_output_index: sighash.outpoint.vout,
                 prevout_type: sighash.prevout_type,
-                will_sign,
             })
             .collect()
     }
@@ -514,9 +552,10 @@ impl BitcoinTxValidationData {
     /// A transaction is invalid if any request fails core validation
     /// (status, amounts, votes, lock-time, expiry) or if any input/output
     /// fails the fee check. Signability of individual inputs (a separate
-    /// concern handled by [`DepositRequestReport::will_sign`])
-    /// does NOT affect tx validity — unsignable inputs are still part of
-    /// the tx, they're just emitted with `will_sign != Yes`.
+    /// concern handled by [`DepositRequestReport::will_sign`]) does NOT
+    /// affect tx validity — unsignable inputs are still part of the tx;
+    /// they're just skipped (and logged) by `to_input_rows`, so the row
+    /// is never persisted and this signer doesn't commit to signing it.
     pub fn is_valid_tx(&self) -> bool {
         self.validate().is_ok()
     }

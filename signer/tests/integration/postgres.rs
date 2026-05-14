@@ -6156,7 +6156,6 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
         aggregate_key: setup.signers.aggregate_key().into(),
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([88; 32]).into(),
-        will_sign: model::WillSign::Yes,
     };
     db.write_bitcoin_txs_sighashes(&[sighash]).await.unwrap();
 
@@ -6232,7 +6231,6 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         aggregate_key: setup.signers.aggregate_key().into(),
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([66; 32]).into(),
-        will_sign: model::WillSign::Yes,
     };
     db.write_bitcoin_txs_sighashes(&[sighash3]).await.unwrap();
 
@@ -6246,7 +6244,6 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         aggregate_key: setup.signers.aggregate_key().into(),
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([77; 32]).into(),
-        will_sign: model::WillSign::Yes,
     };
     db.write_bitcoin_txs_sighashes(&[sighash2]).await.unwrap();
 
@@ -6262,7 +6259,6 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         aggregate_key: setup.signers.aggregate_key().into(),
         chain_tip,
         sighash: bitcoin::TapSighash::from_byte_array([88; 32]).into(),
-        will_sign: model::WillSign::Yes,
     };
     db.write_bitcoin_txs_sighashes(&[sighash1]).await.unwrap();
 

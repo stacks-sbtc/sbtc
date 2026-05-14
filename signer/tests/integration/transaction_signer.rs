@@ -978,7 +978,6 @@ mod serial {
             sighash,
             prevout_type: model::TxPrevoutType::Deposit,
             aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
-            will_sign: model::WillSign::Yes,
         };
 
         db.write_bitcoin_txs_sighashes(&[row]).await.unwrap();
@@ -1101,7 +1100,6 @@ mod serial {
             sighash,
             prevout_type: model::TxPrevoutType::Deposit,
             aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
-            will_sign: model::WillSign::Yes,
         };
 
         db.write_bitcoin_txs_sighashes(&[row]).await.unwrap();

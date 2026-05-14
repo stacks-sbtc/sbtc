@@ -1351,26 +1351,6 @@ impl std::fmt::Display for SigHash {
     }
 }
 
-/// Whether this signer will sign a particular sighash, and the reason if
-/// not. This is narrower than [`InputValidationResult`]: by the time we
-/// build a [`BitcoinTxSigHash`], the request has already passed
-/// validation, so the only remaining question is signability.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-#[cfg_attr(feature = "testing", derive(fake::Dummy))]
-pub enum WillSign {
-    /// The signer will sign the sighash.
-    Yes,
-    /// The signer is not part of the signing set that controls the
-    /// aggregate key locking the deposit funds.
-    CannotSignUtxo,
-    /// The DKG shares associated with the aggregate key locking the
-    /// deposit have not yet been verified.
-    DkgSharesUnverified,
-    /// The DKG shares associated with the aggregate key locking the
-    /// deposit failed verification.
-    DkgSharesVerifyFailed,
-}
-
 /// The sighash and enough metadata to piece together what happened.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
@@ -1395,11 +1375,6 @@ pub struct BitcoinTxSigHash {
     pub sighash: SigHash,
     /// The type of prevout that we are dealing with.
     pub prevout_type: TxPrevoutType,
-    /// Whether the signer will sign this sighash, and if not, why. This
-    /// is not persisted to the database — the row is only written when
-    /// the value is [`WillSign::Yes`], so presence of the row in storage
-    /// already implies "will sign".
-    pub will_sign: WillSign,
 }
 
 /// An output that was created due to a withdrawal request.

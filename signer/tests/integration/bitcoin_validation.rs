@@ -21,7 +21,6 @@ use signer::context::Context;
 use signer::context::SbtcLimits;
 use signer::message::BitcoinPreSignRequest;
 use signer::storage::DbRead as _;
-use signer::storage::model;
 use signer::storage::model::TxPrevoutType;
 use signer::testing;
 use signer::testing::context::TestContext;
@@ -638,40 +637,42 @@ async fn cannot_sign_deposit_is_ok() {
     let set = &validation_data[0];
     assert!(set.to_withdrawal_rows().is_empty());
 
-    // `to_input_rows` emits a row for every input in the tx with the
-    // per-input signing decision attached. The unsignable deposit is
-    // tagged `will_sign = CannotSignUtxo`; the storage boundary in
-    // `handle_bitcoin_pre_sign_request` filters those before writing, so
-    // the unsignable row never reaches the database.
+    // `to_input_rows` skips inputs this signer cannot sign for, so we
+    // get one row for the signer's input and one for the signable
+    // deposit. The unsignable deposit is dropped at row construction
+    // time — no commitment to sign, no DB row — and a warning is logged
+    // for traceability.
     let input_rows = set.to_input_rows();
-    assert_eq!(input_rows.len(), 3);
+    assert_eq!(input_rows.len(), 2);
 
     let signer = &input_rows[0];
     assert_eq!(signer.prevout_type, TxPrevoutType::SignersInput);
     assert_eq!(signer.prevout_txid.deref(), &setup.donation.txid);
     assert_eq!(signer.prevout_output_index, setup.donation.vout);
-    assert_eq!(signer.will_sign, model::WillSign::Yes);
 
-    // setup.deposits[0] is the unsignable one (can_sign = false above);
-    // setup.deposits[1] is the signable one. They're emitted in outpoint
-    // order, which matches setup.deposits because we sorted it.
-    let [deposit1, deposit2] = input_rows.last_chunk().unwrap();
-    let outpoint1 = setup.deposits[0].0.outpoint;
-    assert_eq!(deposit1.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit1.prevout_txid.deref(), &outpoint1.txid);
-    assert_eq!(deposit1.prevout_output_index, outpoint1.vout);
-    assert_eq!(deposit1.will_sign, model::WillSign::CannotSignUtxo);
+    // setup.deposits[0] is the unsignable one (can_sign = false above),
+    // so the only deposit row we get back is for setup.deposits[1].
+    let unsignable_outpoint = setup.deposits[0].0.outpoint;
+    let signable_outpoint = setup.deposits[1].0.outpoint;
+    let deposit = &input_rows[1];
+    assert_eq!(deposit.prevout_type, TxPrevoutType::Deposit);
+    assert_eq!(deposit.prevout_txid.deref(), &signable_outpoint.txid);
+    assert_eq!(deposit.prevout_output_index, signable_outpoint.vout);
 
-    let outpoint2 = setup.deposits[1].0.outpoint;
-    assert_eq!(deposit2.prevout_type, TxPrevoutType::Deposit);
-    assert_eq!(deposit2.prevout_txid.deref(), &outpoint2.txid);
-    assert_eq!(deposit2.prevout_output_index, outpoint2.vout);
-    assert_eq!(deposit2.will_sign, model::WillSign::Yes);
+    // Sanity check: the unsignable outpoint must not appear in the
+    // emitted row set.
+    assert!(
+        !input_rows
+            .iter()
+            .any(|row| row.prevout_txid.deref() == &unsignable_outpoint.txid
+                && row.prevout_output_index == unsignable_outpoint.vout)
+    );
 
-    // The sighashes attached to the rows must match the sighashes a
-    // coordinator would produce from the same requests — both rows,
-    // including the unsignable one (the input is still in the tx; we
-    // just don't sign it).
+    // The sighashes we emit must match the ones a coordinator would
+    // produce from the same requests. The constructed tx still includes
+    // the unsignable input (it's still part of the package, just signed
+    // by other signers), so sighashes.deposits has two entries; ours
+    // matches the second one (the signable deposit).
     let sbtc_requests = SbtcRequests {
         deposits: setup
             .deposits
@@ -693,8 +694,7 @@ async fn cannot_sign_deposit_is_ok() {
     assert_eq!(sighashes.signers, *signer.sighash);
 
     assert_eq!(sighashes.deposits.len(), 2);
-    assert_eq!(sighashes.deposits[0].1, *deposit1.sighash);
-    assert_eq!(sighashes.deposits[1].1, *deposit2.sighash);
+    assert_eq!(sighashes.deposits[1].1, *deposit.sighash);
 
     testing::storage::drop_db(db).await;
 }
