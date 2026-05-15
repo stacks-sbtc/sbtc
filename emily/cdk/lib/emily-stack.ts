@@ -519,11 +519,11 @@ export class EmilyStack extends cdk.Stack {
 
     /**
      * Creates or updates the API Gateway to connect with the Lambda function.
-     * @param {lambda.Function} operationLambda The Lambda function to connect to the API.
+     * @param {lambda.Alias} operationLambda The Lambda function to connect to the API.
      * @param {s3.IBucket} sanctionsBucket The sanctions S3 bucket.
      * @param {EmilyStackProps} props The stack properties.
-     * @returns {apig.SpecRestApi} The created or updated API Gateway.
-     * @post An API Gateway with execute permissions linked to the Lambda function is returned.
+     * @returns {apig.SpecRestApi[]} The created or updated API Gateways.
+     * @post API Gateways with execute permissions linked to the Lambda function are returned.
      */
     createOrUpdateApi(
         operationLambda: lambda.Alias,
@@ -561,7 +561,7 @@ export class EmilyStack extends cdk.Stack {
 
     /**
      * Creates or updates a specific API Gateway to connect with the Lambda function.
-     * @param {lambda.Function} operationLambda The Lambda function to connect to the API.
+     * @param {lambda.Alias} operationLambda The Lambda function to connect to the API.
      * @param {number} numApiKeys The number of API keys to create for the API.
      * @param {string} apiPurpose The purpose of the API.
      * @param {s3.IBucket} sanctionsBucket The sanctions S3 bucket.
