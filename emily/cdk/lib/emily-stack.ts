@@ -634,10 +634,8 @@ export class EmilyStack extends cdk.Stack {
             sourceArn: api.arnForExecuteApi(),
         });
 
-        // The sanctions list is only served on the public API.
-        if (apiPurpose === "public") {
-            this.addSanctionsRoute(api, sanctionsBucket, apiPurposeResourceIdSuffix);
-        }
+        // Add the sanctions list to the API.
+        this.addSanctionsRoute(api, sanctionsBucket, apiPurposeResourceIdSuffix);
 
         // Only add the custom domain name it's specified.
         let customRootDomainNameRoot = EmilyStackUtils.getCustomRootDomainName();

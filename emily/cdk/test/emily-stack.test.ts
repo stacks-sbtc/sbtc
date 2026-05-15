@@ -85,4 +85,48 @@ describe('EmilyStack Test', () => {
             // that you can't ignore.
         });
     });
+
+    it('should create the sanctions bucket', async () => {
+        // Arrange
+        const app = new cdk.App();
+        const stack = new EmilyStack(app, 'TestStack', TEST_STACK_PROPS);
+
+        // Act
+        const template = Template.fromStack(stack);
+
+        // Assert
+        template.hasResourceProperties('AWS::S3::Bucket', {
+            BucketName: `sanctionsbucket-account-region-${Constants.UNIT_TEST_STAGE_NAME}`,
+            PublicAccessBlockConfiguration: {
+                BlockPublicAcls: true,
+                BlockPublicPolicy: true,
+                IgnorePublicAcls: true,
+                RestrictPublicBuckets: true,
+            },
+        });
+    });
+
+    it('should create a sanctions resource on the API', async () => {
+        // Arrange
+        const app = new cdk.App();
+        const stack = new EmilyStack(app, 'TestStack', TEST_STACK_PROPS);
+
+        // Act
+        const template = Template.fromStack(stack);
+
+        // Assert
+        const sanctionsResources = template.findResources('AWS::ApiGateway::Resource', {
+            Properties: { PathPart: 'sanctions' },
+        });
+        expect(Object.keys(sanctionsResources).length).toBeGreaterThan(0);
+
+        // Every sanctions GET method must require an API key.
+        Object.keys(sanctionsResources).forEach(sanctionsResourceLogicalId => {
+            template.hasResourceProperties('AWS::ApiGateway::Method', {
+                HttpMethod: 'GET',
+                ResourceId: { Ref: sanctionsResourceLogicalId },
+                ApiKeyRequired: true,
+            });
+        });
+    });
 });
