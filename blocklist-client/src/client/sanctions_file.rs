@@ -83,7 +83,7 @@ pub async fn run_refresh_loop(
                 sanctions_state.replace(set).await;
                 tracing::info!(count, "refreshed sanctions list");
             }
-            Err(err) => tracing::warn!(%err, "failed to refresh sanctions list"),
+            Err(error) => tracing::warn!(%error, "failed to refresh sanctions list"),
         }
         tokio::time::sleep(config.polling_interval).await;
     }
