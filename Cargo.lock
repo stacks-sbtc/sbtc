@@ -963,6 +963,7 @@ dependencies = [
 name = "blocklist-client"
 version = "0.0.1"
 dependencies = [
+ "assert_matches",
  "clap",
  "config",
  "mockito",
@@ -973,6 +974,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "utoipa",
  "warp",
 ]
