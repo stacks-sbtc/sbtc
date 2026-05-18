@@ -1,5 +1,6 @@
 //! Handlers for the blocklist client API
 
+use crate::client::sanctions_file::SanctionsState;
 use crate::client::{risk_client, sanctions};
 use crate::common::error::{Error, ErrorResponse};
 use crate::config::{AssessmentMethod, Settings};
@@ -24,7 +25,8 @@ use warp::{Rejection, Reply, http::StatusCode};
     (status = 400, description = "Invalid request body"),
     (status = 404, description = "Address not found"),
     (status = 405, description = "Method not allowed"),
-    (status = 500, description = "Internal server error")
+    (status = 500, description = "Internal server error"),
+    (status = 503, description = "Sanctions list not loaded yet")
     )
 )]
 
@@ -32,6 +34,7 @@ pub async fn check_address_handler(
     address: String,
     client: Client,
     config: Settings,
+    sanctions_state: SanctionsState,
 ) -> impl Reply {
     let result = (async {
         if let Some(risk_analysis) = &config.risk_analysis {
@@ -44,8 +47,7 @@ pub async fn check_address_handler(
                 }
             }
         } else if config.sanctions.is_some() {
-            // TODO: implement this
-            Err(Error::InternalServer)
+            sanctions_state.check_address(&address).await
         } else {
             // This shouldn't happen since we validate the config
             Err(Error::InternalServer)

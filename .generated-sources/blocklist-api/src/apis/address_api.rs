@@ -21,6 +21,7 @@ pub enum CheckAddressError {
     Status404(),
     Status405(),
     Status500(),
+    Status503(),
     UnknownValue(serde_json::Value),
 }
 
