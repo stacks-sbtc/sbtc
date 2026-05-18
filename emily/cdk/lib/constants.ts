@@ -49,5 +49,5 @@ export class Constants {
      * Object key for the sanctions list served from the sanctions bucket
      * through the public API at `GET /sanctions`.
      */
-    static SANCTIONS_OBJECT_KEY: string = "sanctions.txt";
+    static SANCTIONS_OBJECT_KEY: string = "ofac/sanctions.txt";
 }

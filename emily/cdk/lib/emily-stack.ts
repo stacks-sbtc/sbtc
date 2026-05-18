@@ -135,7 +135,7 @@ export class EmilyStack extends cdk.Stack {
         removalPolicy: cdk.RemovalPolicy,
         props: EmilyStackProps,
     ): s3.Bucket {
-        const bucketId: string = 'SanctionsBucket';
+        const bucketId: string = 'SanctionsLists';
         return new s3.Bucket(this, bucketId, {
             bucketName: EmilyStackUtils.getResourceName(bucketId, props).toLowerCase(),
             blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
