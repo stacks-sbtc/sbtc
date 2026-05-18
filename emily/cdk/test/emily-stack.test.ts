@@ -96,7 +96,7 @@ describe('EmilyStack Test', () => {
 
         // Assert
         template.hasResourceProperties('AWS::S3::Bucket', {
-            BucketName: `sanctionsbucket-account-region-${Constants.UNIT_TEST_STAGE_NAME}`,
+            BucketName: `sanctionslists-account-region-${Constants.UNIT_TEST_STAGE_NAME}`,
             PublicAccessBlockConfiguration: {
                 BlockPublicAcls: true,
                 BlockPublicPolicy: true,
