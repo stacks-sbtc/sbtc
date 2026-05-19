@@ -1361,7 +1361,9 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
 
         // This computation follows the logic laid out in
         // <https://github.com/stacks-network/sbtc/issues/182>.
-        let fee_sats = (input_weight * tx_fee.to_sat()).div_ceil(request_weight);
+        // The multiplication is done in u128 to avoid a theoretical overflow.
+        let weighted_fee = u128::from(input_weight) * u128::from(tx_fee.to_sat());
+        let fee_sats = weighted_fee.div_ceil(u128::from(request_weight)) as u64;
         Some(Amount::from_sat(fee_sats))
     }
 
@@ -2941,6 +2943,29 @@ mod tests {
         tx.input.push(deposit);
 
         let fee = Amount::from_sat(500_000);
+
+        let tx_info = BitcoinTxInfo::from_tx(tx, fee);
+        let assessed_fee = tx_info.assess_input_fee(&deposit_outpoint).unwrap();
+        assert_eq!(assessed_fee, fee);
+    }
+
+    #[test]
+    fn assess_input_fee_does_not_overflow_with_max_money() {
+        let deposit_outpoint = OutPoint::new(Txid::from_byte_array([1; 32]), 0);
+        let mut tx = base_signer_transaction();
+        // A large witness gives the input a weight high enough that the
+        // intermediate `input_weight * tx_fee` would overflow a u64.
+        let mut witness = bitcoin::Witness::new();
+        witness.push(vec![0u8; 100_000]);
+        let deposit = bitcoin::TxIn {
+            previous_output: deposit_outpoint,
+            script_sig: ScriptBuf::new(),
+            sequence: bitcoin::Sequence::ZERO,
+            witness,
+        };
+        tx.input.push(deposit);
+
+        let fee = Amount::MAX_MONEY;
 
         let tx_info = BitcoinTxInfo::from_tx(tx, fee);
         let assessed_fee = tx_info.assess_input_fee(&deposit_outpoint).unwrap();
