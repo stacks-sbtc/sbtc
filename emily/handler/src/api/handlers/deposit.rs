@@ -856,7 +856,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sorted_sha256_multiple_keys_order_independant() {
+    fn test_sorted_sha256_multiple_keys_order_independent() {
         let pubkeys1: Vec<[u8; 32]> = vec![[2u8; 32], [1u8; 32]];
         let pubkeys2: Vec<[u8; 32]> = vec![[1u8; 32], [2u8; 32]];
         assert_eq!(sorted_sha256(pubkeys1), sorted_sha256(pubkeys2));
