@@ -2769,7 +2769,7 @@ mod tests {
             private_key: ctx.config().signer.private_key,
             signing_round_max_duration: Duration::from_secs(10),
             bitcoin_presign_request_max_duration: Duration::from_secs(10),
-            dkg_max_duration: Duration::from_secs(1),
+            dkg_max_duration: Duration::from_secs(10),
             is_epoch3: true,
         };
 
@@ -2792,8 +2792,7 @@ mod tests {
 
         // Now the chain tip in the state matches the chain tip passed in,
         // so we should process the blocks. However, we do not have any
-        // signer set info in the state, so we'll bail with an error after
-        // attempting (and failing) to DKG.
+        // signer set info in the state, so we'll bail with an error.
         let error = ev.process_new_blocks(chain_tip1).await.unwrap_err();
         assert_matches::assert_matches!(error, Error::MissingAggregateKey(_));
     }
