@@ -48,12 +48,16 @@ jobs:
         uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
 
       - name: Fetch sanctions list from S3 bucket
+        if: matrix.docker_target == 'blocklist-client'
         env:
           # TODO: move to env
           SANCTIONS_AWS_S3_BUCKET_NIGHTLY: ${{ secrets['SANCTIONS_AWS_S3_BUCKET_NIGHTLY'] }}
         run: |
-          set -e
           aws s3 cp "s3://${SANCTIONS_AWS_S3_BUCKET_NIGHTLY}/ofac/sanctions.txt" ./sanctions.txt
+          if [ ! -s ./sanctions.txt ]; then
+            echo "fetched sanctions file is empty"
+            exit 1
+          fi
           wc -l ./sanctions.txt
 
       - name: Setup Buildx
