@@ -53,9 +53,8 @@ jobs:
           SANCTIONS_AWS_S3_BUCKET_NIGHTLY: ${{ secrets['SANCTIONS_AWS_S3_BUCKET_NIGHTLY'] }}
         run: |
           set -e
-          aws s3 cp "s3://${SANCTIONS_AWS_S3_BUCKET_NIGHTLY}/ofac/sanctions.txt" /tmp/sanctions.txt
-          wc -l /tmp/sanctions.txt
-          exit 1 # TODO: remove
+          aws s3 cp "s3://${SANCTIONS_AWS_S3_BUCKET_NIGHTLY}/ofac/sanctions.txt" ./sanctions.txt
+          wc -l ./sanctions.txt
 
       - name: Setup Buildx
         id: setup_buildx
