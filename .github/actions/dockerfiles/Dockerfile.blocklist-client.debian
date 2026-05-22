@@ -52,7 +52,7 @@ FROM debian:trixie-slim AS blocklist-client
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /output/blocklist-client /usr/local/bin/blocklist-client
 
-# Optional: baked-in sanctions list. Glob pattern means missing file is a no-op.
-COPY sanctions.tx[t] /etc/blocklist-client/
+# The baked-in sanctions list file is required to build the release image
+COPY sanctions.txt /etc/blocklist-client/
 
 ENTRYPOINT ["/usr/local/bin/blocklist-client"]
