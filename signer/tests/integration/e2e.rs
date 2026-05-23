@@ -68,7 +68,7 @@ async fn start_signers(
     num_signers: usize,
     signatures_required: u16,
 ) -> Vec<(
-    IntegrationTestContext<StacksClient>,
+    IntegrationTestContext<StacksClient, EmilyClient>,
     PgStore,
     Keypair,
     signer::network::in_memory2::SignerNetwork,
