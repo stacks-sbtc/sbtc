@@ -72,14 +72,15 @@ function deriveStakerPubkey(xpub, change, index) {
     return bip32.fromBase58(xpub, NETWORK).derive(change).derive(index).publicKey;
 }
 
-// Ledger wallet-policy template for Option 2. Uses @0/@1 placeholders the
-// device will substitute with the keyRoots at registration / signing time.
-// The H reveal is mandatory at spend time (sane miniscript).
+// Ledger wallet-policy template for Option 2. The sha256(H) check lives
+// inside the covenant arm of the or_i: the timelock branch needs only the
+// staker signature, and the covenant branch reveals the preimage. H is
+// committed on-chain via the witness-script hash in the P2WSH address.
 function buildLedgerTemplate() {
     return (
         `wsh(and_v(v:pk(@0/**),` +
-        `and_v(v:sha256(${preimageHashHex()}),` +
-        `or_i(after(${CLTV_HEIGHT}),pk(@1/**)))))`
+        `or_i(after(${CLTV_HEIGHT}),` +
+        `and_v(v:sha256(${preimageHashHex()}),pk(@1/**)))))`
     );
 }
 
@@ -93,8 +94,8 @@ function buildKeyRoot({ fingerprintHex, originPath, xpub }) {
 function buildWitnessScript({ stakerPubkey, covenantPubkey }) {
     const ms =
         `and_v(v:pk(@0),` +
-        `and_v(v:sha256(${preimageHashHex()}),` +
-        `or_i(after(${CLTV_HEIGHT}),pk(@1))))`;
+        `or_i(after(${CLTV_HEIGHT}),` +
+        `and_v(v:sha256(${preimageHashHex()}),pk(@1))))`;
     const { asm, issane } = compileMiniscript(ms);
     if (asm.includes('analysis error')) {
         throw new Error(`miniscript compile failed: ${asm}`);
@@ -436,11 +437,11 @@ async function cmdSpend({ txid, vout, amount, to, fee, txHexArg, branch }) {
         const preimage = Buffer.from(state.preimageHex, 'hex');
         let witness;
         if (branch === 'timelock') {
-            // Witness for the timelock branch:
-            //   [ outer_if=true=0x01, preimage, staker_sig, witnessScript ]
+            // Witness for the timelock branch. sha256(H) is no longer in this
+            // path, so the preimage is not part of the witness.
+            //   [ outer_if=true=0x01, staker_sig, witnessScript ]
             witness = [
                 Buffer.from([0x01]),
-                preimage,
                 signatureWithSighash,
                 witnessScript,
             ];
@@ -469,15 +470,17 @@ async function cmdSpend({ txid, vout, amount, to, fee, txHexArg, branch }) {
             );
             console.log(`  Covenant signature (${covenantSig.length} bytes).`);
 
-            // Witness for the covenant branch. Items push bottom→top in
-            // array order; at OP_IF time the stack must be [cov_sig, empty]
-            // so OP_IF pops `empty` (passing MINIMALIF) and the ELSE branch
-            // finds cov_sig underneath for OP_CHECKSIG.
-            //   [ covenant_sig, outer_if=empty, preimage, staker_sig, witnessScript ]
+            // Witness for the covenant branch. sha256(H) now sits inside the
+            // ELSE arm, so the preimage is consumed after OP_IF picks the
+            // ELSE path. Tracing bottom→top, the OP_IF selector (empty)
+            // ends up on top of [cov_sig, preimage] so OP_IF pops `empty`
+            // (passing MINIMALIF); then OP_SIZE/SHA256/EQUALVERIFY consume
+            // preimage and OP_CHECKSIG consumes cov_sig.
+            //   [ covenant_sig, preimage, outer_if=empty, staker_sig, witnessScript ]
             witness = [
                 covenantSig,
-                Buffer.alloc(0),
                 preimage,
+                Buffer.alloc(0),
                 signatureWithSighash,
                 witnessScript,
             ];

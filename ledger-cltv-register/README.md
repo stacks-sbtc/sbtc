@@ -10,10 +10,10 @@ The miniscript template is:
 wsh(
   and_v(
     v:pk(@staker/**),
-    and_v(
-      v:sha256(H),
-      or_i(
-        after(N),
+    or_i(
+      after(N),
+      and_v(
+        v:sha256(H),
         pk(@covenant/**)
       )
     )
@@ -22,7 +22,11 @@ wsh(
 ```
 
 with `N = 1000` (already in the past on testnet4) and `H = sha256(preimage)`
-for a hardcoded 32-byte preimage.
+for a hardcoded 32-byte preimage. The `sha256(H)` check sits inside the
+covenant arm of the `or_i`: the staker can spend through the timelock
+without ever revealing the preimage, and only the covenant unstake path
+requires it. `H` is still committed on-chain via the witness-script hash,
+so the Stacks-principal binding is preserved.
 
 > **Why Option 2 and not Option 3?** We tried Option 3 first. Both
 > `@bitcoinerlab/descriptors` and the Ledger Bitcoin Test app rejected the
@@ -100,17 +104,19 @@ The two branches differ only at the end:
 **`--branch timelock`** — sets `nLockTime = 1000`, `nSequence = 0xfffffffe`,
 and assembles the witness as
 ```
-[ 0x01, <preimage>, <staker-sig>, <witnessScript> ]
+[ 0x01, <staker-sig>, <witnessScript> ]
 ```
+The preimage is not needed in this path.
 
 **`--branch covenant`** — leaves locktime/sequence at their defaults, locally
 computes the BIP-143 sighash, signs it with the deterministic covenant key,
 and assembles
 ```
-[ <covenant-sig>, <empty>, <preimage>, <staker-sig>, <witnessScript> ]
+[ <covenant-sig>, <preimage>, <empty>, <staker-sig>, <witnessScript> ]
 ```
-(the empty selector sits above the covenant sig so OP_IF pops it — empty is
-the canonical "false" under the MINIMALIF policy rule.)
+The empty selector sits above the covenant sig and preimage so OP_IF pops it
+(empty is the canonical "false" under MINIMALIF); the ELSE arm then consumes
+the preimage and the covenant sig.
 
 Then either way, the raw transaction is broadcast through mempool.space
 testnet4.
