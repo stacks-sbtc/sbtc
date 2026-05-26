@@ -81,23 +81,43 @@ node index.js --spend \
   --vout   <output-index>          \
   --amount <amount-in-sats>        \
   --to     <destination-tb1-addr>  \
-  --fee    <fee-in-sats>
+  --fee    <fee-in-sats>           \
+  [--branch timelock|covenant]
 ```
 
-This:
+`--branch` defaults to `timelock`. Both branches:
 
-1. Rebuilds the witness script from `cltv-wallet.json`.
-2. Fetches the funding tx hex from mempool.space testnet4 (pass `--txhex
-   <hex>` to skip the HTTP call).
-3. Builds a PSBT with `nLockTime = 1000` and `nSequence = 0xfffffffe`,
-   populating witnessUtxo, witnessScript, and bip32Derivation for both keys.
-4. Calls `app.signPsbt(...)`. Confirm the spend on the device.
-5. Extracts the staker signature and assembles the final witness for the
-   **timelock branch**, revealing the preimage:
-   ```
-   [ 0x01, <preimage>, <staker-sig||sighash>, <witnessScript> ]
-   ```
-6. Broadcasts the raw transaction to mempool.space testnet4.
+1. Rebuild the witness script from `cltv-wallet.json`.
+2. Fetch the funding tx hex from mempool.space testnet4 (pass `--txhex <hex>`
+   to skip the HTTP call).
+3. Build a PSBT with witnessUtxo, witnessScript, and bip32Derivation for
+   both keys.
+4. Call `app.signPsbt(...)` and prompt the Ledger to sign with the staker
+   key.
+
+The two branches differ only at the end:
+
+**`--branch timelock`** — sets `nLockTime = 1000`, `nSequence = 0xfffffffe`,
+and assembles the witness as
+```
+[ 0x01, <preimage>, <staker-sig>, <witnessScript> ]
+```
+
+**`--branch covenant`** — leaves locktime/sequence at their defaults, locally
+computes the BIP-143 sighash, signs it with the deterministic covenant key,
+and assembles
+```
+[ <covenant-sig>, <empty>, <preimage>, <staker-sig>, <witnessScript> ]
+```
+(the empty selector sits above the covenant sig so OP_IF pops it — empty is
+the canonical "false" under the MINIMALIF policy rule.)
+
+Then either way, the raw transaction is broadcast through mempool.space
+testnet4.
+
+Note that the same Ledger signature works for both branches, because
+`pk(@staker)` is checked above the `OP_IF` and the device commits to the
+spending tx, not the chosen path.
 
 ## State file
 

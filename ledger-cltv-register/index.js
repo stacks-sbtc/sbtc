@@ -64,7 +64,7 @@ function deriveCovenant() {
     return {
         masterFingerprint: root.fingerprint, // Buffer
         xpub: node.neutered().toBase58(),
-        pubkeyAt: (change, index) => node.derive(change).derive(index).publicKey,
+        nodeAt: (change, index) => node.derive(change).derive(index),
     };
 }
 
@@ -246,7 +246,7 @@ async function cmdGenerate({ change, index }) {
         // Compute the address locally first so we always have it, even if the
         // device rejects registration.
         const stakerPubkey = deriveStakerPubkey(stakerXpub, change, index);
-        const covenantPubkey = covenant.pubkeyAt(change, index);
+        const covenantPubkey = covenant.nodeAt(change, index).publicKey;
         const witnessScript = buildWitnessScript({ stakerPubkey, covenantPubkey });
         const { address, scriptPubKey } = p2wshFromScript(witnessScript);
         console.log(`\nComputed address (locally, ${change}/${index}): ${address}`);
@@ -329,10 +329,16 @@ async function cmdGenerate({ change, index }) {
 
 // ---------------------------------------------------------------------------
 // --spend: build a PSBT, sign on the Ledger, finalize the witness manually,
-// and broadcast to testnet4. Always spends via the timelock branch.
+// and broadcast to testnet4. The --branch flag picks the spending path:
+//   "timelock" — only the staker (Ledger) signs, CLTV must be satisfied
+//   "covenant" — staker (Ledger) AND covenant sign; CLTV is not enforced
+// In both cases the preimage is revealed (Option 2 requires it).
 // ---------------------------------------------------------------------------
 
-async function cmdSpend({ txid, vout, amount, to, fee, txHexArg }) {
+async function cmdSpend({ txid, vout, amount, to, fee, txHexArg, branch }) {
+    if (branch !== 'timelock' && branch !== 'covenant') {
+        throw new Error(`--branch must be "timelock" or "covenant", got ${branch}`);
+    }
     const state = loadState();
     if (!state) throw new Error(`no ${STATE_FILE} — run --generate first`);
     if (!state.registered) {
@@ -344,21 +350,28 @@ async function cmdSpend({ txid, vout, amount, to, fee, txHexArg }) {
     return withLedger(async (app) => {
         const stakerPubkey = deriveStakerPubkey(state.stakerXpub, state.change, state.index);
         const covenant = deriveCovenant();
-        const covenantPubkey = covenant.pubkeyAt(state.change, state.index);
+        const covenantNode = covenant.nodeAt(state.change, state.index);
+        const covenantPubkey = covenantNode.publicKey;
         const witnessScript = Buffer.from(state.witnessScriptHex, 'hex');
         const scriptPubKey = Buffer.from(state.scriptPubKeyHex, 'hex');
 
         const sendAmount = amount - fee;
         if (sendAmount <= 0) throw new Error(`amount (${amount}) must exceed fee (${fee})`);
 
+        // For the timelock branch the tx must satisfy CLTV(1000) and have a
+        // non-final sequence to enable nLockTime. The covenant branch ignores
+        // CLTV, so we leave locktime at 0 and use the default sequence — that
+        // keeps the BIP-143 sighash distinct from the timelock case so it's
+        // easy to tell the two transactions apart on chain.
         const psbt = new bitcoinjs.Psbt({ network: NETWORK });
         psbt.setVersion(2);
-        psbt.setLocktime(CLTV_HEIGHT);
+        if (branch === 'timelock') psbt.setLocktime(CLTV_HEIGHT);
 
+        const sequence = branch === 'timelock' ? ENABLE_LOCKTIME_SEQUENCE : 0xffffffff;
         const input = {
             hash: Buffer.from(txid, 'hex').reverse(),
             index: vout,
-            sequence: ENABLE_LOCKTIME_SEQUENCE,
+            sequence,
             witnessUtxo: { script: scriptPubKey, value: amount },
             witnessScript,
             bip32Derivation: [
@@ -387,9 +400,10 @@ async function cmdSpend({ txid, vout, amount, to, fee, txHexArg }) {
             value: sendAmount,
         });
 
+        console.log(`Branch: ${branch}`);
         console.log('Unsigned PSBT (base64):');
         console.log(`  ${psbt.toBase64()}`);
-        console.log(`\nLocktime: ${psbt.locktime}, sequence: 0x${ENABLE_LOCKTIME_SEQUENCE.toString(16)}`);
+        console.log(`\nLocktime: ${psbt.locktime}, sequence: 0x${sequence.toString(16)}`);
         console.log(`Input: ${txid}:${vout} (${amount} sats)`);
         console.log(`Output: ${sendAmount} sats to ${to} (fee ${fee} sats)`);
 
@@ -419,15 +433,55 @@ async function cmdSpend({ txid, vout, amount, to, fee, txHexArg }) {
         }
         console.log(`  Got signature (${signatureWithSighash.length} bytes).`);
 
-        // Witness for the timelock branch with mandatory preimage reveal:
-        //   [ outer_if=true=0x01, preimage, sig, witnessScript ]
         const preimage = Buffer.from(state.preimageHex, 'hex');
-        const witness = [
-            Buffer.from([0x01]),
-            preimage,
-            signatureWithSighash,
-            witnessScript,
-        ];
+        let witness;
+        if (branch === 'timelock') {
+            // Witness for the timelock branch:
+            //   [ outer_if=true=0x01, preimage, staker_sig, witnessScript ]
+            witness = [
+                Buffer.from([0x01]),
+                preimage,
+                signatureWithSighash,
+                witnessScript,
+            ];
+        } else {
+            // Covenant branch — we also need a covenant signature. Compute the
+            // BIP-143 sighash for input 0 against the same witness script /
+            // amount the Ledger signed under, then sign locally with the
+            // deterministic covenant key. The staker key in the script is
+            // checked first by OP_CHECKSIGVERIFY, so the same Ledger
+            // signature works for either branch.
+            const sighashTx = new bitcoinjs.Transaction();
+            sighashTx.version = 2;
+            sighashTx.locktime = psbt.locktime;
+            sighashTx.addInput(Buffer.from(txid, 'hex').reverse(), vout, sequence);
+            sighashTx.addOutput(bitcoinjs.address.toOutputScript(to, NETWORK), sendAmount);
+            const sighash = sighashTx.hashForWitnessV0(
+                0,
+                witnessScript,
+                amount,
+                bitcoinjs.Transaction.SIGHASH_ALL
+            );
+            const rawCovenantSig = covenantNode.sign(sighash);
+            const covenantSig = bitcoinjs.script.signature.encode(
+                rawCovenantSig,
+                bitcoinjs.Transaction.SIGHASH_ALL
+            );
+            console.log(`  Covenant signature (${covenantSig.length} bytes).`);
+
+            // Witness for the covenant branch. Items push bottom→top in
+            // array order; at OP_IF time the stack must be [cov_sig, empty]
+            // so OP_IF pops `empty` (passing MINIMALIF) and the ELSE branch
+            // finds cov_sig underneath for OP_CHECKSIG.
+            //   [ covenant_sig, outer_if=empty, preimage, staker_sig, witnessScript ]
+            witness = [
+                covenantSig,
+                Buffer.alloc(0),
+                preimage,
+                signatureWithSighash,
+                witnessScript,
+            ];
+        }
 
         psbt.updateInput(0, { finalScriptWitness: serializeWitness(witness) });
         // Skip bitcoinjs's heuristic fee check — the caller specified the fee
@@ -454,11 +508,14 @@ function usage() {
   Generate the locking address (registers the policy on your Ledger):
     node index.js --generate [--change 0] [--index 0]
 
-  Spend the locked funds via the timelock branch:
-    node index.js --spend --txid <hex> --vout <n> --amount <sats> --to <addr> --fee <sats> [--txhex <hex>]
+  Spend the locked funds:
+    node index.js --spend --txid <hex> --vout <n> --amount <sats> --to <addr> --fee <sats> \\
+        [--branch timelock|covenant] [--txhex <hex>]
 
   Notes:
     - Network: testnet4. Open the Bitcoin Test app on the Ledger.
+    - --branch defaults to "timelock". "covenant" also signs locally with the
+      deterministic covenant key.
     - CLTV unlock height is hardcoded to ${CLTV_HEIGHT} (already in the past on testnet4).
     - Covenant xpub is derived deterministically from a hardcoded seed.
     - State (descriptor, policy HMAC) is persisted to ${STATE_FILE}.
@@ -478,6 +535,7 @@ async function main() {
             to: { type: 'string' },
             fee: { type: 'string' },
             txhex: { type: 'string' },
+            branch: { type: 'string' },
             help: { type: 'boolean' },
         },
     });
@@ -509,6 +567,7 @@ async function main() {
         to: values.to,
         fee: Number(values.fee),
         txHexArg: values.txhex,
+        branch: values.branch ?? 'timelock',
     });
 }
 
