@@ -72,12 +72,13 @@ function deriveStakerPubkey(xpub, change, index) {
     return bip32.fromBase58(xpub, NETWORK).derive(change).derive(index).publicKey;
 }
 
-// Ledger wallet-policy template for Option 3. Uses @0/@1 placeholders the
+// Ledger wallet-policy template for Option 2. Uses @0/@1 placeholders the
 // device will substitute with the keyRoots at registration / signing time.
+// The H reveal is mandatory at spend time (sane miniscript).
 function buildLedgerTemplate() {
     return (
         `wsh(and_v(v:pk(@0/**),` +
-        `and_v(v:or_i(and_v(v:sha256(${preimageHashHex()}),1),1),` +
+        `and_v(v:sha256(${preimageHashHex()}),` +
         `or_i(after(${CLTV_HEIGHT}),pk(@1/**)))))`
     );
 }
@@ -89,17 +90,17 @@ function buildKeyRoot({ fingerprintHex, originPath, xpub }) {
 // Build the concrete witness script for given (change, index). The miniscript
 // library only compiles when key positions are placeholders (@0, @1), so we
 // compile that abstract form and substitute hex pubkeys in the resulting ASM.
-// `compileMiniscript` returns ASM even when `issane=false` — that's what we
-// need here, since the Option-3 optional-sha256 form is intentionally
-// not-sane by miniscript rules but is still a valid Bitcoin script.
 function buildWitnessScript({ stakerPubkey, covenantPubkey }) {
     const ms =
         `and_v(v:pk(@0),` +
-        `and_v(v:or_i(and_v(v:sha256(${preimageHashHex()}),1),1),` +
+        `and_v(v:sha256(${preimageHashHex()}),` +
         `or_i(after(${CLTV_HEIGHT}),pk(@1))))`;
-    const { asm } = compileMiniscript(ms);
+    const { asm, issane } = compileMiniscript(ms);
     if (asm.includes('analysis error')) {
         throw new Error(`miniscript compile failed: ${asm}`);
+    }
+    if (!issane) {
+        throw new Error(`miniscript not sane — Ledger will reject: ${ms}`);
     }
     const cleaned = asm
         .trim()
@@ -418,11 +419,12 @@ async function cmdSpend({ txid, vout, amount, to, fee, txHexArg }) {
         }
         console.log(`  Got signature (${signatureWithSighash.length} bytes).`);
 
-        // Witness for the timelock branch (skip the H reveal):
-        //   [ outer_if=true=0x01, inner_if=false=empty, sig, witnessScript ]
+        // Witness for the timelock branch with mandatory preimage reveal:
+        //   [ outer_if=true=0x01, preimage, sig, witnessScript ]
+        const preimage = Buffer.from(state.preimageHex, 'hex');
         const witness = [
             Buffer.from([0x01]),
-            Buffer.alloc(0),
+            preimage,
             signatureWithSighash,
             witnessScript,
         ];
