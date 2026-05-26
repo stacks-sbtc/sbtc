@@ -60,6 +60,26 @@ jobs:
         with:
           ref: refs/tags/${{ github.event.client_payload.tag_name }}
 
+      ## Fetch the sanctions list for the blocklist client
+      - name: Configure AWS Credentials via OIDC
+        if: matrix.docker_target == 'blocklist-client'
+        uses: stacks-sbtc/actions/aws/configure-aws-credentials@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          role-to-assume: ${{ secrets['SANCTIONS_AWS_ROLE_ARN'] }}
+          aws-region: ${{ vars['SANCTIONS_AWS_REGION'] }}
+
+      - name: Fetch sanctions list from S3 bucket
+        if: matrix.docker_target == 'blocklist-client'
+        env:
+          SANCTIONS_AWS_S3_BUCKET: ${{ vars['SANCTIONS_AWS_S3_BUCKET'] }}
+        run: |
+          aws s3 cp "s3://${SANCTIONS_AWS_S3_BUCKET}/ofac/sanctions.txt" ./sanctions.txt
+          if [ ! -f ./sanctions.txt ]; then
+            echo "sanctions file was not fetched"
+            exit 1
+          fi
+          wc -l ./sanctions.txt
+
       - name: Setup Buildx
         id: setup_buildx
         uses: stacks-sbtc/actions/docker/setup-buildx-action@505c42b153ba2ac261c276e96bc5dc7b68d61039

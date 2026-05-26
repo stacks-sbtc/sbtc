@@ -26,6 +26,10 @@ pub enum Error {
     #[error("Invalid API response structure")]
     InvalidApiResponse,
 
+    /// I/O error
+    #[error("io error: {0}")]
+    IO(#[from] std::io::Error),
+
     /// Your API key is invalid. This may be because your API Key is expired
     /// or not sent correctly as the value of the Token HTTP header
     #[error("Unauthorized access - check your API key")]
@@ -53,6 +57,10 @@ pub enum Error {
     #[error("Service unavailable")]
     ServiceUnavailable,
 
+    /// The local sanctions list has not been populated yet
+    #[error("Sanctions list not loaded yet")]
+    SanctionsListNotReady,
+
     /// Request timeout error
     #[error("Request timeout")]
     RequestTimeout,
@@ -73,8 +81,10 @@ impl Error {
             Error::NotFound => StatusCode::NOT_FOUND,
             Error::NotAcceptable => StatusCode::NOT_ACCEPTABLE,
             Error::Conflict => StatusCode::CONFLICT,
-            Error::InternalServer => StatusCode::INTERNAL_SERVER_ERROR,
-            Error::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Error::InternalServer | Error::IO(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ServiceUnavailable | Error::SanctionsListNotReady => {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
             Error::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
         }
     }
@@ -90,8 +100,9 @@ impl Error {
             Error::NotFound => "Resource not found".to_string(),
             Error::NotAcceptable => "Not acceptable format requested".to_string(),
             Error::Conflict => "Request conflict".to_string(),
-            Error::InternalServer => "Internal server error".to_string(),
+            Error::InternalServer | Error::IO(_) => "Internal server error".to_string(),
             Error::ServiceUnavailable => "Service unavailable".to_string(),
+            Error::SanctionsListNotReady => "Sanctions list not loaded yet".to_string(),
             Error::RequestTimeout => "Request timeout".to_string(),
         }
     }
