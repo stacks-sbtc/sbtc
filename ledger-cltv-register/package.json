@@ -1,16 +1,20 @@
 {
   "name": "ledger-cltv-register",
   "version": "1.0.0",
-  "description": "Register a CLTV wallet policy on Ledger Nano S device",
+  "description": "Register and spend an Option-3 CLTV+covenant wallet policy on a Ledger device (sBTC staking test)",
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "register": "node index.js"
+    "generate": "node index.js --generate",
+    "spend": "node index.js --spend"
   },
   "dependencies": {
-    "@ledgerhq/ledger-bitcoin": "0.3.0",
+    "@bitcoinerlab/miniscript": "1.4.3",
+    "@bitcoinerlab/secp256k1": "1.2.0",
     "@ledgerhq/hw-transport-node-hid": "6.30.0",
-    "bech32": "2.0.0"
+    "@ledgerhq/ledger-bitcoin": "0.3.0",
+    "bip32": "4.0.0",
+    "bitcoinjs-lib": "6.1.7"
   },
   "engines": {
     "node": ">=18"

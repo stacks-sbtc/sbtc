@@ -1,0 +1,23 @@
+{
+  "change": 0,
+  "index": 0,
+  "cltvHeight": 1000,
+  "preimageHex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "preimageHashHex": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+  "stakerOriginPath": "48'/1'/0'/2'",
+  "stakerXpub": "tpubDEtZTp44VPMj2EGq396SLXpYb3EoM1scTwMbGPmpywhW8miTHegDpKZcuMecKyb7ykmBVodxau3xVC66Dkg4hJHo2KLmHuD7SiAbMmKvUfo",
+  "covenantOriginPath": "48'/1'/0'/2'",
+  "covenantXpub": "tpubDEC8p4skY4i7mNjxt9yF3u7my5T6KtGLcvEDcH5rKA6XVtJN4JV3SsHWoePTqsHNh47WBkQ79r77KsUYc2PAmaqqasBJMvidbxiupZpJexg",
+  "covenantFingerprint": "3442193e",
+  "masterFingerprint": "3b065492",
+  "policyName": "sBTC stake test",
+  "policyTemplate": "wsh(and_v(v:pk(@0/**),and_v(v:or_i(and_v(v:sha256(66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925),1),1),or_i(after(1000),pk(@1/**)))))",
+  "policyKeyRoots": [
+    "[3b065492/48'/1'/0'/2']tpubDEtZTp44VPMj2EGq396SLXpYb3EoM1scTwMbGPmpywhW8miTHegDpKZcuMecKyb7ykmBVodxau3xVC66Dkg4hJHo2KLmHuD7SiAbMmKvUfo",
+    "[3442193e/48'/1'/0'/2']tpubDEC8p4skY4i7mNjxt9yF3u7my5T6KtGLcvEDcH5rKA6XVtJN4JV3SsHWoePTqsHNh47WBkQ79r77KsUYc2PAmaqqasBJMvidbxiupZpJexg"
+  ],
+  "address": "tb1qdt0h66swcjh7nrsar358pkhwuzs2m56c59uxm4pwjfqkqc6vf6rsgefeqd",
+  "scriptPubKeyHex": "00206adf7d6a0ec4afe98e1d1c6870daeee0a0add358a1786dd42e924160634c4e87",
+  "witnessScriptHex": "210384d1bf731deefec84458985aefc13dd0045ffbbfe71f3a993bf2adb9b3f85936ad6382012088a82066687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f29258851675168696302e803b1672103a416734a7729d2e0a4f885f4e939618a5a45f5f32511641236536a24272d99f3ac68",
+  "registered": false
+}
