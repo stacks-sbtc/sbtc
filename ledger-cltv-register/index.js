@@ -72,15 +72,15 @@ function deriveStakerPubkey(xpub, change, index) {
     return bip32.fromBase58(xpub, NETWORK).derive(change).derive(index).publicKey;
 }
 
-// Ledger wallet-policy template for Option 2. The sha256(H) check lives
-// inside the covenant arm of the or_i: the timelock branch needs only the
-// staker signature, and the covenant branch reveals the preimage. H is
-// committed on-chain via the witness-script hash in the P2WSH address.
+// Ledger wallet-policy template for Option 2. The or_i runs first, with
+// sha256(H) only required on the covenant arm; the staker signature is
+// checked at the end. This is form 2 of the design — see the Notion doc.
+//   wsh(and_v(v:or_i(after(N), and_v(v:sha256(H), pk(@covenant))), pk(@staker)))
 function buildLedgerTemplate() {
     return (
-        `wsh(and_v(v:pk(@0/**),` +
-        `or_i(after(${CLTV_HEIGHT}),` +
-        `and_v(v:sha256(${preimageHashHex()}),pk(@1/**)))))`
+        `wsh(and_v(v:or_i(after(${CLTV_HEIGHT}),` +
+        `and_v(v:sha256(${preimageHashHex()}),pk(@1/**))),` +
+        `pk(@0/**)))`
     );
 }
 
@@ -93,9 +93,9 @@ function buildKeyRoot({ fingerprintHex, originPath, xpub }) {
 // compile that abstract form and substitute hex pubkeys in the resulting ASM.
 function buildWitnessScript({ stakerPubkey, covenantPubkey }) {
     const ms =
-        `and_v(v:pk(@0),` +
-        `or_i(after(${CLTV_HEIGHT}),` +
-        `and_v(v:sha256(${preimageHashHex()}),pk(@1))))`;
+        `and_v(v:or_i(after(${CLTV_HEIGHT}),` +
+        `and_v(v:sha256(${preimageHashHex()}),pk(@1))),` +
+        `pk(@0))`;
     const { asm, issane } = compileMiniscript(ms);
     if (asm.includes('analysis error')) {
         throw new Error(`miniscript compile failed: ${asm}`);
@@ -437,12 +437,13 @@ async function cmdSpend({ txid, vout, amount, to, fee, txHexArg, branch }) {
         const preimage = Buffer.from(state.preimageHex, 'hex');
         let witness;
         if (branch === 'timelock') {
-            // Witness for the timelock branch. sha256(H) is no longer in this
-            // path, so the preimage is not part of the witness.
-            //   [ outer_if=true=0x01, staker_sig, witnessScript ]
+            // Witness for the timelock branch. The script runs the or_i
+            // first then the staker OP_CHECKSIG at the end, so staker_sig
+            // sits at the bottom of the stack and the OP_IF selector on top.
+            //   [ staker_sig, outer_if=true=0x01, witnessScript ]
             witness = [
-                Buffer.from([0x01]),
                 signatureWithSighash,
+                Buffer.from([0x01]),
                 witnessScript,
             ];
         } else {
@@ -470,18 +471,18 @@ async function cmdSpend({ txid, vout, amount, to, fee, txHexArg, branch }) {
             );
             console.log(`  Covenant signature (${covenantSig.length} bytes).`);
 
-            // Witness for the covenant branch. sha256(H) now sits inside the
-            // ELSE arm, so the preimage is consumed after OP_IF picks the
-            // ELSE path. Tracing bottom→top, the OP_IF selector (empty)
-            // ends up on top of [cov_sig, preimage] so OP_IF pops `empty`
-            // (passing MINIMALIF); then OP_SIZE/SHA256/EQUALVERIFY consume
-            // preimage and OP_CHECKSIG consumes cov_sig.
-            //   [ covenant_sig, preimage, outer_if=empty, staker_sig, witnessScript ]
+            // Witness for the covenant branch. With the or_i first and the
+            // staker CHECKSIG last, the stack bottom→top is:
+            //   staker_sig (consumed last by trailing OP_CHECKSIG)
+            //   cov_sig    (consumed inside the ELSE arm by OP_CHECKSIG)
+            //   preimage   (consumed inside the ELSE arm by OP_SHA256)
+            //   empty      (top — popped by OP_IF, passes MINIMALIF as false)
+            //   [ staker_sig, covenant_sig, preimage, outer_if=empty, witnessScript ]
             witness = [
+                signatureWithSighash,
                 covenantSig,
                 preimage,
                 Buffer.alloc(0),
-                signatureWithSighash,
                 witnessScript,
             ];
         }

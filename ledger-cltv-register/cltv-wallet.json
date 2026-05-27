@@ -11,15 +11,15 @@
   "covenantFingerprint": "3442193e",
   "masterFingerprint": "3b065492",
   "policyName": "sBTC stake test",
-  "policyTemplate": "wsh(and_v(v:pk(@0/**),or_i(after(1000),and_v(v:sha256(66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925),pk(@1/**)))))",
+  "policyTemplate": "wsh(and_v(v:or_i(after(1000),and_v(v:sha256(66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925),pk(@1/**))),pk(@0/**)))",
   "policyKeyRoots": [
     "[3b065492/48'/1'/0'/2']tpubDEtZTp44VPMj2EGq396SLXpYb3EoM1scTwMbGPmpywhW8miTHegDpKZcuMecKyb7ykmBVodxau3xVC66Dkg4hJHo2KLmHuD7SiAbMmKvUfo",
     "[3442193e/48'/1'/0'/2']tpubDEC8p4skY4i7mNjxt9yF3u7my5T6KtGLcvEDcH5rKA6XVtJN4JV3SsHWoePTqsHNh47WBkQ79r77KsUYc2PAmaqqasBJMvidbxiupZpJexg"
   ],
-  "policyId": "5e9cee7403f5d738ee0a6d98bba683c7d51c8c93fc109559f317bccfacad47af",
-  "policyHmac": "b7c730922765ae7f3092dcc5a77354ecca845d92910c231bd4b0ef967e73b9f1",
-  "address": "tb1qxl93yqtmjwr2fn3e2we6r6k406u9v76ylfjf76v4kagpqhg59jdqs9tgdw",
-  "scriptPubKeyHex": "002037cb12017b9386a4ce3953b3a1ead57eb8567b44fa649f6995b750105d142c9a",
-  "witnessScriptHex": "210384d1bf731deefec84458985aefc13dd0045ffbbfe71f3a993bf2adb9b3f85936ad6302e803b16782012088a82066687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925882103a416734a7729d2e0a4f885f4e939618a5a45f5f32511641236536a24272d99f3ac68",
+  "policyId": "e1872054fd4d540c0b35dfdae50ec42470672615b6d77379090130a70c77b8d0",
+  "policyHmac": "04dcb3fef711cfbb7ce9295882164a9aca03732a32466ae7257370e764120985",
+  "address": "tb1qc5qlpj9xjkgg9acm2fhaey7m6p8fk0z9jlt43j6dflpnc00mr0dq7k4sjg",
+  "scriptPubKeyHex": "0020c501f0c8a6959082f71b526fdc93dbd04e9b3c4597d758cb4d4fc33c3dfb1bda",
+  "witnessScriptHex": "6302e803b16782012088a82066687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925882103a416734a7729d2e0a4f885f4e939618a5a45f5f32511641236536a24272d99f3ac6869210384d1bf731deefec84458985aefc13dd0045ffbbfe71f3a993bf2adb9b3f85936ac",
   "registered": true
 }

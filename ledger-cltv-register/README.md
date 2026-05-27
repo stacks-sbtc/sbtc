@@ -9,14 +9,14 @@ The miniscript template is:
 ```
 wsh(
   and_v(
-    v:pk(@staker/**),
-    or_i(
+    v:or_i(
       after(N),
       and_v(
         v:sha256(H),
         pk(@covenant/**)
       )
-    )
+    ),
+    pk(@staker/**)
   )
 )
 ```
@@ -101,10 +101,15 @@ node index.js --spend \
 
 The two branches differ only at the end:
 
+In the compiled script the `or_i` runs first and the staker `OP_CHECKSIG`
+runs last (with the `v:` wrapper inserting an `OP_VERIFY` between them), so
+the staker signature lives at the *bottom* of the witness stack and the
+OP_IF selector sits on top.
+
 **`--branch timelock`** — sets `nLockTime = 1000`, `nSequence = 0xfffffffe`,
 and assembles the witness as
 ```
-[ 0x01, <staker-sig>, <witnessScript> ]
+[ <staker-sig>, 0x01, <witnessScript> ]
 ```
 The preimage is not needed in this path.
 
@@ -112,11 +117,12 @@ The preimage is not needed in this path.
 computes the BIP-143 sighash, signs it with the deterministic covenant key,
 and assembles
 ```
-[ <covenant-sig>, <preimage>, <empty>, <staker-sig>, <witnessScript> ]
+[ <staker-sig>, <covenant-sig>, <preimage>, <empty>, <witnessScript> ]
 ```
-The empty selector sits above the covenant sig and preimage so OP_IF pops it
-(empty is the canonical "false" under MINIMALIF); the ELSE arm then consumes
-the preimage and the covenant sig.
+The empty selector on top is what OP_IF pops (empty is the canonical "false"
+under MINIMALIF); the ELSE arm then consumes the preimage and the covenant
+sig, OP_VERIFY pops the resulting `1`, and finally the trailing OP_CHECKSIG
+consumes the staker sig at the bottom.
 
 Then either way, the raw transaction is broadcast through mempool.space
 testnet4.
