@@ -10,7 +10,7 @@ services:
       - ./postgres/data:/var/lib/postgresql/data
 
   sbtc-signer:
-    image: blockstack/sbtc:signer-0.0.9-rc6@sha256:44d2c828c6452f75ea2fabe5160ba95a9f944c0fcaeeaea5523dff81da8bc342
+    image: ghcr.io/stacks-sbtc/sbtc:signer-v1.3.3@sha256:955a9ee0d28466c0fc2c88c7ba74f69c7121e8679ff7142469da552e565421b7
     entrypoint:
       - "/usr/local/bin/signer"
       - "--config"
@@ -35,13 +35,15 @@ services:
       - "127.0.0.1:8801:8801" # this export is only exposed to the Docker host for security reasons. NEVER expose it to the internet!
 
   blocklist-client:
-    image: blockstack/sbtc:blocklist-client-0.0.9-rc6@sha256:e4fa52ac16c357ae69f3b9eb5d5254a43bc605dbded621291b5637064b04d105
+    image: ghcr.io/stacks-sbtc/sbtc:blocklist-client-v1.3.3@sha256:c11ead728f25796498ca8f5a35185f2491020fb219f020998fa381d7503df363
     command: "/usr/local/bin/blocklist-client"
     ports:
       - "3032:3032"
     environment:
-      BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL: https://public.chainalysis.com
-      BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY: ${BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY}
+      BLOCKLIST_CLIENT_SANCTIONS__LOCAL_PATH: "/etc/blocklist-client/sanctions.txt"
+      BLOCKLIST_CLIENT_SANCTIONS__URL: "https://beta.sbtc-emily.com/sanctions"
+      BLOCKLIST_CLIENT_SANCTIONS__HEADER__KEY: "x-api-key"
+      BLOCKLIST_CLIENT_SANCTIONS__HEADER__VALUE: "${EMILY_API_KEY:?}"
       BLOCKLIST_CLIENT_SERVER__HOST: "0.0.0.0"
       BLOCKLIST_CLIENT_SERVER__PORT: "3032"
 
