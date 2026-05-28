@@ -80,7 +80,6 @@ services:
     container_name: blocklist-client
     # this version can be outdated, check the last image on: https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc
     image: ghcr.io/stacks-sbtc/sbtc:blocklist-client-v1.3.0@sha256:53ff6c387804109886518d9cec85ad235e793aa71e4dcbe5cc9013f118b360f7
-    command: "/usr/local/bin/blocklist-client"
     environment:
       BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY: *BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY
       BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL: https://public.chainalysis.com
