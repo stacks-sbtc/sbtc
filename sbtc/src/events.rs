@@ -558,6 +558,11 @@ impl RawTupleData {
 
         match version.as_slice() {
             // version == 0x00 and (len hashbytes) == 20 => P2PKH
+            //
+            // We also allow for an empty version slice, since that is
+            // technically allowed by the smart contract. See [1] for more
+            // details. 
+            // [1]:  https://github.com/stacks-sbtc/sbtc/issues/2071
             [0x00] | [] => {
                 let bytes =
                     <[u8; 20]>::try_from(hash_bytes).map_err(EventError::ClaritySliceConversion)?;
