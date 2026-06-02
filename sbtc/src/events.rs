@@ -558,7 +558,7 @@ impl RawTupleData {
 
         match version.as_slice() {
             // version == 0x00 and (len hashbytes) == 20 => P2PKH
-            [0x00] => {
+            [0x00] | [] => {
                 let bytes =
                     <[u8; 20]>::try_from(hash_bytes).map_err(EventError::ClaritySliceConversion)?;
                 let pubkey_hash = PubkeyHash::from_byte_array(bytes);
