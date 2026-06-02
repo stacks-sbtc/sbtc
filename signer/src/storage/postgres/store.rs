@@ -73,6 +73,7 @@ impl PgStore {
             // in the migrations directory.
             if !key.ends_with(".sql") {
                 tracing::debug!(migration = %key, "Skipping non-SQL migration file");
+                continue;
             }
 
             // Check if the migration has already been applied. If so, we should
