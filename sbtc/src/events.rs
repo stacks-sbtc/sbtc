@@ -1050,11 +1050,11 @@ mod tests {
     }
 
     impl RawTupleData {
-        fn new_recipient<const N: usize>(version: u8, hash: [u8; N]) -> Self {
+        fn new_recipient<const N: usize>(version: Vec<u8>, hash: [u8; N]) -> Self {
             let recipient = [
                 (
                     ClarityName::from("version"),
-                    ClarityValue::buff_from_byte(version),
+                    ClarityValue::buff_from(version).unwrap(),
                 ),
                 (
                     ClarityName::from("hashbytes"),
@@ -1069,41 +1069,50 @@ mod tests {
     }
 
     #[test_case(
-        0x00,
+        vec![],
+        PubkeyHash::from(*PUBLIC_KEY).to_byte_array(),
+        ScriptBuf::new_p2pkh(&PUBLIC_KEY.pubkey_hash());
+    "P2PKH-empty-version")]
+    #[test_case(
+        vec![0x00],
         PubkeyHash::from(*PUBLIC_KEY).to_byte_array(),
         ScriptBuf::new_p2pkh(&PUBLIC_KEY.pubkey_hash());
     "P2PKH")]
     #[test_case(
-        0x01,
+        vec![0x01],
         ScriptHash::from(ScriptBuf::new_op_return([1; 5])).to_byte_array(),
         ScriptBuf::new_p2sh(&ScriptBuf::new_op_return([1; 5]).script_hash());
     "P2SH")]
     #[test_case(
-        0x02,
+        vec![0x02],
         new_p2sh_segwit(PUBLIC_KEY.wpubkey_hash()).to_byte_array(),
         ScriptBuf::new_p2sh(&new_p2sh_segwit(PUBLIC_KEY.wpubkey_hash()));
     "P2SH-P2WPKH")]
     #[test_case(
-        0x03,
+        vec![0x03],
         new_p2sh_segwit(ScriptBuf::new_op_return([1; 5]).wscript_hash()).to_byte_array(),
         ScriptBuf::new_p2sh(&new_p2sh_segwit(ScriptBuf::new_op_return([1; 5]).wscript_hash()));
     "P2SH-P2WSH")]
     #[test_case(
-        0x04,
+        vec![0x04],
         PubkeyHash::from(*PUBLIC_KEY).to_byte_array(),
         ScriptBuf::new_p2wpkh(&PUBLIC_KEY.wpubkey_hash());
     "P2WPKH")]
     #[test_case(
-        0x05,
+        vec![0x05],
         ScriptBuf::new_op_return([1; 5]).wscript_hash().to_byte_array(),
         ScriptBuf::new_p2wsh(&ScriptBuf::new_op_return([1; 5]).wscript_hash());
     "P2WSH")]
     #[test_case(
-        0x06,
+        vec![0x06],
         TWEAKED_PUBLIC_KEY.serialize(),
         ScriptBuf::new_p2tr_tweaked(*TWEAKED_PUBLIC_KEY);
     "P2TR")]
-    fn recipient_to_script_pub_key<const N: usize>(version: u8, hash: [u8; N], script: ScriptBuf) {
+    fn recipient_to_script_pub_key<const N: usize>(
+        version: Vec<u8>,
+        hash: [u8; N],
+        script: ScriptBuf,
+    ) {
         // For these tests, we show what is expected for the hashbytes for
         // each of the address types and check that the result of the
         // `RawTupleData::try_into_script_pub_key` function matches what
@@ -1116,14 +1125,16 @@ mod tests {
         assert_eq!(actual_script_pub_key, script);
     }
 
-    #[test_case(0x06, [1; 33]; "hash 33 bytes P2TR")]
-    #[test_case(0x06, [1; 20]; "hash 20 bytes P2TR")]
-    #[test_case(0x07, [1; 20]; "incorrect version 1")]
-    #[test_case(0x07, [1; 32]; "incorrect version 2")]
-    #[test_case(0x05, [1; 20]; "bad p2wsh hash length")]
-    #[test_case(0x00, [1; 32]; "bad p2pkh 1")]
-    #[test_case(0x00, [1; 21]; "bad p2pkh 2")]
-    fn bad_recipient_cases<const N: usize>(version: u8, hash: [u8; N]) {
+    #[test_case(vec![0x06], [1; 33]; "hash 33 bytes P2TR")]
+    #[test_case(vec![0x06], [1; 20]; "hash 20 bytes P2TR")]
+    #[test_case(vec![0x07], [1; 20]; "incorrect version 1")]
+    #[test_case(vec![0x07], [1; 32]; "incorrect version 2")]
+    #[test_case(vec![0x05], [1; 20]; "bad p2wsh hash length")]
+    #[test_case(vec![0x00], [1; 32]; "bad p2pkh 1")]
+    #[test_case(vec![0x00], [1; 21]; "bad p2pkh 2")]
+    #[test_case(vec![], [1; 21]; "bad p2pkh 3")]
+    #[test_case(vec![], [1; 32]; "bad p2pkh 4")]
+    fn bad_recipient_cases<const N: usize>(version: Vec<u8>, hash: [u8; N]) {
         // For these tests, we show what is unexpected lengths in the
         // hashbytes leads to the `RawTupleData::try_into_script_pub_key`
         // returning an error.
