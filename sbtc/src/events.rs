@@ -561,7 +561,7 @@ impl RawTupleData {
             //
             // We also allow for an empty version slice, since that is
             // technically allowed by the smart contract. See [1] for more
-            // details. 
+            // details.
             // [1]:  https://github.com/stacks-sbtc/sbtc/issues/2071
             [0x00] | [] => {
                 let bytes =
