@@ -36,7 +36,6 @@ services:
 
   blocklist-client:
     image: ghcr.io/stacks-sbtc/sbtc:blocklist-client-v1.3.3@sha256:c11ead728f25796498ca8f5a35185f2491020fb219f020998fa381d7503df363
-    command: "/usr/local/bin/blocklist-client"
     ports:
       - "3032:3032"
     environment:
