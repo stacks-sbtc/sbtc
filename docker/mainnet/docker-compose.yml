@@ -21,8 +21,6 @@ x-common-vars:
   - &SIGNER_SIGNER__PRIVATE_KEY ${SIGNER_SIGNER__PRIVATE_KEY:?} # Required
   # Emily
   - &EMILY_API_KEY ${EMILY_API_KEY:?} # Required
-  # Blocklist client
-  - &BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY ${BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY:?} # Required
   # Vector, Cloudwatch log streaming
   - &STREAM_NAME ${STREAM_NAME:?} # Required
   - &AWS_ACCESS_KEY_ID ${AWS_ACCESS_KEY_ID:?} # Required
@@ -45,7 +43,7 @@ services:
     container_name: sbtc-signer
     restart: on-failure
     # this version can be outdated, check the last image on: https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc
-    image: ghcr.io/stacks-sbtc/sbtc:signer-v1.3.0@sha256:588f822f9f7fc66e3ec37d912c98075dda8a501d44636ca732624ecacb2de361
+    image: ghcr.io/stacks-sbtc/sbtc:signer-v1.3.3@sha256:955a9ee0d28466c0fc2c88c7ba74f69c7121e8679ff7142469da552e565421b7
     entrypoint:
       - "/usr/local/bin/signer"
       - "--config"
@@ -79,11 +77,12 @@ services:
     restart: on-failure
     container_name: blocklist-client
     # this version can be outdated, check the last image on: https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc
-    image: ghcr.io/stacks-sbtc/sbtc:blocklist-client-v1.3.0@sha256:53ff6c387804109886518d9cec85ad235e793aa71e4dcbe5cc9013f118b360f7
+    image: ghcr.io/stacks-sbtc/sbtc:blocklist-client-v1.3.3@sha256:c11ead728f25796498ca8f5a35185f2491020fb219f020998fa381d7503df363
     environment:
-      BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY: *BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY
-      BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL: https://public.chainalysis.com
-      BLOCKLIST_CLIENT_RISK_ANALYSIS__ASSESSMENT_METHOD: sanctions
+      BLOCKLIST_CLIENT_SANCTIONS__LOCAL_PATH: "/etc/blocklist-client/sanctions.txt"
+      BLOCKLIST_CLIENT_SANCTIONS__URL: "https://sbtc-emily.com/sanctions"
+      BLOCKLIST_CLIENT_SANCTIONS__HEADER__KEY: "x-api-key"
+      BLOCKLIST_CLIENT_SANCTIONS__HEADER__VALUE: *EMILY_API_KEY
       BLOCKLIST_CLIENT_SERVER__HOST: "0.0.0.0"
       BLOCKLIST_CLIENT_SERVER__PORT: "3032"
 
