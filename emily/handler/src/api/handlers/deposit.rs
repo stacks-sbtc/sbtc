@@ -337,12 +337,15 @@ pub async fn create_deposit(
 
         let deposit_info = body.validate(context.settings.is_mainnet)?;
 
+        let bitcoin_txid = deposit_info.outpoint.txid.to_string();
+        let bitcoin_tx_output_index = deposit_info.outpoint.vout;
+
         // Check if deposit with such txid and outindex already exists.
         let entry = accessors::get_deposit_entry(
             &context,
             &DepositEntryKey {
-                bitcoin_txid: body.bitcoin_txid.clone(),
-                bitcoin_tx_output_index: body.bitcoin_tx_output_index,
+                bitcoin_txid: bitcoin_txid.clone(),
+                bitcoin_tx_output_index,
             },
         )
         .await;
@@ -359,16 +362,16 @@ pub async fn create_deposit(
         let reclaim_pubkeys_hash = extract_reclaim_pubkeys_hash(&deposit_info.reclaim_script);
         if reclaim_pubkeys_hash.is_none() {
             tracing::warn!(
-                bitcoin_txid = %body.bitcoin_txid,
-                bitcoin_tx_output_index = %body.bitcoin_tx_output_index,
+                %bitcoin_txid,
+                %bitcoin_tx_output_index,
                 "unknown reclaim script"
             );
         }
         // Make table entry.
         let deposit_entry: DepositEntry = DepositEntry {
             key: DepositEntryKey {
-                bitcoin_txid: body.bitcoin_txid,
-                bitcoin_tx_output_index: body.bitcoin_tx_output_index,
+                bitcoin_txid,
+                bitcoin_tx_output_index,
             },
             recipient: hex::encode(deposit_info.recipient.serialize_to_vec()),
             parameters: DepositParametersEntry {
@@ -385,8 +388,8 @@ pub async fn create_deposit(
             last_update_block_hash: stacks_block_hash,
             last_update_height: stacks_block_height,
             amount: deposit_info.amount,
-            reclaim_script: body.reclaim_script,
-            deposit_script: body.deposit_script,
+            reclaim_script: deposit_info.reclaim_script.to_hex_string(),
+            deposit_script: deposit_info.deposit_script.to_hex_string(),
             reclaim_pubkeys_hash,
             ..Default::default()
         };
