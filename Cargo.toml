@@ -7,6 +7,7 @@ members = [
     ".generated-sources/emily/client/rust/testing",
     "blocklist-client",
     "blocklist-openapi-gen",
+    "devenv/setup",
     "emily/handler",
     "emily/openapi-gen",
     "sbtc",

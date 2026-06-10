@@ -105,19 +105,19 @@ services:
     profiles:
       - default
 
-  # Modifies Emily's CDK template and creates DynamoDB Tables.
-  emily-aws-setup:
-    build:
-      context: ../
-      dockerfile: docker/sbtc/Dockerfile
-      target: emily-aws-setup
-    depends_on:
-      - emily-dynamodb
-    environment:
-      - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
-      - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
-    profiles:
-      - default
+  # # Modifies Emily's CDK template and creates DynamoDB Tables.
+  # emily-aws-setup:
+  #   build:
+  #     context: ../
+  #     dockerfile: docker/sbtc/Dockerfile
+  #     target: emily-aws-setup
+  #   depends_on:
+  #     - emily-dynamodb
+  #   environment:
+  #     - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
+  #     - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
+  #   profiles:
+  #     - default
 
   # Runs the Emily server.
   emily-server:
@@ -126,8 +126,8 @@ services:
       dockerfile: docker/sbtc/Dockerfile
       target: emily-server
     depends_on:
-      emily-aws-setup:
-        condition: service_completed_successfully
+      devenv-setup:
+        condition: service_healthy
     environment:
       - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
       - AWS_ACCESS_KEY_ID=xxxxxxxxxxxx
@@ -160,6 +160,34 @@ services:
       - default
     depends_on:
       - emily-server
+
+  # One-shot devenv setup helper: creates Emily's DynamoDB tables, then waits
+  # for the signers to confirm a rotate-keys-wrapper contract call before
+  # broadcasting a donation. Exits 0 once both phases complete.
+  devenv-setup:
+    build:
+      context: ../
+      dockerfile: docker/sbtc/devenv-setup/Dockerfile
+      target: devenv-setup
+    environment:
+      - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
+      - STACKS_RPC_URL=http://stacks-node:20443
+      - BITCOIN_RPC_URL=http://devnet:devnet@bitcoin:18443/wallet/depositor
+      - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
+      - READY_FILE=/tmp/aws-setup-ready
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/aws-setup-ready"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 2s
+    profiles:
+      - default
+    depends_on:
+      - emily-dynamodb
+      - bitcoin
+      - bitcoin-miner
+      - stacks-node
 
   emily-cron:
     build:
