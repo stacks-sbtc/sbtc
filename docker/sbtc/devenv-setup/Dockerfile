@@ -36,13 +36,7 @@ COPY --from=builder /code/sbtc/emily/cdk/cdk.out /code/cdk.out
 ENV AWS_ACCESS_KEY_ID=xxxxxxxxxxxx
 ENV AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxx
 ENV AWS_REGION=us-west-2
-ENV INPUT_CDK_TEMPLATE=/code/cdk.out/EmilyStack.template.json
-ENV READY_FILE=/tmp/aws-setup-ready
-
-# The container is "healthy" once the aws-setup phase has created the tables
-# and touched the sentinel file. emily-server (and anything else gated on
-# DynamoDB) keys off this — wait-and-donate keeps running afterwards.
-HEALTHCHECK --interval=2s --timeout=2s --retries=60 --start-period=2s \
-    CMD test -f "$READY_FILE" || exit 1
+ENV INPUT_CDK_TEMPLATE_PATH=/code/cdk.out/EmilyStack.template.json
+ENV READY_FILE_PATH=/tmp/aws-setup-ready
 
 ENTRYPOINT ["/usr/local/bin/devenv-setup", "run"]
