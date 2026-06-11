@@ -160,7 +160,7 @@ devenv-up-no-dkg-spox:
 	docker compose -f docker/docker-compose.yml -f devenv/deterministic-dkg/docker-compose.yml -f devenv/spox/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer up -d
 
 devenv-down:
-	docker compose -f docker/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer down -t 0 -v
+	docker compose -f docker/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer down -t 0 -v --remove-orphans
 
 devenv-sbtc-up:
 	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin up --build -d
