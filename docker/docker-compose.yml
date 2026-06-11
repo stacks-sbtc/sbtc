@@ -105,20 +105,6 @@ services:
     profiles:
       - default
 
-  # # Modifies Emily's CDK template and creates DynamoDB Tables.
-  # emily-aws-setup:
-  #   build:
-  #     context: ../
-  #     dockerfile: docker/sbtc/Dockerfile
-  #     target: emily-aws-setup
-  #   depends_on:
-  #     - emily-dynamodb
-  #   environment:
-  #     - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
-  #     - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
-  #   profiles:
-  #     - default
-
   # Runs the Emily server.
   emily-server:
     build:
