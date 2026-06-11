@@ -124,23 +124,12 @@ services:
     profiles:
       - default
 
-  # Modifies Emily's CDK template and creates DynamoDB Tables.
-  emily-aws-setup:
-    image: djordon/emily-aws-setup:v1.3.3@sha256:efe9dcf1dc3a9e9beb4c39f741e6bb2ff4a76c7adfc1bad19ba34e04b7035d7d
-    depends_on:
-      - emily-dynamodb
-    environment:
-      - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
-      - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
-    profiles:
-      - default
-
   # Runs the Emily server.
   emily-server:
     image: djordon/emily-server:v1.3.3@sha256:0c0986662fd8fbdfd5eaa27c3307cafe481a1e0ddb8edabc82cf4cd6e277e451
     depends_on:
-      emily-aws-setup:
-        condition: service_completed_successfully
+      devenv-setup:
+        condition: service_healthy
     environment:
       - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
       - AWS_ACCESS_KEY_ID=xxxxxxxxxxxx
@@ -188,6 +177,31 @@ services:
     depends_on:
       - emily-server
       - mempool-api
+
+  # One-shot devenv setup helper: creates Emily's DynamoDB tables, then waits
+  # for the signers to confirm a rotate-keys-wrapper contract call before
+  # broadcasting a donation. Exits 0 once both phases complete.
+  devenv-setup:
+    image: djordon/devenv-setup:91b6fa55@sha256:00d6db378491dcab76d91a8db7522d920d7ce12b7de01e632fbeba320f02e0a3
+    environment:
+      - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
+      - STACKS_RPC_URL=http://stacks-node:20443
+      - BITCOIN_RPC_URL=http://devnet:devnet@bitcoin:18443/wallet/depositor
+      - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
+      - READY_FILE_PATH=/tmp/aws-setup-ready
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/aws-setup-ready"]
+      interval: 2s
+      timeout: 2s
+      retries: 300
+      start_period: 2s
+    profiles:
+      - default
+    depends_on:
+      - emily-dynamodb
+      - bitcoin
+      - bitcoin-miner
+      - stacks-node
 
   # sBTC Signers.
   # ------------------
