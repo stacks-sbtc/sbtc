@@ -114,15 +114,9 @@ pub async fn run(args: AwsSetupArgs) -> Result<(), Error> {
         tracing::info!(table = %table.table_name, "created table");
     }
 
-    tracing::info!(path = %args.ready_file_path .display(), "writing aws-setup ready sentinel");
-    write_ready_file(args.ready_file_path)?;
-    tracing::info!("sentinal written to successfully");
-    Ok(())
-}
-
-/// Touch the sentinel file the container healthcheck watches.
-fn write_ready_file(path: PathBuf) -> Result<(), Error> {
+    let path = args.ready_file_path.clone();
     File::create(&path).map_err(|source| Error::WriteReadyFile { path, source })?;
+    tracing::info!(path = %args.ready_file_path.display(), "wrote aws-setup ready sentinel");
     Ok(())
 }
 

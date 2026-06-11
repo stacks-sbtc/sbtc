@@ -1,13 +1,11 @@
 //! `wait-and-donate` subcommand.
 //!
 //! The signers need a "donation" UTXO sitting at the P2TR address derived
-//! from that key before they can sweep any user deposits — without it the
-//! sweeper has nothing to spend from.
+//! from their aggregate key before they can sweep any user deposits.
 //!
 //! This subcommand polls the Stacks node until the sBTC signers' aggregate
-//! key is set, then build, sign, and broadcast the donation transaction
+//! key is set, then builds, signs, and broadcasts the donation transaction
 //! through the local depositor wallet on bitcoin-core.
-//!
 
 use std::num::NonZeroU64;
 use std::time::Duration;
@@ -36,8 +34,11 @@ use crate::stacks::StacksClient;
 /// Default Stacks principal that deployed the sbtc contracts in devenv.
 const DEMO_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 
+/// Amount sent to the signers in the donation transaction.
+const DONATION_AMOUNT: Amount = Amount::from_sat(10_000);
+
 /// Flat fee in sats we burn when broadcasting the donation.
-const DONATION_FEE_SATS: Amount = Amount::from_sat(300);
+const DONATION_FEE: Amount = Amount::from_sat(300);
 
 /// Default interval between Stacks node polls when waiting for the aggregate
 /// key to appear.
@@ -53,9 +54,6 @@ pub struct WaitAndDonateArgs {
     /// [`Error::StacksRpc`].
     #[clap(long = "deployer", env = "DEPLOYER_ADDRESS", default_value = DEMO_DEPLOYER)]
     pub deployer: String,
-    /// Donation amount, in sats.
-    #[clap(long, env = "DONATION_AMOUNT", default_value_t = 10_000)]
-    pub amount: u64,
     /// Interval between Stacks node polls, in seconds.
     #[clap(
         long = "poll-interval",
@@ -69,18 +67,17 @@ pub struct WaitAndDonateArgs {
     /// Bitcoin RPC URL with embedded credentials and wallet path (for
     /// example, `http://devnet:devnet@bitcoin:18443/wallet/depositor`).
     ///
-    /// The wallet path is necessary because some bitcoind RPCs like
-    /// `listunspent` and `signrawtransactionwithwallet` require the wallet
-    /// name.
+    /// The wallet path is mandatory because bitcoind routes wallet-scoped
+    /// RPCs by URL path.
     #[clap(long = "bitcoin-rpc-url", env = "BITCOIN_RPC_URL")]
     pub bitcoin_rpc_url: Url,
 }
 
 /// Entry point for the subcommand.
 ///
-/// Poll Stacks until the aggregate key is set, then build and broadcasts
-/// the donation transaction to the sbtc signers. The function only
-/// suceesfully returns once a donation `txid` has been submitted.
+/// Polls the Stacks node until the aggregate key is set, then builds and
+/// broadcasts a donation transaction to the sbtc signers. The function
+/// only returns successfully once a donation `txid` has been submitted.
 pub async fn run(args: WaitAndDonateArgs) -> Result<(), Error> {
     let stacks = StacksClient::new(args.stacks_rpc_url)?;
     let bitcoin = build_bitcoin_client(&args.bitcoin_rpc_url)?;
@@ -89,7 +86,7 @@ pub async fn run(args: WaitAndDonateArgs) -> Result<(), Error> {
     let aggregate_key = wait_for_aggregate_key(&stacks, &args.deployer, poll_interval).await;
     tracing::info!(%aggregate_key, "aggregate key is set, broadcasting donation");
 
-    let unsigned_tx = build_donation_tx(&bitcoin, &aggregate_key, args.amount)?;
+    let unsigned_tx = build_donation_tx(&bitcoin, &aggregate_key)?;
     let signed_tx = bitcoin.sign_raw_transaction_with_wallet(&unsigned_tx, None, None)?;
     let txid = bitcoin.send_raw_transaction(&signed_tx.hex)?;
 
@@ -122,15 +119,17 @@ async fn wait_for_aggregate_key(
 ///
 /// We ask bitcoind for a single UTXO large enough to cover the donation
 /// plus the flat fee, and spend it into two outputs: the donation to the
-/// signers' P2TR address for the input amount and the rest as change.
+/// signers' P2TR address for the fixed [`DONATION_AMOUNT`] and the rest
+/// back to the depositor wallet as change.
 fn build_donation_tx(
     bitcoin: &BitcoinClient,
     aggregate_key: &PublicKey,
-    amount_sats: u64,
 ) -> Result<Transaction, Error> {
-    let amount = Amount::from_sat(amount_sats);
-    let minimum = amount + DONATION_FEE_SATS;
+    let minimum = DONATION_AMOUNT + DONATION_FEE;
     let unspent = select_utxo(bitcoin, minimum)?;
+
+    let (x_only, _) = aggregate_key.x_only_public_key();
+    let signers_script_pubkey = ScriptBuf::new_p2tr(SECP256K1, x_only, None);
 
     Ok(Transaction {
         version: Version::TWO,
@@ -145,8 +144,8 @@ fn build_donation_tx(
         }],
         output: vec![
             TxOut {
-                value: amount,
-                script_pubkey: p2tr_script_pubkey(aggregate_key),
+                value: DONATION_AMOUNT,
+                script_pubkey: signers_script_pubkey,
             },
             TxOut {
                 value: unspent.amount - minimum,
@@ -168,12 +167,6 @@ fn select_utxo(bitcoin: &BitcoinClient, minimum: Amount) -> Result<ListUnspentRe
         .into_iter()
         .next()
         .ok_or(Error::NoAvailableUtxos)
-}
-
-/// The P2TR `scriptPubKey` used by the signers to lock their UTXOs.
-fn p2tr_script_pubkey(aggregate_key: &PublicKey) -> ScriptBuf {
-    let (x_only, _) = aggregate_key.x_only_public_key();
-    ScriptBuf::new_p2tr(SECP256K1, x_only, None)
 }
 
 /// Build a [`BitcoinClient`] from a URL with embedded credentials.

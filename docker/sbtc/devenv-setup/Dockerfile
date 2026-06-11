@@ -36,7 +36,5 @@ COPY --from=builder /code/sbtc/emily/cdk/cdk.out /code/cdk.out
 ENV AWS_ACCESS_KEY_ID=xxxxxxxxxxxx
 ENV AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxx
 ENV AWS_REGION=us-west-2
-ENV INPUT_CDK_TEMPLATE_PATH=/code/cdk.out/EmilyStack.template.json
-ENV READY_FILE_PATH=/tmp/aws-setup-ready
 
 ENTRYPOINT ["/usr/local/bin/devenv-setup", "run"]

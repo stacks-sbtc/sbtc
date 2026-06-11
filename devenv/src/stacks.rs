@@ -35,7 +35,7 @@ const CLARITY_TYPE_BUFFER: u8 = 0x02;
 const CLARITY_BUFFER_HEADER_LEN: usize = 5;
 
 /// Default per-request timeout for the Stacks RPC.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// A thin client for the Stacks node's HTTP RPC.
 #[derive(Debug, Clone)]
