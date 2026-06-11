@@ -66,6 +66,28 @@ x-sbtc-signer: &sbtc-signer
     - ./sbtc/signer/signer-config.toml:/signer-config.toml
   profiles:
     - sbtc-signer
+  # The published signer image is debian-slim with no curl/wget/nc, so we
+  # use bash's /dev/tcp to probe the metrics port.
+  healthcheck:
+    test: ["CMD", "bash", "-c", "true < /dev/tcp/localhost/8801"]
+    start_period: 10s
+    start_interval: 1s
+    interval: 30s
+    timeout: 1s
+
+# One-shot postgres clients that seed each signer's database with
+# pre-computed DKG shares.
+x-sbtc-signer-seed: &sbtc-signer-seed
+  image: postgres:16.6-bookworm@sha256:c965017e1d29eb03e18a11abc25f5e3cd78cb5ac799d495922264b8489d5a3a1
+  restart: "no"
+  profiles:
+    - default
+  entrypoint:
+    - /bin/bash
+    - -c
+    - |
+      set -e
+      PGPASSWORD=postgres psql -h $${TARGET} -U postgres -d signer -v ON_ERROR_STOP=1 -f /seed/signer.sql
 
 x-stacks-signer: &stacks-signer
   image: ghcr.io/stacks-network/stacks-signer:3.4.0.0.1.0@sha256:afe4332e967b4a509cc05b5f6d4f15389b7afa100398ebdc1b5ae8c15cac996c
@@ -234,6 +256,58 @@ services:
       SIGNER_SIGNER__PROMETHEUS_EXPORTER_ENDPOINT: 0.0.0.0:9183
     ports:
       - "127.0.0.1:8803:8801"
+
+  # Deterministic-DKG seeders.
+  # --------------------------
+  # Each one waits for its signer to be healthy, then imports the matching
+  # SQL dump from devenv/deterministic-dkg/ into the signer's postgres.
+  sbtc-signer-seed-1:
+    <<: *sbtc-signer-seed
+    environment:
+      TARGET: postgres-1
+    volumes:
+      - ../devenv/deterministic-dkg/signer-1.sql:/seed/signer.sql
+    depends_on:
+      sbtc-signer-1:
+        condition: service_healthy
+
+  sbtc-signer-seed-2:
+    <<: *sbtc-signer-seed
+    environment:
+      TARGET: postgres-2
+    volumes:
+      - ../devenv/deterministic-dkg/signer-2.sql:/seed/signer.sql
+    depends_on:
+      sbtc-signer-2:
+        condition: service_healthy
+
+  sbtc-signer-seed-3:
+    <<: *sbtc-signer-seed
+    environment:
+      TARGET: postgres-3
+    volumes:
+      - ../devenv/deterministic-dkg/signer-3.sql:/seed/signer.sql
+    depends_on:
+      sbtc-signer-3:
+        condition: service_healthy
+
+  spox:
+    image: ghcr.io/stx-labs/spox:v1.0.0@sha256:5759f86020461d1d11a244440ad3badc8c4fceee7743a0aa25d8c2b5025215d5
+    environment:
+      SPOX_EMILY_ENDPOINT: "http://emily-server:3031"
+      SPOX_BITCOIN_RPC_ENDPOINT: "http://devnet:devnet@bitcoin:18443"
+      SPOX_NODE_WALLET__NAME: "spox-watch"
+      SPOX_NODE_WALLET__RESCAN_TIMESTAMP: "-604800" # last week
+      # pox-5 deposit values
+      SPOX_DEPOSIT__POX__SIGNERS_XONLY: "48157362b0654badffbb627ce91c7eb352181069db33832e18f035fb58764ecf" # assuming seeded DKG
+      SPOX_DEPOSIT__POX__RECIPIENT: "ST000000000000000000002AMW42H.pox-5"
+      SPOX_DEPOSIT__POX__MAX_FEE: "80000"
+      SPOX_DEPOSIT__POX__LOCK_TIME: "65535"
+      SPOX_DEPOSIT__POX__RECLAIM_SCRIPT: "6a" # OP_RETURN
+    restart: on-failure
+    depends_on:
+      - emily-server
+      - bitcoin
 
   # Bitcoin / Burnchain.
   # --------------------
