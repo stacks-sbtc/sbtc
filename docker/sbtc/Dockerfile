@@ -32,6 +32,11 @@ RUN make install-pnpm && make emily-cdk-synth
 # Create Docker image to run the signer.
 # ---------------------------------------
 FROM debian:trixie-slim AS signer
+# The devenv healthcheck uses curl
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /code/sbtc/target/debug/signer /usr/local/bin/signer
 ENTRYPOINT ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]
