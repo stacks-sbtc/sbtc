@@ -47,7 +47,7 @@ pub enum Error {
     },
     /// The CDK template wasn't valid JSON.
     #[error("failed to parse CDK template JSON: {0}")]
-    ParseTemplate(#[from] serde_json::Error),
+    ParseTemplate(#[source] serde_json::Error),
     /// The template parsed as JSON but had an unexpected shape (missing
     /// fields, unsupported enum string, etc.).
     #[error("malformed CDK template: {0}")]

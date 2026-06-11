@@ -112,10 +112,9 @@ fn decode_aggregate_key(hex_data: &str) -> Result<Option<PublicKey>, Error> {
     if bytes.first() != Some(&CLARITY_TYPE_BUFFER) || bytes.len() < CLARITY_BUFFER_HEADER_LEN {
         return Err(Error::UnexpectedClarityValue);
     }
-    let len = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as usize;
-    let payload = bytes
-        .get(CLARITY_BUFFER_HEADER_LEN..CLARITY_BUFFER_HEADER_LEN + len)
-        .ok_or(Error::UnexpectedClarityValue)?;
+
+    // This doesn't panic because we checked the length above.
+    let payload = &bytes[CLARITY_BUFFER_HEADER_LEN..];
 
     if payload == [0u8] {
         return Ok(None);

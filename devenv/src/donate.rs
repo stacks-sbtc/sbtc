@@ -36,7 +36,7 @@ use crate::stacks::StacksClient;
 /// Default Stacks principal that deployed the sbtc contracts in devenv.
 const DEMO_DEPLOYER: &str = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS";
 
-/// Flat fee in sats we burn when broadcasting the donation. 
+/// Flat fee in sats we burn when broadcasting the donation.
 const DONATION_FEE_SATS: Amount = Amount::from_sat(300);
 
 /// Default interval between Stacks node polls when waiting for the aggregate

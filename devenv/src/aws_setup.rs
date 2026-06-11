@@ -134,18 +134,18 @@ fn write_ready_file(path: PathBuf) -> Result<(), Error> {
 /// `AWS::DynamoDB::Table` resources, deserialising their `Properties` into
 /// [`TableProperties`].
 fn read_table_definitions(path: PathBuf) -> Result<Vec<TableProperties>, Error> {
-    let file = File::open(&path)
+    let buf_reader = File::open(&path)
+        .map(BufReader::new)
         .map_err(|source| Error::ReadTemplate { path, source })?;
-    let template: Template = serde_json::from_reader(BufReader::new(file))?;
+    let template: Template = serde_json::from_reader(buf_reader).map_err(Error::ParseTemplate)?;
 
     template
         .resources
         .into_values()
         .filter(|resource| resource.ty == DYNAMO_TABLE_TYPE)
-        .map(|resource| {
-            serde_json::from_value::<TableProperties>(resource.properties).map_err(Error::from)
-        })
-        .collect()
+        .map(|resource| serde_json::from_value::<TableProperties>(resource.properties))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(Error::ParseTemplate)
 }
 
 /// Top-level CDK template object. We only care about `Resources`; the rest
