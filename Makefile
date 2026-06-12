@@ -156,8 +156,14 @@ devenv-up:
 devenv-up-no-dkg:
 	docker compose -f docker/docker-compose.yml -f devenv/deterministic-dkg/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer up -d
 
+devenv-pox5-up:
+	docker compose -f docker/docker-compose.pox5.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer up -d
+
 devenv-down:
 	docker compose -f docker/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer down -t 0 -v
+
+devenv-pox5-down:
+	docker compose -f docker/docker-compose.pox5.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer down -t 0 -v
 
 devenv-sbtc-up:
 	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin up --build -d
@@ -168,7 +174,7 @@ devenv-sbtc-down:
 devenv-sbtc-build:
 	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin build
 
-.PHONY: devenv-no-sbtc-up devenv-no-sbtc-down devenv-up devenv-up-no-dkg devenv-down devenv-sbtc-up devenv-sbtc-down devenv-sbtc-build
+.PHONY: devenv-no-sbtc-up devenv-no-sbtc-down devenv-up devenv-up-no-dkg devenv-down devenv-pox5-down devenv-sbtc-up devenv-sbtc-down devenv-sbtc-build devenv-pox5-up
 
 # ##############################################################################
 # EMILY

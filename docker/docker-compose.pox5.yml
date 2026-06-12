@@ -45,10 +45,7 @@ x-postgres: &postgres
     - sbtc-postgres
 
 x-sbtc-signer: &sbtc-signer
-  build:
-    context: ../
-    dockerfile: docker/sbtc/Dockerfile
-    target: signer
+  image: ghcr.io/stacks-sbtc/sbtc:signer-v1.3.3@sha256:955a9ee0d28466c0fc2c88c7ba74f69c7121e8679ff7142469da552e565421b7
   logging:
     driver: fluentd
     options:
@@ -69,12 +66,28 @@ x-sbtc-signer: &sbtc-signer
     - ./sbtc/signer/signer-config.toml:/signer-config.toml
   profiles:
     - sbtc-signer
+  # The published signer image is debian-slim with no curl/wget/nc, so we
+  # use bash's /dev/tcp to probe the metrics port.
   healthcheck:
-    test: [ "CMD-SHELL", "curl -sf http://localhost:8801/info 2> /dev/null" ]
+    test: ["CMD", "bash", "-c", "true < /dev/tcp/localhost/8801"]
     start_period: 10s
     start_interval: 1s
     interval: 30s
     timeout: 1s
+
+# One-shot postgres clients that seed each signer's database with
+# pre-computed DKG shares.
+x-sbtc-signer-seed: &sbtc-signer-seed
+  image: postgres:16.6-bookworm@sha256:c965017e1d29eb03e18a11abc25f5e3cd78cb5ac799d495922264b8489d5a3a1
+  restart: "no"
+  profiles:
+    - default
+  entrypoint:
+    - /bin/bash
+    - -c
+    - |
+      set -e
+      PGPASSWORD=postgres psql -h $${TARGET} -U postgres -d signer -v ON_ERROR_STOP=1 -f /seed/signer.sql
 
 x-stacks-signer: &stacks-signer
   image: ghcr.io/stacks-network/stacks-signer:3.4.0.0.1.0@sha256:afe4332e967b4a509cc05b5f6d4f15389b7afa100398ebdc1b5ae8c15cac996c
@@ -113,10 +126,7 @@ services:
 
   # Runs the Emily server.
   emily-server:
-    build:
-      context: ../
-      dockerfile: docker/sbtc/Dockerfile
-      target: emily-server
+    image: djordon/emily-server:v1.3.3@sha256:0c0986662fd8fbdfd5eaa27c3307cafe481a1e0ddb8edabc82cf4cd6e277e451
     depends_on:
       devenv-setup:
         condition: service_healthy
@@ -138,10 +148,7 @@ services:
       - default
 
   emily-sidecar:
-    build:
-      context: ../
-      dockerfile: docker/sbtc/emily-sidecar/Dockerfile
-      target: emily-sidecar
+    image: djordon/emily-sidecar:v1.3.3@sha256:d1271d06f456ea86ca33c724bf58db54670fb9179a36eb0eac567eadc771ef21
     restart: on-failure
     ports:
       - "127.0.0.1:20540:20540"
@@ -153,14 +160,29 @@ services:
     depends_on:
       - emily-server
 
+  emily-cron:
+    image: djordon/emily-cron:v1.3.3@sha256:9b8d74c82f24d33a07b02dd7188c11f2057de2ac966b188258c962d953e004d6
+    restart: on-failure
+    environment:
+      - EMILY_API_KEY=testApiKey
+      - EMILY_ENDPOINT=http://emily-server:3031
+      - PRIVATE_EMILY_ENDPOINT=http://emily-server:3031
+      - MEMPOOL_API_URL=http://mempool-api:8999/api
+      - ELECTRS_API_URL=http://electrs:3002
+      - HIRO_API_URL=https://api.hiro.so
+      - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
+    profiles:
+      - default
+      - bitcoin-mempool
+    depends_on:
+      - emily-server
+      - mempool-api
+
   # One-shot devenv setup helper: creates Emily's DynamoDB tables, then waits
   # for the signers to confirm a rotate-keys-wrapper contract call before
   # broadcasting a donation. Exits 0 once both phases complete.
   devenv-setup:
-    build:
-      context: ../
-      dockerfile: docker/sbtc/devenv-setup/Dockerfile
-      target: devenv-setup
+    image: djordon/devenv-setup:91b6fa55@sha256:00d6db378491dcab76d91a8db7522d920d7ce12b7de01e632fbeba320f02e0a3
     environment:
       - DYNAMODB_ENDPOINT=http://emily-dynamodb:8000
       - STACKS_RPC_URL=http://stacks-node:20443
@@ -180,27 +202,6 @@ services:
       - bitcoin
       - bitcoin-miner
       - stacks-node
-
-  emily-cron:
-    build:
-      context: ../
-      dockerfile: docker/sbtc/emily-cron/Dockerfile
-      target: emily-cron
-    restart: on-failure
-    environment:
-      - EMILY_API_KEY=testApiKey
-      - EMILY_ENDPOINT=http://emily-server:3031
-      - PRIVATE_EMILY_ENDPOINT=http://emily-server:3031
-      - MEMPOOL_API_URL=http://mempool-api:8999/api
-      - ELECTRS_API_URL=http://electrs:3002
-      - HIRO_API_URL=https://api.hiro.so
-      - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
-    profiles:
-      - default
-      - bitcoin-mempool
-    depends_on:
-      - emily-server
-      - mempool-api
 
   # sBTC Signers.
   # ------------------
@@ -270,50 +271,63 @@ services:
     ports:
       - "127.0.0.1:8803:8801"
 
-  # Blocklist client.
-  # -----------------
-  blocklist-client:
-    build:
-      context: ../
-      dockerfile: docker/sbtc/Dockerfile
-      target: blocklist-client
+  # Deterministic-DKG seeders.
+  # --------------------------
+  # Each one waits for its signer to be healthy, then imports the matching
+  # SQL dump from devenv/deterministic-dkg/ into the signer's postgres.
+  sbtc-signer-seed-1:
+    <<: *sbtc-signer-seed
     environment:
-      BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL: ${BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL:-https://public.chainalysis.com}
-      BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY: ${BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY:-}
-      BLOCKLIST_CLIENT_SERVER__HOST: "0.0.0.0"
-    ports:
-      - "127.0.0.1:3030:3030"
-    profiles:
-      - default
-
-  # sBTC Bridge Website.
-  # --------------------
-  sbtc-bridge-website:
-    build:
-      context: bridge-website
-      dockerfile: Dockerfile
+      TARGET: postgres-1
+    volumes:
+      - ../devenv/deterministic-dkg/signer-1.sql:/seed/signer.sql
     depends_on:
-      - stacks-node
-      - stacks-api
+      sbtc-signer-1:
+        condition: service_healthy
+
+  sbtc-signer-seed-2:
+    <<: *sbtc-signer-seed
+    environment:
+      TARGET: postgres-2
+    volumes:
+      - ../devenv/deterministic-dkg/signer-2.sql:/seed/signer.sql
+    depends_on:
+      sbtc-signer-2:
+        condition: service_healthy
+
+  sbtc-signer-seed-3:
+    <<: *sbtc-signer-seed
+    environment:
+      TARGET: postgres-3
+    volumes:
+      - ../devenv/deterministic-dkg/signer-3.sql:/seed/signer.sql
+    depends_on:
+      sbtc-signer-3:
+        condition: service_healthy
+
+  spox:
+    image: ghcr.io/stx-labs/spox:v1.0.0@sha256:5759f86020461d1d11a244440ad3badc8c4fceee7743a0aa25d8c2b5025215d5
+    environment:
+      SPOX_EMILY_ENDPOINT: "http://emily-server:3031"
+      SPOX_BITCOIN_RPC_ENDPOINT: "http://devnet:devnet@bitcoin:18443"
+      SPOX_NODE_WALLET__NAME: "spox-watch"
+      SPOX_NODE_WALLET__RESCAN_TIMESTAMP: "-604800" # last week
+      # pox-5 deposit values bcrt1p78dy0epr5znh99lthu5czrc8k8a3sk69czg79vnh6jfccqtkmp3ssd0s7n
+      SPOX_DEPOSIT__POX__SIGNERS_XONLY: "48157362b0654badffbb627ce91c7eb352181069db33832e18f035fb58764ecf" # assuming seeded DKG
+      SPOX_DEPOSIT__POX__RECIPIENT: "ST000000000000000000002AMW42H.pox-5"
+      SPOX_DEPOSIT__POX__MAX_FEE: "80000"
+      SPOX_DEPOSIT__POX__LOCK_TIME: "65535"
+      SPOX_DEPOSIT__POX__RECLAIM_SCRIPT: "6a" # OP_RETURN
+      # sbtc faucet bcrt1pr7gsq32vsczjdgrsnt4ucwjg72nd8rdwtaral23h6twynsjchk6qtfe8ad
+      SPOX_DEPOSIT__FAUCET__SIGNERS_XONLY: "48157362b0654badffbb627ce91c7eb352181069db33832e18f035fb58764ecf" # assuming seeded DKG
+      SPOX_DEPOSIT__FAUCET__RECIPIENT: "STB44HYPYAT2BB2QE513NSP81HTMYWBJP02HPGK6"
+      SPOX_DEPOSIT__FAUCET__MAX_FEE: "80000"
+      SPOX_DEPOSIT__FAUCET__LOCK_TIME: "65535"
+      SPOX_DEPOSIT__FAUCET__RECLAIM_SCRIPT: "6a" # OP_RETURN
+    restart: on-failure
+    depends_on:
       - emily-server
       - bitcoin
-    ports:
-      - "127.0.0.1:3000:3000"
-    profiles:
-      - default
-    environment:
-      BITCOIND_URL: http://bitcoin:18443
-      EMILY_URL: http://emily-server:3031
-      MEMPOOL_API_URL: http://mempool-web:8083/api
-      PUBLIC_MEMPOOL_URL: http://127.0.0.1:8083
-      BITCOIN_RPC_USER_NAME: devnet
-      BITCOIN_RPC_PASSWORD: devnet
-      WALLET_NETWORK: sbtcDevenv
-      RECLAIM_LOCK_TIME: 18
-      SBTC_CONTRACT_DEPLOYER: SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
-      BANNER_CONTENT: devenv!
-      STACKS_API_URL: http://stacks-api:3999
-      WITHDRAWAL_FEE_MULTIPLIER: 100
 
   # Bitcoin / Burnchain.
   # --------------------
