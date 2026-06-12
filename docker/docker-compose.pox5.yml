@@ -312,12 +312,18 @@ services:
       SPOX_BITCOIN_RPC_ENDPOINT: "http://devnet:devnet@bitcoin:18443"
       SPOX_NODE_WALLET__NAME: "spox-watch"
       SPOX_NODE_WALLET__RESCAN_TIMESTAMP: "-604800" # last week
-      # pox-5 deposit values
+      # pox-5 deposit values bcrt1p78dy0epr5znh99lthu5czrc8k8a3sk69czg79vnh6jfccqtkmp3ssd0s7n
       SPOX_DEPOSIT__POX__SIGNERS_XONLY: "48157362b0654badffbb627ce91c7eb352181069db33832e18f035fb58764ecf" # assuming seeded DKG
       SPOX_DEPOSIT__POX__RECIPIENT: "ST000000000000000000002AMW42H.pox-5"
       SPOX_DEPOSIT__POX__MAX_FEE: "80000"
       SPOX_DEPOSIT__POX__LOCK_TIME: "65535"
       SPOX_DEPOSIT__POX__RECLAIM_SCRIPT: "6a" # OP_RETURN
+      # sbtc faucet bcrt1pr7gsq32vsczjdgrsnt4ucwjg72nd8rdwtaral23h6twynsjchk6qtfe8ad
+      SPOX_DEPOSIT__FAUCET__SIGNERS_XONLY: "48157362b0654badffbb627ce91c7eb352181069db33832e18f035fb58764ecf" # assuming seeded DKG
+      SPOX_DEPOSIT__FAUCET__RECIPIENT: "STB44HYPYAT2BB2QE513NSP81HTMYWBJP02HPGK6"
+      SPOX_DEPOSIT__FAUCET__MAX_FEE: "80000"
+      SPOX_DEPOSIT__FAUCET__LOCK_TIME: "65535"
+      SPOX_DEPOSIT__FAUCET__RECLAIM_SCRIPT: "6a" # OP_RETURN
     restart: on-failure
     depends_on:
       - emily-server
