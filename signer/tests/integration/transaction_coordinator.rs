@@ -6141,6 +6141,7 @@ where
         &signer_keys,
         signatures_required,
         signer::config::NetworkKind::Regtest,
+        signer::config::NetworkKind::Regtest.chain_id(),
         0,
     )
     .unwrap();
