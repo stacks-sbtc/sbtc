@@ -2,8 +2,9 @@ use core::num::TryFromIntError;
 use rand_core::{CryptoRng, RngCore};
 use std::collections::{BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
+use crate::errors::AggregatorError;
 use crate::{
     common::{
         check_public_shares, validate_key_id, validate_signer_id, PolyCommitment, PublicNonce,
@@ -16,11 +17,10 @@ use crate::{
     errors::{DkgError, EncryptionError},
     net::{
         BadPrivateShare, DkgBegin, DkgEnd, DkgEndBegin, DkgFailure, DkgPrivateBegin,
-        DkgPrivateShares, DkgPublicShares, DkgStatus, Message, NonceRequest, NonceResponse, Packet,
-        Signable, SignatureShareRequest, SignatureShareResponse, SignatureType,
+        DkgPrivateShares, DkgPublicShares, DkgStatus, Message, NonceRequest, NonceResponse,
+        SignatureShareRequest, SignatureShareResponse, SignatureType,
     },
     state_machine::{PublicKeys, StateMachine},
-    traits::SignerState as SignerSavedState,
     util::{decrypt, encrypt, make_shared_secret},
     v2,
 };
@@ -89,63 +89,21 @@ pub enum Error {
     #[error("integer conversion error")]
     /// An error during integer conversion operations
     TryFromInt,
+    /// An aggregator error occurred
+    #[error("Aggregator error: {0}")]
+    Aggregator(#[from] AggregatorError),
+    /// This happens when either the signer's private polynomial is not
+    /// set, or the polynomial commitment could not be constructed for this
+    /// signer because the private polynomial was degenerate (it had no
+    /// coefficients).
+    #[error("no polynomial commitment could be constructed for this signer")]
+    NoPolynomialCommitment,
 }
 
 impl From<TryFromIntError> for Error {
     fn from(_e: TryFromIntError) -> Self {
         Self::TryFromInt
     }
-}
-
-/// The saved state required to reconstruct a signer
-#[derive(Clone, Debug)]
-pub struct SavedState {
-    /// current DKG round ID
-    pub dkg_id: u64,
-    /// current signing round ID
-    pub sign_id: u64,
-    /// current signing iteration ID
-    pub sign_iter_id: u64,
-    /// the threshold of the keys needed for a valid signature
-    pub threshold: u32,
-    /// the threshold of the keys needed for a valid DKG
-    pub dkg_threshold: u32,
-    /// the total number of signers
-    pub total_signers: u32,
-    /// the total number of keys
-    pub total_keys: u32,
-    /// the Signer object
-    pub signer: SignerSavedState,
-    /// the Signer ID
-    pub signer_id: u32,
-    /// the current state
-    pub state: State,
-    /// map of polynomial commitments for each party
-    /// party_id => PolyCommitment
-    pub commitments: HashMap<u32, PolyCommitment>,
-    /// map of decrypted DKG private shares
-    /// src_party_id => (dst_key_id => private_share)
-    pub decrypted_shares: HashMap<u32, HashMap<u32, Scalar>>,
-    /// shared secrets used to decrypt private shares
-    /// src_party_id => (signer_id, dh shared key)
-    pub decryption_keys: HashMap<u32, (u32, Point)>,
-    /// invalid private shares
-    /// signer_id => {shared_key, tuple_proof}
-    pub invalid_private_shares: HashMap<u32, BadPrivateShare>,
-    /// public nonces for this signing round
-    pub public_nonces: Vec<PublicNonce>,
-    /// the private key used to sign messages sent over the network
-    pub network_private_key: Scalar,
-    /// the public keys for all signers and coordinator
-    pub public_keys: PublicKeys,
-    /// the DKG public shares received in this round
-    pub dkg_public_shares: BTreeMap<u32, DkgPublicShares>,
-    /// the DKG private shares received in this round
-    pub dkg_private_shares: BTreeMap<u32, DkgPrivateShares>,
-    /// the DKG private begin message received in this round
-    pub dkg_private_begin_msg: Option<DkgPrivateBegin>,
-    /// the DKG end begin message received in this round
-    pub dkg_end_begin_msg: Option<DkgEndBegin>,
 }
 
 /// A state machine for a signing round
@@ -274,60 +232,6 @@ impl Signer {
         })
     }
 
-    /// Load a coordinator from the previously saved `state`
-    pub fn load(state: &SavedState) -> Self {
-        Self {
-            dkg_id: state.dkg_id,
-            sign_id: state.sign_id,
-            sign_iter_id: state.sign_iter_id,
-            threshold: state.threshold,
-            dkg_threshold: state.dkg_threshold,
-            total_signers: state.total_signers,
-            total_keys: state.total_keys,
-            signer: v2::Party::load(&state.signer),
-            signer_id: state.signer_id,
-            state: state.state.clone(),
-            commitments: state.commitments.clone(),
-            decrypted_shares: state.decrypted_shares.clone(),
-            decryption_keys: state.decryption_keys.clone(),
-            invalid_private_shares: state.invalid_private_shares.clone(),
-            public_nonces: state.public_nonces.clone(),
-            network_private_key: state.network_private_key,
-            public_keys: state.public_keys.clone(),
-            dkg_public_shares: state.dkg_public_shares.clone(),
-            dkg_private_shares: state.dkg_private_shares.clone(),
-            dkg_private_begin_msg: state.dkg_private_begin_msg.clone(),
-            dkg_end_begin_msg: state.dkg_end_begin_msg.clone(),
-        }
-    }
-
-    /// Save the state required to reconstruct the coordinator
-    pub fn save(&self) -> SavedState {
-        SavedState {
-            dkg_id: self.dkg_id,
-            sign_id: self.sign_id,
-            sign_iter_id: self.sign_iter_id,
-            threshold: self.threshold,
-            dkg_threshold: self.dkg_threshold,
-            total_signers: self.total_signers,
-            total_keys: self.total_keys,
-            signer: self.signer.save(),
-            signer_id: self.signer_id,
-            state: self.state.clone(),
-            commitments: self.commitments.clone(),
-            decrypted_shares: self.decrypted_shares.clone(),
-            decryption_keys: self.decryption_keys.clone(),
-            invalid_private_shares: self.invalid_private_shares.clone(),
-            public_nonces: self.public_nonces.clone(),
-            network_private_key: self.network_private_key,
-            public_keys: self.public_keys.clone(),
-            dkg_public_shares: self.dkg_public_shares.clone(),
-            dkg_private_shares: self.dkg_private_shares.clone(),
-            dkg_private_begin_msg: self.dkg_private_begin_msg.clone(),
-            dkg_end_begin_msg: self.dkg_end_begin_msg.clone(),
-        }
-    }
-
     /// Reset internal state
     pub fn reset<T: RngCore + CryptoRng>(&mut self, dkg_id: u64, rng: &mut T) {
         self.dkg_id = dkg_id;
@@ -344,24 +248,15 @@ impl Signer {
         self.state = State::Idle;
     }
 
-    /// Process the slice of packets
+    /// Process the slice of messages
     pub fn process_inbound_messages<R: RngCore + CryptoRng>(
         &mut self,
-        messages: &[Packet],
+        messages: &[Message],
         rng: &mut R,
-    ) -> Result<Vec<Packet>, Error> {
-        let mut responses = vec![];
+    ) -> Result<Vec<Message>, Error> {
+        let mut responses = Vec::new();
         for message in messages {
-            let outbounds = self.process(&message.msg, rng)?;
-            for out in outbounds {
-                let msg = Packet {
-                    sig: out
-                        .sign(&self.network_private_key)
-                        .expect("Failed to sign message"),
-                    msg: out,
-                };
-                responses.push(msg);
-            }
+            responses.append(&mut self.process(message, rng)?);
         }
         Ok(responses)
     }
@@ -383,7 +278,7 @@ impl Signer {
                 self.dkg_private_shares(dkg_private_shares, rng)
             }
             Message::SignatureShareRequest(sign_share_request) => {
-                self.sign_share_request(sign_share_request, rng)
+                self.sign_share_request(sign_share_request)
             }
             Message::NonceRequest(nonce_request) => self.nonce_request(nonce_request, rng),
             _ => Ok(vec![]), // TODO
@@ -661,10 +556,9 @@ impl Signer {
         Ok(msgs)
     }
 
-    fn sign_share_request<R: RngCore + CryptoRng>(
+    fn sign_share_request(
         &mut self,
         sign_request: &SignatureShareRequest,
-        rng: &mut R,
     ) -> Result<Vec<Message>, Error> {
         let signer_id_set = sign_request
             .nonce_responses
@@ -715,19 +609,17 @@ impl Signer {
             let signature_shares = match sign_request.signature_type {
                 SignatureType::Taproot(merkle_root) => {
                     self.signer
-                        .sign_taproot(msg, &signer_ids, &key_ids, &nonces, merkle_root)
+                        .sign_taproot(msg, &signer_ids, &key_ids, &nonces, merkle_root)?
                 }
                 SignatureType::Schnorr => {
                     self.signer
-                        .sign_schnorr(msg, &signer_ids, &key_ids, &nonces)
+                        .sign_schnorr(msg, &signer_ids, &key_ids, &nonces)?
                 }
                 SignatureType::Frost => {
                     self.signer
-                        .sign_with_tweak(msg, &signer_ids, &key_ids, &nonces, None)
+                        .sign_with_tweak(msg, &signer_ids, &key_ids, &nonces, None)?
                 }
             };
-
-            self.signer.gen_nonce(rng);
 
             let response = SignatureShareResponse {
                 dkg_id: sign_request.dkg_id,
@@ -759,8 +651,6 @@ impl Signer {
         self.reset(dkg_begin.dkg_id, rng);
         self.move_to(State::DkgPublicDistribute)?;
 
-        //let _party_state = self.signer.save();
-
         self.dkg_public_begin(rng)
     }
 
@@ -783,7 +673,28 @@ impl Signer {
         };
 
         if let Some(poly) = self.signer.get_poly_commitment(rng) {
-            public_share.comms.push((poly.id.id.get_u32(), poly));
+            public_share.comms.push((poly.id().id.get_u32(), poly));
+        } else {
+            // There are two cases where this can happen:
+            // 1. The signer's private polynomial is not set. This should
+            //    never be the case, since v2::Party sets the private
+            //    polynomial when it is created and the private polynomial
+            //    is never cleared in production code.
+            // 2. The signers private polynomial is degenerate, leading to
+            //    a failure to construct a PolyCommitment. While a
+            //    degenerate private polynomial is allowed in the
+            //    `polynomial::Polynomial` type, we do not construct such
+            //    polynomials here.
+            //
+            // So with current code, this should never happen. A TODO is to
+            // change the code to make it a compile time guarantee.
+
+            error!(
+                signer_id = %self.signer_id,
+                dkg_id = %self.dkg_id,
+                "no polynomial commitment for this signer, programmer error!",
+            );
+            return Err(Error::NoPolynomialCommitment);
         }
 
         let public_share = Message::DkgPublicShares(public_share);
@@ -1036,7 +947,7 @@ impl StateMachine<State, Error> for Signer {
 pub mod test {
     use crate::{
         common::PolyCommitment,
-        curve::{ecdsa, scalar::Scalar},
+        curve::{ecdsa, point::Point, scalar::Scalar},
         net::{DkgBegin, DkgEndBegin, DkgPrivateBegin, DkgPublicShares, DkgStatus, Message},
         schnorr::ID,
         state_machine::{
@@ -1208,7 +1119,7 @@ pub mod test {
         let mut signer =
             Signer::new(1, 1, 1, 1, 0, vec![1], private_key, public_keys, &mut rng).unwrap();
         let comms = if let Some(comm) = signer.signer.get_poly_commitment(&mut rng) {
-            vec![(comm.id.id.get_u32(), comm.clone())]
+            vec![(comm.id().id.get_u32(), comm.clone())]
         } else {
             vec![]
         };
@@ -1243,10 +1154,11 @@ pub mod test {
         signer.state = SignerState::DkgPublicGather;
         signer.commitments.insert(
             1,
-            PolyCommitment {
-                id: ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
-                poly: vec![],
-            },
+            PolyCommitment::new(
+                ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
+                vec![Point::new()],
+            )
+            .expect("test commitment has one point"),
         );
 
         // public_shares_done should be true

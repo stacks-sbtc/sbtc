@@ -11,7 +11,7 @@ use aws_sdk_dynamodb::{
         Projection, ProjectionType, ScalarAttributeType,
     },
 };
-use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
+use aws_smithy_http_client::Builder;
 use bitcoin::hex::DisplayHex as _;
 use futures::future::join_all;
 use rand::{RngCore as _, rngs::OsRng};
@@ -233,8 +233,7 @@ fn get_test_client() -> Client {
     );
 
     // We don't need https in tests (and we avoid wasting time in loading certs)
-    let tcp_connector = hyper_014::client::HttpConnector::new();
-    let http_client = HyperClientBuilder::new().build(tcp_connector);
+    let http_client = Builder::new().build_http();
 
     let config = Config::builder()
         .behavior_version(BehaviorVersion::latest())

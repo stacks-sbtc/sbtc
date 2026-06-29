@@ -21,7 +21,7 @@ install-py:
 	uv --directory emily_sidecar venv && uv --directory emily_sidecar pip sync pyproject.toml
 
 install-pnpm:
-	pnpm --recursive install
+	pnpm install --frozen-lockfile
 
 install: install-py install-pnpm
 
@@ -153,19 +153,22 @@ devenv-no-sbtc-down:
 devenv-up:
 	docker compose -f docker/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer up -d
 
+devenv-up-no-dkg:
+	docker compose -f docker/docker-compose.yml -f devenv/deterministic-dkg/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer up -d
+
 devenv-down:
 	docker compose -f docker/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer down -t 0 -v
 
 devenv-sbtc-up:
-	docker compose -f docker/docker-compose.yml --profile sbtc-signer up --build -d
+	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin up --build -d
 
 devenv-sbtc-down:
-	docker compose -f docker/docker-compose.yml --profile sbtc-signer down
+	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin down
 
 devenv-sbtc-build:
-	docker compose -f docker/docker-compose.yml --profile sbtc-signer build
+	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin build
 
-.PHONY: devenv-no-sbtc-up devenv-no-sbtc-down devenv-up devenv-down devenv-sbtc-up devenv-sbtc-down devenv-sbtc-build
+.PHONY: devenv-no-sbtc-up devenv-no-sbtc-down devenv-up devenv-up-no-dkg devenv-down devenv-sbtc-up devenv-sbtc-down devenv-sbtc-build
 
 # ##############################################################################
 # EMILY

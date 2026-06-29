@@ -28,7 +28,6 @@ use secp256k1::ecdsa::RecoverableSignature;
 use stacks_common::address::AddressHashMode;
 use stacks_common::address::C32_ADDRESS_VERSION_TESTNET_MULTISIG;
 use stacks_common::types::chainstate::StacksAddress;
-use wsts::common::Nonce;
 use wsts::common::PolyCommitment;
 use wsts::common::PublicNonce;
 use wsts::common::SignatureShare;
@@ -50,6 +49,7 @@ use wsts::net::SignatureType;
 use wsts::traits::PartyState;
 use wsts::traits::SignerState;
 
+use crate::MAX_BITCOIN_BLOCK_VSIZE;
 use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::BitcoinTxVin;
@@ -345,7 +345,6 @@ pub fn encrypted_dkg_shares<R: rand::RngCore + rand::CryptoRng>(
     let party_state = wsts::traits::PartyState {
         polynomial: None,
         private_keys: vec![],
-        nonce: wsts::common::Nonce::random(rng),
     };
 
     let signer_state = wsts::traits::SignerState {
@@ -355,7 +354,7 @@ pub fn encrypted_dkg_shares<R: rand::RngCore + rand::CryptoRng>(
         num_parties: 1,
         threshold: 1,
         group_key: group_key.into(),
-        parties: vec![(0, party_state)],
+        party_state,
     };
 
     let encoded = signer_state.encode_to_vec();
@@ -754,11 +753,10 @@ impl fake::Dummy<fake::Faker> for TxRequestIds {
 }
 
 impl fake::Dummy<fake::Faker> for Fees {
-    fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
-        Fees {
-            total: config.fake_with_rng(rng),
-            rate: config.fake_with_rng(rng),
-        }
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
+        let total: u64 = (0..=Amount::MAX_MONEY.to_sat()).fake_with_rng(rng);
+        let vsize: u64 = (1..MAX_BITCOIN_BLOCK_VSIZE).fake_with_rng(rng);
+        Fees::new_unchecked(total, vsize)
     }
 }
 
@@ -767,7 +765,7 @@ impl fake::Dummy<fake::Faker> for BitcoinPreSignRequest {
         BitcoinPreSignRequest {
             request_package: fake::vec![TxRequestIds; 0..20],
             fee_rate: config.fake_with_rng(rng),
-            last_fees: config.fake_with_rng(rng),
+            last_fees: Some(config.fake_with_rng::<Fees, _>(rng).into()),
         }
     }
 }
@@ -1079,15 +1077,6 @@ impl Dummy<Unit> for SignatureShareResponse {
     }
 }
 
-impl Dummy<Unit> for Nonce {
-    fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
-        Nonce {
-            d: config.fake_with_rng(rng),
-            e: config.fake_with_rng(rng),
-        }
-    }
-}
-
 impl Dummy<Unit> for (u32, PartyState) {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
         (
@@ -1098,9 +1087,20 @@ impl Dummy<Unit> for (u32, PartyState) {
                     .into_iter()
                     .map(|_| config.fake_with_rng(rng))
                     .collect(),
-                nonce: config.fake_with_rng(rng),
             },
         )
+    }
+}
+
+impl Dummy<Unit> for PartyState {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
+        PartyState {
+            polynomial: config.fake_with_rng(rng),
+            private_keys: fake::vec![(); 0..20]
+                .into_iter()
+                .map(|_| config.fake_with_rng(rng))
+                .collect(),
+        }
     }
 }
 
@@ -1113,10 +1113,7 @@ impl Dummy<Unit> for SignerState {
             num_parties: Faker.fake_with_rng(rng),
             threshold: Faker.fake_with_rng(rng),
             group_key: config.fake_with_rng(rng),
-            parties: fake::vec![(); 0..20]
-                .into_iter()
-                .map(|_| config.fake_with_rng(rng))
-                .collect(),
+            party_state: config.fake_with_rng(rng),
         }
     }
 }
@@ -1133,13 +1130,14 @@ impl Dummy<Unit> for wsts::schnorr::ID {
 
 impl Dummy<Unit> for PolyCommitment {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Unit, rng: &mut R) -> Self {
-        PolyCommitment {
-            id: config.fake_with_rng(rng),
-            poly: fake::vec![(); 0..20]
-                .into_iter()
-                .map(|_| config.fake_with_rng(rng))
-                .collect(),
-        }
+        let id = config.fake_with_rng(rng);
+        let poly = fake::vec![(); 1..20]
+            .into_iter()
+            .map(|_| config.fake_with_rng(rng))
+            .collect();
+        // SAFETY: We know the poly is non-empty because we generated at
+        // least one point, so this will never fail
+        PolyCommitment::new(id, poly).unwrap()
     }
 }
 

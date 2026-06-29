@@ -5,6 +5,6 @@
     "build": "pnpm build-openapi"
   },
   "devDependencies": {
-    "@openapitools/openapi-generator-cli": "^2.13.2"
+    "@openapitools/openapi-generator-cli": "^2.31.0"
   }
 }

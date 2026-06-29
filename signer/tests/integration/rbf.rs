@@ -278,10 +278,7 @@ mod serial {
                 _ => panic!("Unexpected response when sending bad replacement transaction"),
             }
 
-            Fees {
-                total: last_fee,
-                rate: last_fee as f64 / last_size as f64,
-            }
+            Fees::new_unchecked(last_fee, last_size as u64)
         };
 
         // Step 3. Construct an RBF transaction

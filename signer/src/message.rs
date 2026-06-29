@@ -2,7 +2,6 @@
 
 use secp256k1::ecdsa::RecoverableSignature;
 
-use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::validation::TxRequestIds;
 use crate::keys::PublicKey;
 use crate::stacks::contracts::ContractCall;
@@ -230,7 +229,9 @@ pub struct BitcoinPreSignRequest {
     pub fee_rate: f64,
     /// The total fee amount and the fee rate for the last transaction that
     /// used this UTXO as an input.
-    pub last_fees: Option<Fees>,
+    ///
+    /// This field is deprecated and will be removed in a future release.
+    pub last_fees: Option<crate::proto::Fees>,
 }
 
 impl std::fmt::Display for BitcoinPreSignRequest {

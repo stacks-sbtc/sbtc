@@ -24,7 +24,6 @@ use emily_client::models::UpdateWithdrawalsRequestBody;
 use emily_client::models::UpdateWithdrawalsResponse;
 use emily_client::models::WithdrawalUpdate;
 use emily_client::models::{DepositStatus, WithdrawalStatus};
-use reqwest_012;
 use sbtc::deposits::CreateDepositRequest;
 use url::Url;
 
@@ -176,7 +175,7 @@ impl EmilyClient {
         config.base_path = url.to_string().trim_end_matches("/").to_string();
         config.api_key = api_key;
 
-        let client = reqwest_012::Client::builder()
+        let client = reqwest::Client::builder()
             .timeout(timeout)
             .build()
             .map_err(Error::EmilyReqwestClientCreation)?;

@@ -25,9 +25,9 @@ endpoint = "http://blocklist-client:3032"
 # Required: true
 # Environment: SIGNER_EMILY__ENDPOINTS
 # Environment Example: '"https://1234567890abcdef@api.emilyexample.com",..'
-endpoints = [
-    "https://$EMILY_API_KEY@sbtc-emily.com"
-]
+# endpoints = [
+#     "https://$EMILY_API_KEY@sbtc-emily.com"
+# ]
 
 # !! ==============================================================================
 # !! Bitcoin Core Configuration
@@ -43,9 +43,9 @@ endpoints = [
 # Required: true
 # Environment: SIGNER_BITCOIN__RPC_ENDPOINTS
 # Environment Example: http://user:pass@seed-1:4122,http://foo:bar@seed-2:4122
-rpc_endpoints = [
-    "http://$BITCOIN_RPC_USERNAME:$BITCOIN_RPC_PASSWORD@$BITCOIN_RPC_HOST:$BITCOIN_RPC_PORT",
-]
+# rpc_endpoints = [
+#     "http://$BITCOIN_RPC_USERNAME:$BITCOIN_RPC_PASSWORD@$BITCOIN_RPC_HOST:$BITCOIN_RPC_PORT",
+# ]
 
 # !! ==============================================================================
 # !! Stacks Node Configuration
@@ -55,9 +55,9 @@ rpc_endpoints = [
 # provided. If multiple nodes are provided they will be tried in order when
 # making requests.
 # Environment: SIGNER_STACKS__ENDPOINTS
-endpoints = [
-    "http://$STACKS_RPC_HOST:$STACKS_RPC_PORT",
-]
+# endpoints = [
+#     "http://$STACKS_RPC_HOST:$STACKS_RPC_PORT",
+# ]
 
 # !! ==============================================================================
 # !! Signer Configuration
@@ -67,7 +67,7 @@ endpoints = [
 #
 # Required: true
 # Environment: SIGNER_SIGNER__DB_ENDPOINT
-db_endpoint = "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
+# db_endpoint = "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 
 # The private key associated with the signer. This is used to generate the
 # signers associated public key and sign messages to other signers.
@@ -80,8 +80,7 @@ db_endpoint = "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$PO
 # Format: "<hex-encoded-private-key>" (64 or 66 hex-characters)
 # Required: true
 # Environment: SIGNER_SIGNER__PRIVATE_KEY
-# NOTE: Set through Environment: SIGNER_SIGNER__PRIVATE_KEY
-private_key = "0000000000000000000000000000000000000000000000000000000000000001"
+# private_key = "0000000000000000000000000000000000000000000000000000000000000001"
 
 # Specifies which network to use when constructing and sending transactions
 # on stacks and bitcoin. This corresponds to the `chain` flag in the
@@ -105,7 +104,7 @@ bootstrap_signing_set = [
     "024020d254667b90161127d4197d9cecfb1e7b5a5237c34cf45391d60254d293d7",
     "0368d6742af52b9f7069570da3bdba120f7e760ea31c4bc0e5b96bba7a70f4d317",
     "03830690830ab2790433231521edbad02715ce7d8b6a8aa43f83cad3e2407b96c4",
-    "031f53224e6250d31fd0d6a9b926402ca308e824e750daf5d5a75d5bf59d50d7b0",
+    "03b767388de2f11326cd2c44ac2032f5bf8fcf8572b46cfff0057c5e1c5c0bd7d6",
     "02c14b0daa6ddb9b74869fd947372a3622d2f88a871523dcd14c5c7c7f0c6c9cc0",
     "03b5b8b594438c7101bbc5fb25d1b76c4643c713481031f7d06bde1f1668c8112d",
     "03ed8edbcbb26010ae3a992ea1e4fffab3805e1303edbd3c130307b4cbcd38a481",

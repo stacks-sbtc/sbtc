@@ -5,9 +5,9 @@ use std::str::FromStr as _;
 use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::consensus::encode;
 use bitcoin::{OutPoint, ScriptBuf, Txid};
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use warp::http::StatusCode;
 
 use sbtc::deposits::{CreateDepositRequest, DepositInfo};
 

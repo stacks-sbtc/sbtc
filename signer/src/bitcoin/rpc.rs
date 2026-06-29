@@ -19,11 +19,14 @@ use bitcoincore_rpc_json::GetBlockchainInfoResult;
 use bitcoincore_rpc_json::GetMempoolEntryResult;
 use bitcoincore_rpc_json::GetNetworkInfoResult;
 use bitcoincore_rpc_json::GetTxOutResult;
+use futures::future::try_join_all;
 use jsonrpc::simple_http;
 use serde::Deserialize;
 use url::Url;
 
 use crate::bitcoin::BitcoinInteract;
+use crate::bitcoin::utxo::Fees;
+use crate::bitcoin::utxo::SignerUtxo;
 use crate::error::Error;
 use crate::storage::model::BitcoinBlockHeight;
 
@@ -56,6 +59,20 @@ pub struct GetTxResponse {
     pub block_time: Option<u64>,
 }
 
+/// A type containing basic information about an unspent output
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "testing", derive(PartialEq))]
+pub struct OutPointSummary {
+    /// The block hash of the Bitcoin block that confirms a transaction
+    /// that created the associated output.
+    pub block_hash: BlockHash,
+    /// Whether the transaction is a coinbase transaction.
+    ///
+    /// This is true for coinbase transactions, and false for other
+    /// transactions.
+    pub is_coinbase: bool,
+}
+
 /// A struct containing the response from bitcoin-core for requests for
 /// detailed transactions. Specifically, this object can be used for:
 /// 1. The response object for `getrawtransaction` RPC where verbose is set
@@ -69,7 +86,7 @@ pub struct GetTxResponse {
 ///   type, which is what the bitcoincore-rpc crate returns for the
 ///   `getrawtransaction` RPC with verbosity set to 1. That type is missing
 ///   some information that we want.
-/// * All optional fields are omited from bitcoin-core for coinbase
+/// * All optional fields are omitted from bitcoin-core for coinbase
 ///   transactions and whenever the "block undo data" is missing for a
 ///   block. The block undo data is always present for validated blocks,
 ///   and block validation is always done for blocks on the currently
@@ -413,8 +430,8 @@ impl BitcoinCoreClient {
     }
 
     /// Fetch and decode raw transaction from bitcoin-core using the
-    /// getrawtransaction RPC with a verbosity of 1. None is returned if
-    /// the node cannot find the transaction in a bitcoin block or the
+    /// getrawtransaction RPC with a verbosity of 1 [1]. None is returned
+    /// if the node cannot find the transaction in a bitcoin block or the
     /// mempool.
     ///
     /// # Notes
@@ -422,11 +439,13 @@ impl BitcoinCoreClient {
     /// By default, this call only returns a transaction if it is in the
     /// mempool. If -txindex is enabled on bitcoin-core and no blockhash
     /// argument is passed, it will return the transaction if it is in the
-    /// mempool or any block. We require -txindex to be enabled (same with
-    /// stacks-core[^1]) so this should work with transactions in either
-    /// the mempool and a bitcoin block.
+    /// mempool or any block. We do not require -txindex to be enabled
+    /// (same with stacks-core[2]), so we only claim that this function
+    /// works with transactions in the mempool.
     ///
-    /// [^1]: <https://docs.stacks.co/guides-and-tutorials/run-a-miner/mine-mainnet-stacks-tokens>
+    /// [1]: <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
+    /// [2]: <https://docs.stacks.co/operate/run-a-node/run-a-pruned-bitcoin-node>
+    #[cfg(any(test, feature = "testing"))]
     pub fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         let args = [
             serde_json::to_value(txid).map_err(Error::JsonSerialize)?,
@@ -441,6 +460,63 @@ impl BitcoinCoreClient {
             Ok(tx_info) => Ok(Some(tx_info)),
             Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -5, .. }))) => Ok(None),
             Err(err) => Err(Error::BitcoinCoreGetTransaction(err, *txid)),
+        }
+    }
+
+    /// Fetch the summary of a UTXO identified by the given outpoint.
+    ///
+    /// This function ends up making three calls to bitcoin-core:
+    /// 1. We use the `gettxout` RPC to get confirmation height relative to
+    ///    the chain tip.
+    /// 2. We use the `getblockheader` RPC to get the block height of the
+    ///    chain tip returned in (1).
+    /// 3. We use the `getblockhash` RPC to get the block hash of the block
+    ///    confirming the transaction that created the UTXO.
+    ///
+    /// # Notes
+    ///
+    /// This function can return an incorrect response if our bitcoin node
+    /// detects a reorg in the middle of this function call and the reorg
+    /// affects the outpoint in question.
+    ///
+    /// This function returns Ok(None) if:
+    /// * the associated output has been spent.
+    /// * the associated output is not confirmed in a block on the
+    ///   canonical bitcoin blockchain.
+    ///
+    /// The documentation of the `getblockhash` RPC can be found at:
+    /// <https://bitcoincore.org/en/doc/25.0.0/rpc/blockchain/getblockhash/>
+    pub fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        // This returns Some(_) if the transaction is confirmed in a canonical
+        // block and unspent.
+        let Some(out) = self.get_tx_out(outpoint, false)? else {
+            return Ok(None);
+        };
+
+        // This should always succeed, since we are just asking for the
+        // chain tip header.
+        let Some(chain_tip) = self.get_block_header(&out.bestblock)? else {
+            return Err(Error::BitcoinCoreUnknownChainTip(out.bestblock, *outpoint));
+        };
+
+        // Now that we know the height of the chain tip and how many
+        // confirmations the transaction has, we can get the height of the
+        // block confirming the transaction with simple arithmetic. Note
+        // that we need to add 1; the confirmations value is one more than
+        // the "offset" value that we want. For example, a transaction that
+        // is confirmed at the chain tip has 1 confirmation, but the offset
+        // from the chain tip is 0.
+        let confirmation_height = chain_tip
+            .height
+            .saturating_sub(out.confirmations as u64)
+            .saturating_add(1u64);
+
+        match self.inner.get_block_hash(*confirmation_height) {
+            Ok(block_hash) => Ok(Some(OutPointSummary {
+                block_hash,
+                is_coinbase: out.coinbase,
+            })),
+            Err(err) => Err(Error::BitcoinCoreGetBlockHash(err, *confirmation_height)),
         }
     }
 
@@ -459,7 +535,7 @@ impl BitcoinCoreClient {
     ///
     /// - This method requires bitcoin-core v25 or later.
     /// - The implementation is based on the documentation at
-    ///   https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/
+    ///   <https://bitcoincore.org/en/doc/25.0.0/rpc/rawtransactions/getrawtransaction/>
     pub fn get_tx_info(
         &self,
         txid: &Txid,
@@ -578,17 +654,17 @@ impl BitcoinCoreClient {
     /// Modified from the bitcoin-core docs[1]:
     ///
     /// Bitcoin-core has two different modes for fee rate estimation,
-    /// "conservative" and "economical". We use the "conservative" estimate
-    /// because it is more likely to be sufficient for the desired target,
-    /// but is not as responsive to short term drops in the prevailing fee
-    /// market when compared to the "economical" fee rate. Also, the docs
-    /// mention the response is in BTC/kB, but from the comments in
-    /// bitcoin-core[2] this is really BTC/kvB (kvB is kilo-vbyte).
+    /// "conservative" and "economical". We use "economical" since we are fine
+    /// with a higher risk of confirmation delay in favor of generally lower
+    /// fees.
+    ///
+    /// Also, the docs mention the response is in BTC/kB, but from the comments
+    /// in bitcoin-core[2] this is really BTC/kvB (kvB is kilo-vbyte).
     ///
     /// [^1]: https://developer.bitcoin.org/reference/rpc/estimatesmartfee.html
     /// [^2]: https://github.com/bitcoin/bitcoin/blob/d367a4e36f7357c4ebd018e8e1c9c5071db2e1c2/src/rpc/fees.cpp#L90-L91
     pub fn estimate_fee_rate(&self, num_blocks: u16) -> Result<FeeEstimate, Error> {
-        let estimate_mode = Some(EstimateMode::Conservative);
+        let estimate_mode = Some(EstimateMode::Economical);
         let resp = self
             .inner
             .estimate_smart_fee(num_blocks, estimate_mode)
@@ -642,6 +718,10 @@ impl BitcoinCoreClient {
 }
 
 impl BitcoinInteract for BitcoinCoreClient {
+    async fn get_utxo_info(&self, outpoint: &OutPoint) -> Result<Option<OutPointSummary>, Error> {
+        self.get_utxo_info(outpoint)
+    }
+
     async fn broadcast_transaction(&self, tx: &Transaction) -> Result<(), Error> {
         self.inner
             .send_raw_transaction(tx)
@@ -660,6 +740,7 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_block_header(block_hash)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_tx(&self, txid: &Txid) -> Result<Option<GetTxResponse>, Error> {
         self.get_tx(txid)
     }
@@ -672,11 +753,8 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_tx_info(txid, block_hash)
     }
 
-    async fn estimate_fee_rate(&self) -> Result<f64, Error> {
-        // TODO(542): This function is supposed to incorporate other fee
-        // estimation methods, in particular the ones in the
-        // src/bitcoin/fees.rs module.
-        self.estimate_fee_rate(1)
+    async fn estimate_fee_rate(&self, num_blocks: u16) -> Result<f64, Error> {
+        self.estimate_fee_rate(num_blocks)
             .map(|estimate| estimate.sats_per_vbyte)
     }
 
@@ -736,6 +814,101 @@ impl BitcoinInteract for BitcoinCoreClient {
     async fn get_best_block_hash(&self) -> Result<BlockHash, Error> {
         self.get_best_block_hash()
     }
+}
+
+/// Assesses the total fees paid for any outstanding sweep transactions in
+/// the mempool which may need to be RBF'd. If there are no sweep
+/// transactions which are spending the signer's UTXO, then this function
+/// will return [`None`].
+#[tracing::instrument(skip_all, fields(signer_utxo = %signer_utxo.outpoint))]
+pub async fn assess_mempool_sweep_transaction_fees<B>(
+    bitcoin_client: &B,
+    signer_utxo: &SignerUtxo,
+) -> Result<Option<Fees>, Error>
+where
+    B: BitcoinInteract + Clone,
+{
+    // Find the mempool transactions that are spending the provided UTXO.
+    let mempool_txs_spending_utxo = bitcoin_client
+        .find_mempool_transactions_spending_output(&signer_utxo.outpoint)
+        .await?;
+
+    // If no transactions are found, we have nothing to do.
+    if mempool_txs_spending_utxo.is_empty() {
+        tracing::debug!(
+            outpoint = %signer_utxo.outpoint,
+            "no mempool transactions found spending signer output; nothing to do"
+        );
+        return Ok(None);
+    }
+
+    tracing::debug!(
+        outpoint = %signer_utxo.outpoint,
+        "found mempool transactions spending signer output; assessing fees"
+    );
+
+    // If we have some transactions, we need to find the one that pays the
+    // highest fee. This is the transaction that we will use as the root of
+    // the sweep package. Note that even if only one transaction was
+    // returned above, we still need to get the fee for it, which is why
+    // there's no special logic for one vs multiple.
+    //
+    // This can technically error if the mempool transactions are not found,
+    // but it shouldn't happen since we got the transaction ids from
+    // bitcoin-core itself.
+    let best_sweep_root = try_join_all(mempool_txs_spending_utxo.iter().map(|txid| {
+        let bitcoin_client = bitcoin_client.clone();
+        async move {
+            bitcoin_client
+                .get_transaction_fee(txid)
+                .await
+                .map(|fee| (txid, fee))
+        }
+    }))
+    .await?
+    .into_iter()
+    .max_by_key(|(_, fees)| fees.fee);
+
+    // Since we got the transaction ids from bitcoin-core, these should
+    // not be missing, but we double-check here just in case (it could
+    // happen that the client has failed-over to the next node which isn't
+    // in sync with the previous one, for example).
+    let Some((best_sweep_root_txid, fees)) = best_sweep_root else {
+        tracing::warn!(
+            outpoint = %signer_utxo.outpoint,
+            "no fees found for mempool transactions spending signer output"
+        );
+        return Ok(None);
+    };
+
+    // Retrieve all descendant transactions of the best sweep root.
+    let descendant_txids = bitcoin_client
+        .find_mempool_descendants(best_sweep_root_txid)
+        .await?;
+
+    // Retrieve fees for all descendant transactions. If there were no
+    // descendants then this will just result in an empty list.
+    let descendant_fees = try_join_all(descendant_txids.iter().map(|txid| {
+        let bitcoin_client = bitcoin_client.clone();
+        async move { bitcoin_client.get_transaction_fee(txid).await }
+    }))
+    .await?;
+
+    // Sum the fees of the best sweep root and its descendants, while also
+    // summing the vsize of the transactions for fee-rate calculation later.
+    // If there were no descendants then this will just be the fee and size
+    // from the best root sweep transaction.
+    let (total_fees, total_vsize) =
+        descendant_fees
+            .into_iter()
+            .fold((fees.fee, fees.vsize), |acc, fees| {
+                (
+                    acc.0.saturating_add(fees.fee),
+                    acc.1.saturating_add(fees.vsize),
+                )
+            });
+
+    Fees::new(total_fees, total_vsize).map(Some)
 }
 
 #[cfg(test)]

@@ -1,10 +1,7 @@
 use core::{cmp::PartialEq, fmt::Debug};
 use polynomial::Polynomial;
 
-use crate::{
-    common::Nonce,
-    curve::{point::Point, scalar::Scalar},
-};
+use crate::curve::{point::Point, scalar::Scalar};
 
 #[derive(Clone, Debug, PartialEq)]
 /// The saved state required to reconstruct a party
@@ -13,12 +10,10 @@ pub struct PartyState {
     pub polynomial: Option<Polynomial<Scalar>>,
     /// The key IDS and associate private keys for this party
     pub private_keys: Vec<(u32, Scalar)>,
-    /// The nonce being used by this party
-    pub nonce: Nonce,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-/// The saved state required to reconstruct a signer
+/// The saved state required to reconstruct a v2::Party
 pub struct SignerState {
     /// The signer ID
     pub id: u32,
@@ -32,8 +27,8 @@ pub struct SignerState {
     pub threshold: u32,
     /// The aggregate group public key
     pub group_key: Point,
-    /// The party IDs and associated state for this signer
-    pub parties: Vec<(u32, PartyState)>,
+    /// The party state for this signer.
+    pub party_state: PartyState,
 }
 
 /// Helper functions for tests
@@ -52,7 +47,7 @@ pub mod test_helpers {
         let public_shares: HashMap<u32, PolyCommitment> = signers
             .iter()
             .filter_map(|s| s.get_poly_commitment(rng))
-            .map(|comm| (comm.id.id.get_u32(), comm))
+            .map(|comm| (comm.id().id.get_u32(), comm))
             .collect();
         let mut private_shares = HashMap::new();
 
@@ -91,7 +86,7 @@ pub mod test_helpers {
         let polys: HashMap<u32, PolyCommitment> = signers
             .iter()
             .filter_map(|s| s.get_poly_commitment(rng))
-            .map(|comm| (comm.id.id.get_u32(), comm))
+            .map(|comm| (comm.id().id.get_u32(), comm))
             .collect();
         let mut private_shares = HashMap::new();
 
@@ -214,12 +209,15 @@ pub mod test_helpers {
             .iter()
             .filter_map(|s| s.get_poly_commitment(&mut rng))
             .map(|comm| {
-                let party_id = comm.id.id.get_u32();
+                let party_id = comm.id().id.get_u32();
                 if party_id == bad_party_id {
                     // alter the schnorr proof so it will fail verification
-                    let mut bad_comm = comm.clone();
-                    bad_comm.id.kca += Scalar::from(1);
-                    (party_id, bad_comm)
+                    let mut bad_id = comm.id().clone();
+                    bad_id.kca += Scalar::from(1);
+                    (
+                        party_id,
+                        PolyCommitment::new(bad_id, comm.poly().to_vec()).unwrap(),
+                    )
                 } else {
                     (party_id, comm)
                 }

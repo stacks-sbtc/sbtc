@@ -5,6 +5,14 @@ use thiserror::Error;
 use crate::curve::{point::Error as PointError, scalar::Scalar};
 
 #[derive(Error, Debug, Clone, PartialEq)]
+/// Errors which can happen during public polynomial operations
+pub enum CommonError {
+    #[error("polynomial is invalid, it has no coefficients")]
+    /// An error when trying to create a polynomial with no coefficients
+    InvalidPolynomial,
+}
+
+#[derive(Error, Debug, Clone, PartialEq)]
 /// Errors which can happen during distributed key generation
 pub enum DkgError {
     #[error("missing public shares from {0:?}")]
@@ -42,9 +50,24 @@ impl From<TryFromIntError> for DkgError {
 #[derive(Error, Debug, Clone, PartialEq)]
 /// Errors which can happen during signature aggregation
 pub enum AggregatorError {
+    #[error("aggregator polynomial not initialized")]
+    /// The aggregator has not been initialized with DKG commitments
+    NotInitialized,
+    #[error("could not initialize the aggregator: {0}")]
+    /// An error when attempting to initialize the aggregator with an
+    /// invalid polynomial.
+    InvalidPolynomial(#[from] CommonError),
     #[error("bad poly commitments {0:?}")]
     /// The polynomial commitments which failed verification or were the wrong size
     BadPolyCommitments(Vec<Scalar>),
+    #[error("bad polynomial degree, expected number of coefficients was {expected} but received {received}")]
+    /// The number of coefficients was incorrect
+    BadPolynomialDegree {
+        /// The expected number of coefficients for the polynomial
+        expected: usize,
+        /// The actual number of coefficients for the polynomial
+        received: usize,
+    },
     #[error("bad nonce length (expected {0} got {1}")]
     /// The nonce length was the wrong size
     BadNonceLen(usize, usize),
@@ -60,6 +83,11 @@ pub enum AggregatorError {
     #[error("integer conversion error")]
     /// An error during integer conversion operations
     TryFromInt,
+    #[error("nonce has not been set yet")]
+    /// The nonce in v2::Party has not been set with a call to gen_nonce.
+    /// This means that the signer state machine has yet to receive a nonce
+    /// request before being asked to sign a message.
+    MissingNonce,
 }
 
 impl From<TryFromIntError> for AggregatorError {
