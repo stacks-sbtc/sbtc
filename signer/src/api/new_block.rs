@@ -301,7 +301,6 @@ mod tests {
     use test_case::test_case;
     use tower::ServiceExt as _;
 
-    use crate::EVENT_OBSERVER_BODY_LIMIT;
     use crate::api::get_router;
     use crate::storage::memory::Store;
     use crate::storage::model::DepositRequest;
@@ -309,6 +308,9 @@ mod tests {
     use crate::testing::context::*;
     use crate::testing::get_rng;
     use crate::testing::storage::model::TestData;
+
+    /// The maximum request body size for the new block endpoint.
+    const TEST_NEW_BLOCK_LIMIT: usize = u16::MAX as usize;
 
     /// These were generated from a stacks node after running the
     /// "complete-deposit standard recipient", "accept-withdrawal",
@@ -669,8 +671,8 @@ mod tests {
         assert_eq!(stored_events, &vec![event]);
     }
 
-    #[test_case(EVENT_OBSERVER_BODY_LIMIT, true; "event within limit")]
-    #[test_case(EVENT_OBSERVER_BODY_LIMIT + 1, false; "event over limit")]
+    #[test_case(TEST_NEW_BLOCK_LIMIT, true; "event within limit")]
+    #[test_case(TEST_NEW_BLOCK_LIMIT + 1, false; "event over limit")]
     #[tokio::test]
     async fn test_big_event(event_size: usize, success: bool) {
         let ctx = TestContext::builder()
@@ -679,11 +681,14 @@ mod tests {
             .build();
 
         let state = ApiState { ctx: ctx.clone() };
-        let app = get_router().with_state(state);
+        let app = get_router(TEST_NEW_BLOCK_LIMIT).with_state(state);
 
         let db = ctx.inner_storage();
         // We don't have anything here yet
         assert!(db.lock().await.rotate_keys_transactions.is_empty());
+
+        // Sanity check that the limit is larger than the event.
+        more_asserts::assert_gt!(TEST_NEW_BLOCK_LIMIT, ROTATE_KEYS_WEBHOOK.len());
 
         let mut event: String = " ".repeat(event_size - ROTATE_KEYS_WEBHOOK.len());
         event.push_str(ROTATE_KEYS_WEBHOOK);

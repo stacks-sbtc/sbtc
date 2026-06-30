@@ -224,7 +224,7 @@ pub const GOSSIPSUB_MAX_TRANSMIT_SIZE: usize = 65536;
 /// [1]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/stacks/db/blocks.rs#L160>
 /// [2]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/nakamoto/miner.rs#L924>
 /// [3]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/stacks/db/blocks.rs#L4512>
-pub const EVENT_OBSERVER_BODY_LIMIT: usize = 256 * 1024 * 1024;
+pub const NEW_BLOCK_BODY_LIMIT: usize = 256 * 1024 * 1024;
 
 // These are all build info variables. Many of them are set in build.rs.
 
