@@ -334,6 +334,7 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
         .enable_quic_transport(enable_quic)
         .with_initial_bootstrap_delay(Duration::from_secs(INITIAL_BOOTSTRAP_DELAY_SECS))
         .with_num_signers(num_signers)
+        .with_signer_state(ctx.state().clone())
         .build()?;
 
     // Start the libp2p swarm. This will run until either the shutdown signal is

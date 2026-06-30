@@ -4,10 +4,13 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use libp2p::Multiaddr;
+use std::sync::Arc;
+
 use signer::context::Context as _;
 use signer::context::P2PEvent;
 use signer::context::SignerEvent;
 use signer::context::SignerSignal;
+use signer::context::SignerState;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
 use signer::network::P2PNetwork;
@@ -73,6 +76,7 @@ async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, ad
         .enable_autonat(false)
         .enable_quic_transport(true)
         .add_listen_endpoint(swarm1_addr.clone())
+        .with_signer_state(context1.state().clone())
         .build()
         .expect("Failed to build swarm 1");
 
@@ -82,6 +86,7 @@ async fn libp2p_clients_can_exchange_messages_given_real_network(addr1: &str, ad
         .enable_autonat(false)
         .enable_quic_transport(true)
         .add_listen_endpoint(swarm2_addr)
+        .with_signer_state(context2.state().clone())
         .build()
         .expect("Failed to build swarm 2");
 
@@ -144,6 +149,12 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
         .map(PublicKey::from_private_key)
         .collect::<BTreeSet<_>>();
 
+    // Shared signer state used to wire every swarm's allow-list gate. All
+    // ten keys are signers, so the gate admits every peer and this test
+    // can exercise `connection_limits`.
+    let signer_state = Arc::new(SignerState::default());
+    signer_state.update_current_signer_set(public_keys.clone());
+
     let mut handles = Vec::new();
     let mut contexts = Vec::new();
     let mut swarms = Vec::new();
@@ -156,6 +167,7 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
         .with_initial_bootstrap_delay(Duration::MAX)
         .add_listen_endpoint("/ip4/127.0.0.1/tcp/0".parse().unwrap())
         .with_num_signers(2) // Sets max_established = 3*2 = 6
+        .with_signer_state(signer_state.clone())
         .build()?;
 
     let context1 = TestContext::builder()
@@ -209,6 +221,7 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
             .enable_kademlia(false)
             .enable_autonat(false)
             .with_initial_bootstrap_delay(Duration::MAX)
+            .with_signer_state(signer_state.clone())
             .build()?;
 
         let peer_context = TestContext::builder()
@@ -274,6 +287,7 @@ async fn libp2p_limits_max_established_connections() -> Result<(), Box<dyn std::
             .enable_kademlia(false)
             .enable_autonat(false)
             .with_initial_bootstrap_delay(Duration::MAX)
+            .with_signer_state(signer_state.clone())
             .build()?;
 
         // Just dial without starting the swarm

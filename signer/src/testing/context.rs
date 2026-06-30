@@ -264,7 +264,7 @@ where
         self.inner.config()
     }
 
-    fn state(&self) -> &SignerState {
+    fn state(&self) -> &Arc<SignerState> {
         self.inner.state()
     }
 
@@ -980,21 +980,19 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::{
-            Arc,
-            atomic::{AtomicBool, AtomicU8, Ordering},
-        },
-        time::Duration,
-    };
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicU8;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
 
     use tokio::sync::Notify;
 
+    use crate::context::Context as _;
+    use crate::context::SignerEvent;
+    use crate::context::SignerSignal;
     use crate::storage::model;
-    use crate::{
-        context::{Context as _, SignerEvent, SignerSignal},
-        testing::context::*,
-    };
+    use crate::testing::context::*;
 
     #[test]
     fn can_build() {
