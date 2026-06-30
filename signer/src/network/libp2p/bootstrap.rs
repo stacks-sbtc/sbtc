@@ -280,36 +280,25 @@ impl NetworkBehaviour for Behavior {
 
     fn handle_established_inbound_connection(
         &mut self,
-        connection_id: ConnectionId,
-        peer_id: PeerId,
+        _connection_id: ConnectionId,
+        _peer_id: PeerId,
         _local_addr: &Multiaddr,
-        remote_addr: &Multiaddr,
+        _remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        self.peer_connected(peer_id, connection_id, remote_addr);
-
+        // Accounting is deferred to `FromSwarm::ConnectionEstablished` so it
+        // only runs for connections that actually establish.
         Ok(dummy::ConnectionHandler)
     }
 
     fn handle_established_outbound_connection(
         &mut self,
-        connection_id: ConnectionId,
-        peer_id: PeerId,
-        address: &Multiaddr,
+        _connection_id: ConnectionId,
+        _peer_id: PeerId,
+        _address: &Multiaddr,
         _role_override: Endpoint,
         _port_use: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
-        self.peer_connected(peer_id, connection_id, address);
-
-        if self.pending_connections.remove(&connection_id) {
-            tracing::debug!(%connection_id, %peer_id, %address, "successfully dialed bootstrap peer");
-            self.pending_events
-                .push_back(ToSwarm::GenerateEvent(BootstrapEvent::Connected {
-                    connection_id,
-                    peer_id,
-                    address: address.clone(),
-                }));
-        }
-
+        // Same reasoning here as in `handle_established_inbound_connection`.
         Ok(dummy::ConnectionHandler)
     }
 
@@ -341,6 +330,28 @@ impl NetworkBehaviour for Behavior {
 
     fn on_swarm_event(&mut self, event: libp2p::swarm::FromSwarm) {
         match event {
+            FromSwarm::ConnectionEstablished(e) => {
+                // This fires only after every behavior's
+                // `handle_established_*` returned `Ok` and the connection
+                // was added to the pool.
+                let address = e.endpoint.get_remote_address();
+                self.peer_connected(e.peer_id, e.connection_id, address);
+
+                if self.pending_connections.remove(&e.connection_id) {
+                    tracing::debug!(
+                        connection_id = %e.connection_id,
+                        peer_id = %e.peer_id,
+                        %address,
+                        "successfully dialed bootstrap peer"
+                    );
+                    let event = BootstrapEvent::Connected {
+                        connection_id: e.connection_id,
+                        peer_id: e.peer_id,
+                        address: address.clone(),
+                    };
+                    self.pending_events.push_back(ToSwarm::GenerateEvent(event));
+                }
+            }
             FromSwarm::ConnectionClosed(e) => {
                 let (peer_id, connection_id, address) =
                     (e.peer_id, e.connection_id, e.endpoint.get_remote_address());
