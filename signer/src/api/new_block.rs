@@ -38,15 +38,6 @@ use super::SBTC_REGISTRY_CONTRACT_NAME;
 /// See https://github.com/stacks-network/sbtc/issues/501.
 static SBTC_REGISTRY_IDENTIFIER: OnceLock<QualifiedContractIdentifier> = OnceLock::new();
 
-/// Maximum request body size for the event observer endpoint.
-///
-/// Stacks blocks have a limit of 2 MB, which is enforced at the p2p level, but
-/// event observer events can be larger than that since they contain the
-/// subscribed sbtc events. Luckily, the size of the sbtc events themselves are
-/// bounded by the size of the transactions that create them, so a limit of 8 MB
-/// will be fine since it is twice as high as required.
-pub const EVENT_OBSERVER_BODY_LIMIT: usize = 8 * 1024 * 1024;
-
 /// A handler of `POST /new_block` webhook events.
 ///
 /// # Notes
@@ -310,6 +301,7 @@ mod tests {
     use test_case::test_case;
     use tower::ServiceExt as _;
 
+    use crate::EVENT_OBSERVER_BODY_LIMIT;
     use crate::api::get_router;
     use crate::storage::memory::Store;
     use crate::storage::model::DepositRequest;
