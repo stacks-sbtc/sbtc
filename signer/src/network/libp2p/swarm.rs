@@ -46,6 +46,7 @@ const NEGOTIATION_TIMEOUT_SECS: u64 = 10;
 /// Define the behaviors of the [`SignerSwarm`] libp2p network.
 #[derive(NetworkBehaviour)]
 pub struct SignerBehavior {
+    pub bootstrap: bootstrap::Behavior,
     pub gossipsub: gossipsub::Behaviour,
     mdns: Toggle<mdns::tokio::Behaviour>,
     pub kademlia: Toggle<kad::Behaviour<MemoryStore>>,
@@ -53,7 +54,6 @@ pub struct SignerBehavior {
     pub identify: identify::Behaviour,
     pub autonat_client: Toggle<autonat::v2::client::Behaviour<StdRng>>,
     pub autonat_server: Toggle<autonat::v2::server::Behaviour<StdRng>>,
-    pub bootstrap: bootstrap::Behavior,
     pub connection_limits: connection_limits::Behaviour,
 }
 
