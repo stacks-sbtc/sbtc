@@ -205,6 +205,26 @@ pub const MIN_BITCOIN_INPUT_VSIZE: u64 = 58;
 /// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/misc/quick-protobuf-codec/src/lib.rs#L74-L89>
 pub const GOSSIPSUB_MAX_TRANSMIT_SIZE: usize = 65536;
 
+/// The maximum request body size for the event observer endpoint.
+///
+/// Stacks event observer events include the subscribed events and the
+/// transaction results for all transactions confirmed in the block. Stacks
+/// consensus bounds the size of a valid block by the size of the events
+/// and results produced by the confirmed transactions to 50 MB, and bounds
+/// the size of the confirmed transactions to 2 MB. Since events, results,
+/// and transactions are serialized in event webhooks as hex-encoded
+/// strings, we need to allow at least 104 MB of webhook payload space. To
+/// arrive at 256, we pad 104 to 128 and multiply by 2 to be safe.
+///
+/// In stacks-core, the variable that bounds event and result size is
+/// `MAX_RECEIPT_SIZES`, which is defined in [1] (without comment) and used
+/// in block production and processing in [2-3].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/stacks/db/blocks.rs#L160>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/nakamoto/miner.rs#L924>
+/// [3]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/stacks/db/blocks.rs#L4512>
+pub const EVENT_OBSERVER_BODY_LIMIT: usize = 256 * 1024 * 1024;
+
 // These are all build info variables. Many of them are set in build.rs.
 
 /// The name of the binary that is being run,

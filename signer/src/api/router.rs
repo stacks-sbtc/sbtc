@@ -25,7 +25,7 @@ pub fn get_router<C: Context + 'static>() -> Router<ApiState<C>> {
         .route(
             "/new_block",
             post(new_block::new_block_handler)
-                .layer(DefaultBodyLimit::max(new_block::EVENT_OBSERVER_BODY_LIMIT)),
+                .layer(DefaultBodyLimit::max(crate::EVENT_OBSERVER_BODY_LIMIT)),
         )
         // TODO: remove this once https://github.com/stacks-network/stacks-core/issues/5558
         // is addressed
