@@ -24,8 +24,7 @@ pub fn get_router<C: Context + 'static>(new_block_limit: usize) -> Router<ApiSta
         .route("/info", get(info::info_handler))
         .route(
             "/new_block",
-            post(new_block::new_block_handler)
-                .layer(DefaultBodyLimit::max(new_block_limit)),
+            post(new_block::new_block_handler).layer(DefaultBodyLimit::max(new_block_limit)),
         )
         // TODO: remove this once https://github.com/stacks-network/stacks-core/issues/5558
         // is addressed
@@ -43,7 +42,7 @@ mod tests {
 
     use crate::{
         api::{ApiState, router::get_router},
-        testing::context::TestContext,  
+        testing::context::TestContext,
     };
 
     #[tokio::test]
