@@ -210,11 +210,12 @@ pub const GOSSIPSUB_MAX_TRANSMIT_SIZE: usize = 65536;
 /// Stacks event observer events include the subscribed events and the
 /// transaction results for all transactions confirmed in the block. Stacks
 /// consensus bounds the size of a valid block by the size of the events
-/// and results produced by the confirmed transactions to 50 MB, and bounds
-/// the size of the confirmed transactions to 2 MB. Since events, results,
-/// and transactions are serialized in event webhooks as hex-encoded
-/// strings, we need to allow at least 104 MB of webhook payload space. To
-/// arrive at 256, we pad 104 to 128 and multiply by 2 to be safe.
+/// and results produced by the confirmed transactions to 50 MiB, and
+/// bounds the size of the confirmed transactions to 2 MiB. Since events,
+/// results, and transactions are serialized in event webhooks as
+/// hex-encoded strings, we need to allow at least 104 MiB of webhook
+/// payload space. To arrive at 256, we pad 104 to 128 and multiply by 2 to
+/// be safe.
 ///
 /// In stacks-core, the variable that bounds event and result size is
 /// `MAX_RECEIPT_SIZES`, which is defined in [1] (without comment) and used
