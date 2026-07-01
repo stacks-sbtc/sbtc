@@ -337,6 +337,9 @@ impl NetworkBehaviour for Behavior {
                 let address = e.endpoint.get_remote_address();
                 self.peer_connected(e.peer_id, e.connection_id, address);
 
+                // We only add entries into the pending connections set if
+                // we initiated the dial, so we can remove it here and log
+                // accordingly.
                 if self.pending_connections.remove(&e.connection_id) {
                     tracing::debug!(
                         connection_id = %e.connection_id,

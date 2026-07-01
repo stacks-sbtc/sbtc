@@ -77,6 +77,8 @@ pub struct SignerSwarmConfig {
     pub known_peers: Vec<(PeerId, Multiaddr)>,
     pub num_signers: u16,
     pub max_transmit_size: usize,
+    /// This should be the same signer state from the context, so that
+    /// updates that happen to the signer set are observed here.
     pub signer_state: Arc<SignerState>,
 }
 

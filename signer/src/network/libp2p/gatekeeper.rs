@@ -105,28 +105,34 @@ impl NetworkBehaviour for Behavior {
 #[cfg(test)]
 mod tests {
     use libp2p::core::transport::PortUse;
-    use rand::rngs::OsRng;
 
+    use crate::testing::get_rng;
     use crate::keys::PrivateKey;
     use crate::keys::PublicKey;
 
     use super::*;
 
-    fn peer_id() -> (PublicKey, PeerId) {
-        let public_key = PublicKey::from_private_key(&PrivateKey::new(&mut OsRng));
+    /// Generate a random public key / peer id pair using the given RNG.
+    fn peer_id<R: rand::RngCore + ?Sized>(rng: &mut R) -> (PublicKey, PeerId) {
+        let public_key = PublicKey::from_private_key(&PrivateKey::new(rng));
         (public_key, public_key.into())
     }
 
+    /// Create a behavior with allowing the given public key
     fn behaviour_allowing(public_key: PublicKey) -> Behavior {
         let state = Arc::new(SignerState::default());
         state.current_signer_set().add_signer(public_key);
         Behavior::new(state)
     }
 
+    /// Test that the behavior allows an inbound connection from a peer in
+    /// the signer set and rejects with the expected error peers who are
+    /// not part of the signer set.
     #[test]
     fn admits_inbound_signer_and_rejects_others() {
-        let (allowed_key, allowed_peer) = peer_id();
-        let (_, other_peer) = peer_id();
+        let mut rng = get_rng();
+        let (allowed_key, allowed_peer) = peer_id(&mut rng);
+        let (_, other_peer) = peer_id(&mut rng);
         let mut behaviour = behaviour_allowing(allowed_key);
 
         let conn = ConnectionId::new_unchecked(0);
@@ -145,10 +151,13 @@ mod tests {
         assert!(denied.downcast::<PeerNotInSignerSet>().is_ok());
     }
 
+    /// Test that the behavior allows an outbound connection from a peer in
+    /// the signer set and rejects peers who are not.
     #[test]
     fn admits_outbound_signer_and_rejects_others() {
-        let (allowed_key, allowed_peer) = peer_id();
-        let (_, other_peer) = peer_id();
+        let mut rng = get_rng();
+        let (allowed_key, allowed_peer) = peer_id(&mut rng);
+        let (_, other_peer) = peer_id(&mut rng);
         let mut behaviour = behaviour_allowing(allowed_key);
 
         let conn = ConnectionId::new_unchecked(0);
@@ -179,9 +188,12 @@ mod tests {
         );
     }
 
+    /// Test that updates to the signer set in the state are reflected in
+    /// the behavior.
     #[test]
     fn tracks_live_signer_set_updates() {
-        let (allowed_key, allowed_peer) = peer_id();
+        let mut rng = get_rng();
+        let (allowed_key, allowed_peer) = peer_id(&mut rng);
         let state = Arc::new(SignerState::default());
         let mut behaviour = Behavior::new(Arc::clone(&state));
 
