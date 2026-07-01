@@ -106,9 +106,9 @@ impl NetworkBehaviour for Behavior {
 mod tests {
     use libp2p::core::transport::PortUse;
 
-    use crate::testing::get_rng;
     use crate::keys::PrivateKey;
     use crate::keys::PublicKey;
+    use crate::testing::get_rng;
 
     use super::*;
 
@@ -118,7 +118,7 @@ mod tests {
         (public_key, public_key.into())
     }
 
-    /// Create a behavior with allowing the given public key
+    /// Create a behavior with the given public key
     fn behaviour_allowing(public_key: PublicKey) -> Behavior {
         let state = Arc::new(SignerState::default());
         state.current_signer_set().add_signer(public_key);
