@@ -19,9 +19,12 @@ use rand::rngs::StdRng;
 use tokio::sync::Mutex;
 
 use super::errors::SignerSwarmError;
+
+use super::gatekeeper;
 use super::{bootstrap, event_loop};
 use crate::GOSSIPSUB_MAX_TRANSMIT_SIZE;
 use crate::context::Context;
+use crate::context::SignerState;
 use crate::keys::PrivateKey;
 
 /// The maximum number of substreams _per connection_. This is used to limit
@@ -44,9 +47,17 @@ const MAX_SUBSTREAMS_PER_CONNECTION: usize = 20;
 const NEGOTIATION_TIMEOUT_SECS: u64 = 10;
 
 /// Define the behaviors of the [`SignerSwarm`] libp2p network.
+///
+/// The derive macro composes each behavior's `handle_established_*` call
+/// in declaration order and bailing on a returned `Err`, so gatekeepers
+/// should appear before any behavior that records per-connection state.
 #[derive(NetworkBehaviour)]
 pub struct SignerBehavior {
-    pub bootstrap: bootstrap::Behavior,
+    /// The gatekeeper behavior that rejects non-signer peers during the
+    /// connection upgrade phase.
+    pub gatekeeper: gatekeeper::Behavior,
+    /// The connection limits behavior that enforces numeric slot limits.
+    pub connection_limits: connection_limits::Behaviour,
     pub gossipsub: gossipsub::Behaviour,
     mdns: Toggle<mdns::tokio::Behaviour>,
     pub kademlia: Toggle<kad::Behaviour<MemoryStore>>,
@@ -54,7 +65,7 @@ pub struct SignerBehavior {
     pub identify: identify::Behaviour,
     pub autonat_client: Toggle<autonat::v2::client::Behaviour<StdRng>>,
     pub autonat_server: Toggle<autonat::v2::server::Behaviour<StdRng>>,
-    pub connection_limits: connection_limits::Behaviour,
+    pub bootstrap: bootstrap::Behavior,
 }
 
 pub struct SignerSwarmConfig {
@@ -66,6 +77,7 @@ pub struct SignerSwarmConfig {
     pub known_peers: Vec<(PeerId, Multiaddr)>,
     pub num_signers: u16,
     pub max_transmit_size: usize,
+    pub signer_state: Arc<SignerState>,
 }
 
 impl SignerBehavior {
@@ -111,6 +123,7 @@ impl SignerBehavior {
         let bootstrap = bootstrap::Behavior::new(bootstrap_config);
 
         Ok(Self {
+            gatekeeper: gatekeeper::Behavior::new(config.signer_state),
             gossipsub: Self::gossipsub(&keypair, config.max_transmit_size)?,
             mdns,
             kademlia,
@@ -220,10 +233,14 @@ pub struct SignerSwarmBuilder<'a> {
     initial_bootstrap_delay: Duration,
     num_signers: u16,
     max_transmit_size: usize,
+    signer_state: Arc<SignerState>,
 }
 
 impl<'a> SignerSwarmBuilder<'a> {
     /// Create a new [`SignerSwarmBuilder`] with the given private key.
+    ///
+    /// By default the swarm is wired to a fresh, empty [`SignerState`], whose
+    /// signer set is empty and so rejects every peer.
     pub fn new(private_key: &'a PrivateKey) -> Self {
         Self {
             private_key,
@@ -239,7 +256,15 @@ impl<'a> SignerSwarmBuilder<'a> {
             initial_bootstrap_delay: Duration::ZERO,
             num_signers: crate::MAX_KEYS,
             max_transmit_size: GOSSIPSUB_MAX_TRANSMIT_SIZE,
+            signer_state: Arc::new(SignerState::default()),
         }
+    }
+
+    /// Wires the swarm to the shared [`SignerState`]. Any peer not in the
+    /// set is rejected during the connection-upgrade phase.
+    pub fn with_signer_state(mut self, signer_state: Arc<SignerState>) -> Self {
+        self.signer_state = signer_state;
+        self
     }
 
     /// Sets whether or not this swarm should use mdns.
@@ -370,6 +395,7 @@ impl<'a> SignerSwarmBuilder<'a> {
             known_peers: self.known_peers,
             num_signers: self.num_signers,
             max_transmit_size: self.max_transmit_size,
+            signer_state: self.signer_state,
         };
         let behavior = SignerBehavior::new(keypair.clone(), behavior_config)?;
 
@@ -764,6 +790,7 @@ mod tests {
             .enable_memory_transport(true)
             .with_initial_bootstrap_delay(Duration::MAX) // We manually dial below
             .add_listen_endpoint(swarm1_addr.clone())
+            .with_signer_state(context1.state().clone())
             .build()
             .expect("Failed to build swarm 1");
 
@@ -774,6 +801,7 @@ mod tests {
             .enable_memory_transport(true)
             .with_initial_bootstrap_delay(Duration::MAX) // We manually dial below
             .add_listen_endpoint(swarm2_addr.clone())
+            .with_signer_state(context2.state().clone())
             .build()
             .expect("Failed to build swarm 2");
 
@@ -874,6 +902,7 @@ mod tests {
             .with_initial_bootstrap_delay(Duration::ZERO) // Connect immediately
             .add_known_peers(&[(key2_pub.into(), swarm2_addr.clone())])
             .add_listen_endpoint(swarm1_addr.clone())
+            .with_signer_state(context1.state().clone())
             .build()
             .expect("Failed to build swarm 1");
         let swarm2 = SignerSwarmBuilder::new(&key2)
@@ -883,6 +912,7 @@ mod tests {
             .enable_memory_transport(true)
             .with_initial_bootstrap_delay(Duration::MAX) // Let swarm1 bootstrap
             .add_listen_endpoint(swarm2_addr.clone())
+            .with_signer_state(context2.state().clone())
             .build()
             .expect("Failed to build swarm 2");
 
@@ -941,6 +971,15 @@ mod tests {
             // all discovery protocols disabled so the test is self-contained.
             let key1 = PrivateKey::new(rng);
             let key2 = PrivateKey::new(rng);
+            let pub_key = PublicKey::from_private_key(&key1);
+            let sub_key = PublicKey::from_private_key(&key2);
+
+            // Each side's shared state allows only the other peer. The swarm's
+            // allow-list gate reads the signer set from this handle.
+            let pub_state = Arc::new(SignerState::default());
+            pub_state.current_signer_set().add_signer(sub_key);
+            let sub_state = Arc::new(SignerState::default());
+            sub_state.current_signer_set().add_signer(pub_key);
 
             // Use random memory addresses to avoid conflicts when other
             // tests are running in parallel.
@@ -957,6 +996,7 @@ mod tests {
                 .with_initial_bootstrap_delay(Duration::MAX)
                 .with_max_transmit_size(publisher_max_transmit_size)
                 .add_listen_endpoint(pub_addr.clone())
+                .with_signer_state(pub_state)
                 .build()
                 .unwrap();
 
@@ -969,6 +1009,7 @@ mod tests {
                 .with_initial_bootstrap_delay(Duration::MAX)
                 .with_max_transmit_size(subscriber_max_transmit_size)
                 .add_listen_endpoint(sub_addr.clone())
+                .with_signer_state(sub_state)
                 .build()
                 .unwrap();
 
