@@ -38,7 +38,7 @@ pub struct PeerNotInSignerSet(pub PeerId);
 /// Behavior for allowing only signers to connect to the signer.
 pub struct Behavior {
     /// The signer state to check against.
-    pub state: Arc<SignerState>,
+    state: Arc<SignerState>,
 }
 
 impl Behavior {
