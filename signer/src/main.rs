@@ -357,7 +357,7 @@ async fn run_api(ctx: impl Context + 'static) -> Result<(), Error> {
     let request_id = Arc::new(AtomicU64::new(0));
 
     // Build the signer API application
-    let app = api::get_router()
+    let app = api::get_router(signer::NEW_BLOCK_BODY_LIMIT)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {

@@ -69,6 +69,12 @@ x-sbtc-signer: &sbtc-signer
     - ./sbtc/signer/signer-config.toml:/signer-config.toml
   profiles:
     - sbtc-signer
+  healthcheck:
+    test: [ "CMD-SHELL", "curl -sf http://localhost:8801/info 2> /dev/null" ]
+    start_period: 10s
+    start_interval: 1s
+    interval: 30s
+    timeout: 1s
 
 x-stacks-signer: &stacks-signer
   image: ghcr.io/stacks-network/stacks-signer:3.4.0.0.1.0@sha256:afe4332e967b4a509cc05b5f6d4f15389b7afa100398ebdc1b5ae8c15cac996c

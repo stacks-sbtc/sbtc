@@ -38,15 +38,6 @@ use super::SBTC_REGISTRY_CONTRACT_NAME;
 /// See https://github.com/stacks-network/sbtc/issues/501.
 static SBTC_REGISTRY_IDENTIFIER: OnceLock<QualifiedContractIdentifier> = OnceLock::new();
 
-/// Maximum request body size for the event observer endpoint.
-///
-/// Stacks blocks have a limit of 2 MB, which is enforced at the p2p level, but
-/// event observer events can be larger than that since they contain the
-/// subscribed sbtc events. Luckily, the size of the sbtc events themselves are
-/// bounded by the size of the transactions that create them, so a limit of 8 MB
-/// will be fine since it is twice as high as required.
-pub const EVENT_OBSERVER_BODY_LIMIT: usize = 8 * 1024 * 1024;
-
 /// A handler of `POST /new_block` webhook events.
 ///
 /// # Notes
@@ -317,6 +308,9 @@ mod tests {
     use crate::testing::context::*;
     use crate::testing::get_rng;
     use crate::testing::storage::model::TestData;
+
+    /// The maximum request body size for the new block endpoint.
+    const TEST_NEW_BLOCK_LIMIT: usize = u16::MAX as usize;
 
     /// These were generated from a stacks node after running the
     /// "complete-deposit standard recipient", "accept-withdrawal",
@@ -677,8 +671,8 @@ mod tests {
         assert_eq!(stored_events, &vec![event]);
     }
 
-    #[test_case(EVENT_OBSERVER_BODY_LIMIT, true; "event within limit")]
-    #[test_case(EVENT_OBSERVER_BODY_LIMIT + 1, false; "event over limit")]
+    #[test_case(TEST_NEW_BLOCK_LIMIT, true; "event within limit")]
+    #[test_case(TEST_NEW_BLOCK_LIMIT + 1, false; "event over limit")]
     #[tokio::test]
     async fn test_big_event(event_size: usize, success: bool) {
         let ctx = TestContext::builder()
@@ -687,11 +681,14 @@ mod tests {
             .build();
 
         let state = ApiState { ctx: ctx.clone() };
-        let app = get_router().with_state(state);
+        let app = get_router(TEST_NEW_BLOCK_LIMIT).with_state(state);
 
         let db = ctx.inner_storage();
         // We don't have anything here yet
         assert!(db.lock().await.rotate_keys_transactions.is_empty());
+
+        // Sanity check that the limit is larger than the event.
+        more_asserts::assert_gt!(TEST_NEW_BLOCK_LIMIT, ROTATE_KEYS_WEBHOOK.len());
 
         let mut event: String = " ".repeat(event_size - ROTATE_KEYS_WEBHOOK.len());
         event.push_str(ROTATE_KEYS_WEBHOOK);
