@@ -288,7 +288,7 @@ impl SignerSwarmBuilder {
     #[cfg(any(test, feature = "testing"))]
     pub fn new(private_key: &PrivateKey) -> Self {
         Self {
-            private_key: private_key.clone(),
+            private_key: *private_key,
             listen_on: Vec::new(),
             seed_addrs: Vec::new(),
             known_peers: Vec::new(),
