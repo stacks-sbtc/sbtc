@@ -264,7 +264,7 @@ where
         self.inner.config()
     }
 
-    fn state(&self) -> &SignerState {
+    fn state(&self) -> &Arc<SignerState> {
         self.inner.state()
     }
 

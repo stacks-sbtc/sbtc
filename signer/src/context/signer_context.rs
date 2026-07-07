@@ -122,7 +122,7 @@ where
         &self.config
     }
 
-    fn state(&self) -> &SignerState {
+    fn state(&self) -> &Arc<SignerState> {
         &self.state
     }
 
