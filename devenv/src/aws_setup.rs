@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
+use std::str::FromStr as _;
 
 use aws_sdk_dynamodb::Client as DynamoClient;
 use aws_sdk_dynamodb::config::BehaviorVersion;
@@ -48,9 +49,10 @@ const LIST_TABLES_PAGE: i32 = 100;
 /// Matches where the Dockerfile copies it to.
 const DEFAULT_TEMPLATE_PATH: &str = "/code/cdk.out/EmilyStack.template.json";
 
-/// Default path to the readiness sentinel file. The docker compose
-/// `service_healthy` predicate watches this path.
-const DEFAULT_READY_FILE_PATH: &str = "/tmp/aws-setup-ready";
+/// Path to a sentinel file touched once every required dynamodb table
+/// exists. The container healthcheck watches this so downstream services
+/// can start as soon as the tables are ready.
+pub const READY_FILE_PATH: &str = "/tmp/aws-setup-ready";
 
 /// Arguments for the `aws-setup` subcommand.
 #[derive(Debug, Args)]
@@ -79,15 +81,6 @@ pub struct AwsSetupArgs {
     /// anything non-empty.
     #[clap(long, env = "AWS_SECRET_ACCESS_KEY", default_value = "xxxxxxxx")]
     pub secret_access_key: String,
-    /// Path to a sentinel file touched once every required dynamodb table
-    /// exists. The container healthcheck watches this so downstream
-    /// services can start as soon as the tables are ready.
-    #[clap(
-        long = "ready-file-path",
-        env = "READY_FILE_PATH",
-        default_value = DEFAULT_READY_FILE_PATH,
-    )]
-    pub ready_file_path: PathBuf,
 }
 
 /// Entry point for the subcommand.
@@ -114,9 +107,9 @@ pub async fn run(args: AwsSetupArgs) -> Result<(), Error> {
         tracing::info!(table = %table.table_name, "created table");
     }
 
-    let path = args.ready_file_path.clone();
-    File::create(&path).map_err(|source| Error::WriteReadyFile { path, source })?;
-    tracing::info!(path = %args.ready_file_path.display(), "wrote aws-setup ready sentinel");
+    let path = PathBuf::from_str(READY_FILE_PATH).unwrap();
+    File::create(&path).map_err(Error::WriteReadyFile)?;
+    tracing::info!(path = %READY_FILE_PATH, "wrote aws-setup ready sentinel");
     Ok(())
 }
 

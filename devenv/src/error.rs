@@ -4,6 +4,7 @@
 //! the subsystem they come from: bitcoin RPC, Stacks RPC, CDK template I/O,
 //! and DynamoDB.
 
+use crate::aws_setup::READY_FILE_PATH;
 use aws_sdk_dynamodb::error::BuildError;
 use aws_sdk_dynamodb::error::SdkError;
 use aws_sdk_dynamodb::operation::create_table::CreateTableError;
@@ -54,14 +55,8 @@ pub enum Error {
     MalformedTemplate(String),
     /// Could not write the readiness sentinel that the docker healthcheck
     /// watches.
-    #[error("failed to write ready sentinel {0}: {source}", path.display())]
-    WriteReadyFile {
-        /// Path we tried to write.
-        path: std::path::PathBuf,
-        /// The underlying I/O error.
-        #[source]
-        source: std::io::Error,
-    },
+    #[error("failed to write ready sentinel {READY_FILE_PATH}: {0}")]
+    WriteReadyFile(#[source] std::io::Error),
     /// `ListTables` failed (network or DynamoDB-side error).
     #[error("dynamodb list-tables failed: {0}")]
     DynamoList(#[from] Box<SdkError<ListTablesError>>),

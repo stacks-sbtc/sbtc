@@ -166,7 +166,6 @@ services:
       - STACKS_RPC_URL=http://stacks-node:20443
       - BITCOIN_RPC_URL=http://devnet:devnet@bitcoin:18443/wallet/depositor
       - DEPLOYER_ADDRESS=SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS
-      - READY_FILE_PATH=/tmp/aws-setup-ready
     healthcheck:
       test: ["CMD", "test", "-f", "/tmp/aws-setup-ready"]
       interval: 2s
