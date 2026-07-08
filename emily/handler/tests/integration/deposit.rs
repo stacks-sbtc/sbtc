@@ -208,6 +208,94 @@ async fn create_and_get_deposit_happy_path() {
 }
 
 #[tokio::test]
+async fn create_deposit_normalization() {
+    let (configuration, tables) = new_test_setup().await;
+
+    // Arrange.
+    // --------
+    let bitcoin_tx_output_index = 0;
+
+    // Setup test deposit transaction.
+    let DepositTxnData {
+        recipients,
+        reclaim_scripts,
+        deposit_scripts,
+        bitcoin_txid,
+        transaction_hex,
+    } = DepositTxnData::new(DEPOSIT_LOCK_TIME, DEPOSIT_MAX_FEE, &[DEPOSIT_AMOUNT_SATS]);
+
+    let recipient = recipients.first().unwrap().clone();
+    let reclaim_script = reclaim_scripts.first().unwrap().clone();
+    let deposit_script = deposit_scripts.first().unwrap().clone();
+
+    let request = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        reclaim_script: reclaim_script.clone(),
+        deposit_script: deposit_script.clone(),
+        transaction_hex: transaction_hex.clone(),
+    };
+
+    // Try to create another one non-normalzied
+    let request_2 = CreateDepositRequestBody {
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.to_uppercase(),
+        reclaim_script: reclaim_script.to_uppercase(),
+        deposit_script: deposit_script.to_uppercase(),
+        transaction_hex: transaction_hex.to_uppercase(),
+    };
+
+    let expected_deposit = Deposit {
+        amount: DEPOSIT_AMOUNT_SATS,
+        bitcoin_tx_output_index,
+        bitcoin_txid: bitcoin_txid.clone(),
+        fulfillment: None,
+        last_update_block_hash: BLOCK_HASH.into(),
+        last_update_height: BLOCK_HEIGHT,
+        reclaim_script: reclaim_script.clone(),
+        deposit_script: deposit_script.clone(),
+        parameters: Box::new(DepositParameters {
+            lock_time: DEPOSIT_LOCK_TIME,
+            max_fee: DEPOSIT_MAX_FEE,
+        }),
+        recipient,
+        status: testing_emily_client::models::DepositStatus::Pending,
+        status_message: INITIAL_DEPOSIT_STATUS_MESSAGE.into(),
+        replaced_by_tx: None,
+    };
+
+    // Act.
+    // ----
+    let created_deposit = apis::deposit_api::create_deposit(&configuration, request)
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    let created_deposit_2 = apis::deposit_api::create_deposit(&configuration, request_2)
+        .await
+        .expect("Received an error after making a valid create deposit request api call.");
+
+    let deposits = apis::deposit_api::get_deposits(
+        &configuration,
+        testing_emily_client::models::DepositStatus::Pending,
+        None,
+        None,
+    )
+    .await
+    .expect("Received an error after making a valid get deposits api call.")
+    .deposits;
+
+    // Assert.
+    // -------
+    assert_eq!(expected_deposit, created_deposit);
+    assert_eq!(created_deposit, created_deposit_2);
+
+    assert_eq!(deposits.len(), 1);
+    assert_eq!(expected_deposit.bitcoin_txid, deposits[0].bitcoin_txid);
+
+    clean_test_setup(tables).await;
+}
+
+#[tokio::test]
 async fn wipe_databases_test() {
     let (configuration, tables) = new_test_setup().await;
 
