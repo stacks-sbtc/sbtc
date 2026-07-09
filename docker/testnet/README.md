@@ -112,20 +112,6 @@ AWS_ACCESS_KEY_ID=<provided_access_key_id>
 AWS_SECRET_ACCESS_KEY=<provided_secret_access_key>
 ```
 
-### Configure the blocklist client
-
-> **NOTE:** You will need to send a request to chainanalysis to get an API key, which
-> is as simple as providing your contact info and waiting for an email with the key.
-> The request link is right below.
-
-Add the API key obtained
-[here](https://go.chainalysis.com/crypto-sanctions-screening.html) to the following to the
-`.env` file we provided.
-
-```bash
-BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY=<API_KEY>
-```
-
 ## Running
 
 Run `docker-compose -f ./docker-compose.testnet.yml up`.
