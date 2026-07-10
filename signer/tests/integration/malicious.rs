@@ -73,16 +73,8 @@ use crate::stacks::wait_for_stx_balance;
 use crate::transaction_coordinator::IntegrationTestContext;
 use crate::utxo_construction::make_deposit_request_to;
 
-/// A network wrapper that makes one signer stop participating in DKG
-/// verification rounds while leaving DKG itself and ordinary sweep signing
-/// untouched.
 #[derive(Clone)]
-struct MaliciousNetwork {
-    /// The honest in-memory network instance that actually sends and receives
-    /// messages for one signer component.
-    inner: SignerNetworkInstance,
-    /// The public key of the signer whose component owns this network wrapper.
-    signer_public_key: PublicKey,
+struct MaliciousDkgControl {
     /// Enables the malicious behavior once the test has completed the honest
     /// first DKG and first deposit sweep.
     attack_active: Arc<AtomicBool>,
@@ -95,15 +87,31 @@ struct MaliciousNetwork {
     dropped_dkg_verification_responses: Arc<AtomicUsize>,
 }
 
+/// A network wrapper that makes one signer stop participating in DKG
+/// verification rounds while leaving DKG itself and ordinary sweep signing
+/// untouched.
+#[derive(Clone)]
+struct MaliciousNetwork {
+    /// The honest in-memory network instance that actually sends and receives
+    /// messages for one signer component.
+    inner: SignerNetworkInstance,
+    /// The public key of the signer whose component owns this network wrapper.
+    signer_public_key: PublicKey,
+    /// The shared state that controls when, and for which signer, messages are
+    /// dropped.
+    malicious_dkg: MaliciousDkgControl,
+}
+
 impl MessageTransfer for MaliciousNetwork {
     async fn broadcast(&mut self, msg: Msg) -> Result<(), signer::error::Error> {
         let is_malicious_signer = self
+            .malicious_dkg
             .malicious_signer
             .lock()
             .expect("malicious signer mutex poisoned")
             .is_some_and(|public_key| public_key == self.signer_public_key);
 
-        if self.attack_active.load(Ordering::SeqCst)
+        if self.malicious_dkg.attack_active.load(Ordering::SeqCst)
             && is_malicious_signer
             && let Payload::WstsMessage(wsts_msg) = &msg.inner.payload
             && matches!(wsts_msg.id, WstsMessageId::DkgVerification(_))
@@ -112,7 +120,8 @@ impl MessageTransfer for MaliciousNetwork {
                 WstsNetMessage::NonceResponse(_) | WstsNetMessage::SignatureShareResponse(_)
             )
         {
-            self.dropped_dkg_verification_responses
+            self.malicious_dkg
+                .dropped_dkg_verification_responses
                 .fetch_add(1, Ordering::SeqCst);
             return Ok(());
         }
@@ -125,6 +134,55 @@ impl MessageTransfer for MaliciousNetwork {
     }
 }
 
+struct SignerClients<'a> {
+    /// The Bitcoin Core client copied into each signer context.
+    bitcoin_client: &'a BitcoinCoreClient,
+    /// The block poller shared by every block observer event loop.
+    bitcoin_chain_tip_poller: &'a BitcoinChainTipPoller,
+    /// The Stacks node client copied into each signer context.
+    stacks_client: &'a StacksClient,
+    /// The Emily client copied into each signer context.
+    emily_client: &'a EmilyClient,
+    /// The in-memory WAN used to connect all signer components.
+    network: &'a WanNetwork,
+}
+
+#[derive(Clone, Copy)]
+struct SignerSetConfig {
+    /// Number of signer contexts to create.
+    num_signers: usize,
+    /// Signing threshold for the generated signer set.
+    signatures_required: u16,
+    /// Bitcoin block height at which the signers are allowed to run DKG.
+    dkg_min_bitcoin_block_height: BitcoinBlockHeight,
+}
+
+/// This struct is a container for most of the parameters that are needed
+/// to create a deposit transaction. The missing parameters are around the
+/// reclaim script.
+#[derive(Clone)]
+struct DepositParameters {
+    /// Amount, in satoshis, locked by the deposit.
+    amount: u64,
+    /// Maximum fee, in satoshis, that the depositor allows the sweep to spend.
+    max_fee: u64,
+    /// Aggregate key that controls the sBTC deposit script.
+    aggregate_key: PublicKey,
+    /// Stacks principal that receives the minted sBTC.
+    recipient: PrincipalData,
+}
+
+struct DepositSubmission<'a> {
+    /// The Bitcoin wallet making the deposit.
+    depositor: &'a Recipient,
+    /// The UTXO that funds this deposit output.
+    fund_outpoint: OutPoint,
+    /// The value, in sats, of the funding UTXO.
+    fund_amount: u64,
+    /// Deposit script, amount, fee, and recipient parameters.
+    parameters: DepositParameters,
+}
+
 /// Create the signer contexts, connect every signer to the shared in-memory
 /// WAN, and start the coordinator, signer, request-decider, and block-observer
 /// event loops for each signer.
@@ -133,42 +191,40 @@ impl MessageTransfer for MaliciousNetwork {
 /// `WanNetwork::connect` subscribes that signer to the broadcast channel and
 /// early DKG messages are not replayed to later subscribers.
 async fn start_signers(
-    bitcoin_client: &BitcoinCoreClient,
-    bitcoin_chain_tip_poller: &BitcoinChainTipPoller,
-    stacks_client: &StacksClient,
-    emily_client: &EmilyClient,
-    network: &WanNetwork,
-    num_signers: usize,
-    signatures_required: u16,
-    dkg_min_bitcoin_block_height: BitcoinBlockHeight,
-    attack_active: Arc<AtomicBool>,
-    malicious_signer: Arc<Mutex<Option<PublicKey>>>,
-    dropped_dkg_verification_responses: Arc<AtomicUsize>,
+    clients: SignerClients<'_>,
+    signer_set: SignerSetConfig,
+    malicious_dkg: MaliciousDkgControl,
 ) -> Vec<IntegrationTestContext<StacksClient>> {
     let keypairs = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
-        .take(num_signers)
+        .take(signer_set.num_signers)
         .collect::<Vec<_>>();
 
     let public_keys: Vec<PublicKey> = keypairs.iter().map(|kp| kp.public_key().into()).collect();
-    let wallet =
-        SignerWallet::new(&public_keys, signatures_required, NetworkKind::Testnet, 0).unwrap();
+    let wallet = SignerWallet::new(
+        &public_keys,
+        signer_set.signatures_required,
+        NetworkKind::Testnet,
+        0,
+    )
+    .unwrap();
 
     let tx = fund_stx(
-        stacks_client,
+        clients.stacks_client,
         &wallet.address().to_account_principal(),
         100 * 1_000_000,
     )
     .await;
-    stacks_client
+    clients
+        .stacks_client
         .submit_tx(&tx)
         .await
         .expect("failed to send stacks transaction");
 
-    wait_for_stx_balance(stacks_client, wallet.address(), |ustx| ustx > 0).await;
+    wait_for_stx_balance(clients.stacks_client, wallet.address(), |ustx| ustx > 0).await;
 
     // Let the poller observe the current chain tip before we start producing
     // blocks for the test scenario.
-    let mut stream = bitcoin_chain_tip_poller.get_block_hash_stream();
+    let mut stream = clients.bitcoin_chain_tip_poller.get_block_hash_stream();
     let polling_fut = async {
         loop {
             let _ = stream.next().with_timeout(Duration::from_millis(100)).await;
@@ -182,16 +238,17 @@ async fn start_signers(
         let db = testing::storage::new_test_database().await;
         let ctx = TestContext::builder()
             .with_storage(db.clone())
-            .with_bitcoin_client(bitcoin_client.clone())
-            .with_emily_client(emily_client.clone())
-            .with_stacks_client(stacks_client.clone())
+            .with_bitcoin_client(clients.bitcoin_client.clone())
+            .with_emily_client(clients.emily_client.clone())
+            .with_stacks_client(clients.stacks_client.clone())
             .modify_settings(|settings| {
                 settings.signer.private_key = kp.secret_key().into();
                 settings.signer.bootstrap_signing_set = public_keys.iter().cloned().collect();
-                settings.signer.bootstrap_signatures_required = signatures_required;
+                settings.signer.bootstrap_signatures_required = signer_set.signatures_required;
                 settings.signer.bitcoin_processing_delay = Duration::from_millis(500);
                 settings.signer.deployer = wallet.address().clone();
-                settings.signer.dkg_min_bitcoin_block_height = Some(dkg_min_bitcoin_block_height);
+                settings.signer.dkg_min_bitcoin_block_height =
+                    Some(signer_set.dkg_min_bitcoin_block_height);
                 settings.signer.stacks_fees_max_ustx = NonZero::new(1_000_000).unwrap();
             })
             .build();
@@ -199,7 +256,7 @@ async fn start_signers(
         // Note: we create all networks here because all of them need to
         // exist and be connected before any of the event loops are
         // started.
-        networks.push(network.connect(&ctx));
+        networks.push(clients.network.connect(&ctx));
         signers.push(ctx);
     }
 
@@ -210,9 +267,7 @@ async fn start_signers(
         let spawn_network = |network: &SignerNetwork| MaliciousNetwork {
             inner: network.spawn(),
             signer_public_key,
-            attack_active: attack_active.clone(),
-            malicious_signer: malicious_signer.clone(),
-            dropped_dkg_verification_responses: dropped_dkg_verification_responses.clone(),
+            malicious_dkg: malicious_dkg.clone(),
         };
 
         let ev = TxCoordinatorEventLoop {
@@ -265,7 +320,7 @@ async fn start_signers(
 
         let block_observer = BlockObserver {
             context: ctx.clone(),
-            bitcoin_block_source: bitcoin_chain_tip_poller.clone(),
+            bitcoin_block_source: clients.bitcoin_chain_tip_poller.clone(),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -274,7 +329,7 @@ async fn start_signers(
         });
     }
 
-    while start_count.load(Ordering::SeqCst) < 4 * num_signers as u8 {
+    while start_count.load(Ordering::SeqCst) < 4 * signer_set.num_signers as u8 {
         Sleep::for_millis(10).await;
     }
 
@@ -315,33 +370,27 @@ async fn wait_for_tenure_completed(
 /// transaction spends it.
 async fn submit_deposit<R>(
     rpc: &R,
-    emily_client: &EmilyClient,
-    depositor: &Recipient,
-    depositor_fund_outpoint: OutPoint,
-    depositor_fund_amount: u64,
-    deposit_amount: u64,
-    max_fee: u64,
-    aggregate_key: PublicKey,
-    recipient: PrincipalData,
+    emily: &EmilyClient,
+    submission: DepositSubmission<'_>,
 ) -> OutPoint
 where
     R: RpcApi,
 {
     let depositor_utxo = Utxo {
-        txid: depositor_fund_outpoint.txid,
-        vout: depositor_fund_outpoint.vout,
-        script_pub_key: depositor.address.script_pubkey(),
+        txid: submission.fund_outpoint.txid,
+        vout: submission.fund_outpoint.vout,
+        script_pub_key: submission.depositor.address.script_pubkey(),
         descriptor: String::new(),
-        amount: Amount::from_sat(depositor_fund_amount),
+        amount: Amount::from_sat(submission.fund_amount),
         height: 0,
     };
     let (deposit_tx, deposit_request, deposit_info) = make_deposit_request_to(
-        depositor,
-        deposit_amount,
+        submission.depositor,
+        submission.parameters.amount,
         depositor_utxo,
-        max_fee,
-        aggregate_key.into(),
-        recipient,
+        submission.parameters.max_fee,
+        submission.parameters.aggregate_key.into(),
+        submission.parameters.recipient,
     );
 
     rpc.send_raw_transaction(&deposit_tx)
@@ -355,7 +404,7 @@ where
         transaction_hex: serialize_hex(&deposit_tx),
     };
 
-    deposit_api::create_deposit(emily_client.config(), emily_request)
+    deposit_api::create_deposit(emily.config(), emily_request)
         .await
         .expect("cannot create emily deposit");
 
@@ -384,26 +433,29 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
     let initial_tip = rpc.get_blockchain_info().unwrap();
     let dkg_min_bitcoin_block_height = BitcoinBlockHeight::from(initial_tip.blocks + 5);
 
-    let attack_active = Arc::new(AtomicBool::new(false));
-    let malicious_signer = Arc::new(Mutex::new(None));
-    let dropped_dkg_verification_responses = Arc::new(AtomicUsize::new(0));
-
-    let num_signers = 3;
-    let signatures_required = 3;
+    let malicious_dkg = MaliciousDkgControl {
+        attack_active: Arc::new(AtomicBool::new(false)),
+        malicious_signer: Arc::new(Mutex::new(None)),
+        dropped_dkg_verification_responses: Arc::new(AtomicUsize::new(0)),
+    };
+    let signer_set = SignerSetConfig {
+        num_signers: 3,
+        signatures_required: 3,
+        dkg_min_bitcoin_block_height,
+    };
+    let bitcoin_client = bitcoin.get_client();
     let bitcoin_chain_tip_poller = bitcoin.start_chain_tip_poller().await;
 
     let signers = start_signers(
-        &bitcoin.get_client(),
-        &bitcoin_chain_tip_poller,
-        &stacks_client,
-        &emily_client,
-        &network,
-        num_signers,
-        signatures_required,
-        dkg_min_bitcoin_block_height,
-        attack_active.clone(),
-        malicious_signer.clone(),
-        dropped_dkg_verification_responses.clone(),
+        SignerClients {
+            bitcoin_client: &bitcoin_client,
+            bitcoin_chain_tip_poller: &bitcoin_chain_tip_poller,
+            stacks_client: &stacks_client,
+            emily_client: &emily_client,
+            network: &network,
+        },
+        signer_set,
+        malicious_dkg.clone(),
     )
     .await;
 
@@ -438,27 +490,29 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
     faucet.send_to_script(10_000, first_aggregate_key.signers_script_pubkey());
 
     let depositor = Recipient::new(AddressType::P2tr);
-    let deposit_amount = 100_000;
-    let tx_fee = BITCOIN_CORE_FALLBACK_FEE.to_sat();
-    let max_fee = deposit_amount / 2;
-    let depositor_fund_amount = deposit_amount + tx_fee;
+    let deposit_parameters = DepositParameters {
+        amount: 100_000,
+        max_fee: 20_000,
+        aggregate_key: first_aggregate_key,
+        recipient: depositor.stacks_address().to_account_principal(),
+    };
+
+    let depositor_fund_amount = deposit_parameters.amount + BITCOIN_CORE_FALLBACK_FEE.to_sat();
     let first_depositor_fund_outpoint = faucet.send_to(depositor_fund_amount, &depositor.address);
     let second_depositor_fund_outpoint = faucet.send_to(depositor_fund_amount, &depositor.address);
 
     let chain_tip = faucet.generate_block().into();
     wait_for_tenure_completed(&signers, chain_tip).await;
 
-    let recipient = depositor.stacks_address().to_account_principal();
     let first_deposit_outpoint = submit_deposit(
         rpc,
         &emily_client,
-        &depositor,
-        first_depositor_fund_outpoint,
-        depositor_fund_amount,
-        deposit_amount,
-        max_fee,
-        first_aggregate_key,
-        recipient.clone(),
+        DepositSubmission {
+            depositor: &depositor,
+            fund_outpoint: first_depositor_fund_outpoint,
+            fund_amount: depositor_fund_amount,
+            parameters: deposit_parameters.clone(),
+        },
     )
     .await;
 
@@ -478,17 +532,16 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
         "coordinator should sweep the first deposit before the malicious second DKG"
     );
 
-    attack_active.store(true, Ordering::SeqCst);
+    malicious_dkg.attack_active.store(true, Ordering::SeqCst);
     let second_deposit_outpoint = submit_deposit(
         rpc,
         &emily_client,
-        &depositor,
-        second_depositor_fund_outpoint,
-        depositor_fund_amount,
-        deposit_amount,
-        max_fee,
-        first_aggregate_key,
-        recipient,
+        DepositSubmission {
+            depositor: &depositor,
+            fund_outpoint: second_depositor_fund_outpoint,
+            fund_amount: depositor_fund_amount,
+            parameters: deposit_parameters,
+        },
     )
     .await;
 
@@ -506,14 +559,18 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
         .copied()
         .find(|public_key| *public_key != coordinator)
         .expect("there should be a non-coordinator signer to target");
-    *malicious_signer
+    *malicious_dkg
+        .malicious_signer
         .lock()
         .expect("malicious signer mutex poisoned") = Some(target);
 
     wait_for_tenure_completed(&signers, chain_tip).await;
 
     assert!(
-        dropped_dkg_verification_responses.load(Ordering::SeqCst) > 0,
+        malicious_dkg
+            .dropped_dkg_verification_responses
+            .load(Ordering::SeqCst)
+            > 0,
         "malicious signer should have withheld DKG verification participation"
     );
 
