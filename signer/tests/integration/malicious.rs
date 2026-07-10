@@ -271,7 +271,7 @@ async fn start_signers(
         };
 
         let ev = TxCoordinatorEventLoop {
-            network: spawn_network(&network),
+            network: spawn_network(network),
             context: ctx.clone(),
             context_window: 10000,
             private_key,
@@ -287,7 +287,7 @@ async fn start_signers(
         });
 
         let ev = TxSignerEventLoop {
-            network: spawn_network(&network),
+            network: spawn_network(network),
             context: ctx.clone(),
             context_window: 10000,
             wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
@@ -304,7 +304,7 @@ async fn start_signers(
         });
 
         let ev = RequestDeciderEventLoop {
-            network: spawn_network(&network),
+            network: spawn_network(network),
             context: ctx.clone(),
             context_window: 10000,
             deposit_decisions_retry_window: 1,
