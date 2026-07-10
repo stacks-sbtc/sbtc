@@ -3,7 +3,6 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicU8;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -260,7 +259,7 @@ async fn start_signers(
         signers.push(ctx);
     }
 
-    let start_count = Arc::new(AtomicU8::new(0));
+    let start_count = Arc::new(AtomicUsize::new(0));
     for (ctx, network) in signers.iter().zip(networks.iter()) {
         let private_key = ctx.config().signer.private_key;
         let signer_public_key = PublicKey::from_private_key(&private_key);
@@ -329,7 +328,7 @@ async fn start_signers(
         });
     }
 
-    while start_count.load(Ordering::SeqCst) < 4 * signer_set.num_signers as u8 {
+    while start_count.load(Ordering::SeqCst) < 4 * signer_set.num_signers {
         Sleep::for_millis(10).await;
     }
 
