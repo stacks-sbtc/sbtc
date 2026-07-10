@@ -435,22 +435,17 @@ where
         }
 
         // If we have just run DKG again but did not successfully submit
-        // the key rotation for it, then the aggregate key above is not the
-        // right one, we should use the aggregate key in the registry if
-        // it's available and bail if we do not have anything there.
-        let aggregate_key = maybe_registry_signer_set_info
-            .as_ref()
-            .map(|info| info.aggregate_key)
-            .unwrap_or(aggregate_key);
-
-        let signer_public_keys = maybe_registry_signer_set_info
-            .map(|info| info.signer_set)
-            .ok_or_else(|| Error::NoKeyRotationEvent)?;
+        // the key rotation transaction for it, then the aggregate key
+        // above is not the right one, and we should use the aggregate key
+        // in the registry if it's available.
+        let Some(signer_set_info) = maybe_registry_signer_set_info.as_ref() else {
+            return Err(Error::NoKeyRotationEvent);
+        };
 
         let bitcoin_processing_fut = self.construct_and_sign_bitcoin_sbtc_transactions(
             &bitcoin_chain_tip,
-            &aggregate_key,
-            &signer_public_keys,
+            &signer_set_info.aggregate_key,
+            &signer_set_info.signer_set,
         );
 
         if let Err(error) = bitcoin_processing_fut.await {
@@ -460,7 +455,7 @@ where
         self.construct_and_sign_stacks_response_transactions(
             &bitcoin_chain_tip,
             &wallet,
-            &aggregate_key,
+            &signer_set_info.aggregate_key,
         )
         .await?;
         tracing::debug!("coordinator tenure completed successfully");
