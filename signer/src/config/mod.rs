@@ -453,9 +453,6 @@ pub struct SignerConfig {
     /// The aggregate key constructed during the signers' first DKG. It was
     /// used to lock the first UTXO created by the signers.
     pub bootstrap_aggregate_key: Option<PublicKey>,
-    /// Whether the signer is malicious. This is only used for testing.
-    #[cfg(any(test, feature = "testing"))]
-    pub is_malicious: Option<bool>,
 }
 
 impl Validatable for SignerConfig {
