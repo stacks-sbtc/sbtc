@@ -434,6 +434,15 @@ where
             return Ok(());
         }
 
+        // If we have just run DKG again but did not successfully submit
+        // the key rotation for it, then the aggregate key above is not the
+        // right one, we should use the aggregate key in the registry if
+        // it's available and bail if we do not have anything there.
+        let aggregate_key = maybe_registry_signer_set_info
+            .as_ref()
+            .map(|info| info.aggregate_key)
+            .unwrap_or(aggregate_key);
+
         let signer_public_keys = maybe_registry_signer_set_info
             .map(|info| info.signer_set)
             .ok_or_else(|| Error::NoKeyRotationEvent)?;
@@ -2657,17 +2666,22 @@ mod tests {
     use crate::context::Context as _;
     use crate::emily_client::MockEmilyInteract;
     use crate::error::Error;
-    use crate::keys::{PrivateKey, PublicKey};
+    use crate::keys::PrivateKey;
+    use crate::keys::PublicKey;
     use crate::network::in_memory2::WanNetwork;
     use crate::stacks::api::MockStacksInteract;
+    use crate::storage::DbWrite as _;
     use crate::storage::memory::SharedStore;
-    use crate::storage::model::{BitcoinBlockHeight, DkgSharesStatus};
-    use crate::storage::{DbWrite as _, model};
+    use crate::storage::model;
+    use crate::storage::model::BitcoinBlockHeight;
+    use crate::storage::model::DkgSharesStatus;
     use crate::testing::context::*;
+    use crate::testing::get_rng;
     use crate::testing::transaction_coordinator::TestEnvironment;
-    use crate::testing::{self, get_rng};
+    use crate::testing::{self};
 
-    use fake::{Fake as _, Faker};
+    use fake::Fake as _;
+    use fake::Faker;
     use rand::SeedableRng as _;
     use test_case::test_case;
 
