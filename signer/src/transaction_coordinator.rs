@@ -504,8 +504,19 @@ where
             tracing::info!(
                 "🔐 beginning DKG verification before submitting rotate-key transaction"
             );
-            self.perform_dkg_verification(&bitcoin_chain_tip.block_hash, &last_dkg.aggregate_key)
-                .await?;
+            let result = self
+                .perform_dkg_verification(&bitcoin_chain_tip.block_hash, &last_dkg.aggregate_key);
+
+            // If the DKG verification fails, we don't submit the rotate
+            // key transaction, and we do not want to bail on the tenure,
+            // since there may be work for us to do. So, we return None and
+            // continue with our work, and hope for successful DKG
+            // verification in the next tenure.
+            if let Err(error) = result.await {
+                tracing::error!(%error, "DKG verification failed but we're continuing with our tenure");
+                return Ok(None);
+            }
+
             tracing::info!("🔐 DKG verification successful");
         }
 
