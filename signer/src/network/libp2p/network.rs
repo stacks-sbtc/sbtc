@@ -175,6 +175,7 @@ mod tests {
             .enable_memory_transport(true)
             .add_listen_endpoint(swarm1_addr.clone())
             .add_seed_addr(swarm2_addr.clone())
+            .with_signer_state(context1.state().clone())
             .build()
             .expect("Failed to build swarm 1");
 
@@ -182,6 +183,7 @@ mod tests {
             .enable_memory_transport(true)
             .add_listen_endpoint(swarm2_addr)
             .add_seed_addr(swarm1_addr)
+            .with_signer_state(context2.state().clone())
             .build()
             .expect("Failed to build swarm 2");
 
@@ -275,6 +277,7 @@ mod tests {
             .enable_memory_transport(true)
             .add_listen_endpoint(swarm1_addr.clone())
             .add_seed_addr(swarm2_addr.clone())
+            .with_signer_state(context1.state().clone())
             .build()
             .expect("Failed to build swarm 1");
 
@@ -283,6 +286,7 @@ mod tests {
             .add_listen_endpoint(swarm2_addr.clone())
             .add_seed_addr(swarm1_addr.clone())
             .add_seed_addr(swarm3_addr.clone())
+            .with_signer_state(context2.state().clone())
             .build()
             .expect("Failed to build swarm 2");
 
@@ -290,6 +294,7 @@ mod tests {
             .enable_memory_transport(true)
             .add_listen_endpoint(swarm3_addr.clone())
             .add_seed_addr(swarm2_addr.clone())
+            .with_signer_state(context3.state().clone())
             .build()
             .expect("Failed to build swarm 3");
 
@@ -430,6 +435,7 @@ mod tests {
             .enable_memory_transport(true)
             .add_listen_endpoint(swarm1_addr.clone())
             .add_seed_addr(swarm2_addr.clone())
+            .with_signer_state(context1.state().clone())
             .build()
             .expect("Failed to build swarm 1");
 
@@ -438,6 +444,7 @@ mod tests {
             .add_listen_endpoint(swarm2_addr.clone())
             .add_seed_addr(swarm1_addr.clone())
             .add_seed_addr(swarm3_addr.clone())
+            .with_signer_state(context2.state().clone())
             .build()
             .expect("Failed to build swarm 2");
 
@@ -445,6 +452,7 @@ mod tests {
             .enable_memory_transport(true)
             .add_listen_endpoint(swarm3_addr.clone())
             .add_seed_addr(swarm2_addr.clone())
+            .with_signer_state(context3.state().clone())
             .build()
             .expect("Failed to build swarm 3");
 
@@ -623,12 +631,14 @@ mod tests {
             .enable_memory_transport(true)
             .add_listen_endpoint(swarm1_addr.clone())
             .add_seed_addrs(&[swarm2_addr.clone(), swarm3_addr.clone()])
+            .with_signer_state(context1.state().clone())
             .build()
             .expect("Failed to build swarm 1");
         let mut swarm2 = SignerSwarmBuilder::new(&key2)
             .enable_memory_transport(true)
             .add_listen_endpoint(swarm2_addr.clone())
             .add_seed_addrs(&[swarm1_addr.clone(), swarm3_addr.clone()])
+            .with_signer_state(context2.state().clone())
             .build()
             .expect("Failed to build swarm 2");
         // Create the adversarial swarm.
@@ -636,6 +646,7 @@ mod tests {
             .enable_memory_transport(true)
             .add_listen_endpoint(swarm3_addr.clone())
             .add_seed_addrs(&[swarm1_addr, swarm2_addr])
+            .with_signer_state(context3.state().clone())
             .build()
             .expect("Failed to build swarm 3");
 
