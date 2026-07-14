@@ -1815,4 +1815,97 @@ mod tests {
 
         assert_eq!(original, original_from_proto);
     }
+
+    /// Time how long the victim spends decoding a single oversized
+    /// `DkgPublicShares` message. This is the DoS surface described in
+    /// report #83769: `Point::lift_x` runs once per point in the message
+    /// on the libp2p event loop thread, before signatures are verified.
+    ///
+    /// Skipped by default (long-running by design). Run with:
+    ///
+    /// ```text
+    /// cargo test --release -p signer --lib \
+    ///   proto::convert::tests::bench_deserialize_dkg_public_shares \
+    ///   -- --ignored --nocapture
+    /// ```
+    #[ignore = "benchmark; run with --release --ignored --nocapture"]
+    #[test]
+    fn bench_deserialize_dkg_public_shares() {
+        use prost::Message as _;
+        use std::time::Instant;
+
+        // Same point construction the flooder uses in
+        // `signer/examples/dkg_flood.rs` — any curve point works.
+        let scalar_bytes = [
+            143, 155, 8, 85, 229, 228, 1, 179, 39, 101, 245, 99, 113, 81, 250, 4, 15, 22, 126, 74,
+            137, 110, 198, 25, 250, 142, 202, 51, 0, 241, 238, 168,
+        ];
+        let point = Point::from(Scalar::from(scalar_bytes));
+
+        let points_per_commitment: usize = 1500;
+        let iterations: u32 = 100;
+
+        // Build a `proto::SignerDkgPublicShares` with a single commitment
+        // holding `points_per_commitment` points. This is the shape that
+        // `TryFrom<proto::SignerDkgPublicShares> for DkgPublicShares`
+        // walks, calling `Point::lift_x` once per point.
+        let proto_point = proto::Point::from(point);
+        let id = wsts::schnorr::ID {
+            id: Scalar::from([1u8; 32]),
+            kG: point,
+            kca: Scalar::from([2u8; 32]),
+        };
+        let commitment = proto::PolyCommitment {
+            id: Some(id.into()),
+            poly: vec![proto_point; points_per_commitment],
+        };
+        let party_commitment = proto::PartyCommitment {
+            signer_id: 0,
+            commitment: Some(commitment),
+        };
+        let shares = proto::SignerDkgPublicShares {
+            dkg_id: 0,
+            signer_id: 0,
+            commitments: vec![party_commitment],
+        };
+
+        let encoded = shares.encode_to_vec();
+        println!(
+            "encoded SignerDkgPublicShares: {} bytes ({} points)",
+            encoded.len(),
+            points_per_commitment
+        );
+
+        // Warm-up (one decode) to prime any lazy state / caches so the
+        // first timed iteration isn't an outlier.
+        let _ = DkgPublicShares::try_from(
+            proto::SignerDkgPublicShares::decode(encoded.as_slice()).unwrap(),
+        )
+        .unwrap();
+
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let decoded = proto::SignerDkgPublicShares::decode(encoded.as_slice()).unwrap();
+            let out = DkgPublicShares::try_from(decoded).unwrap();
+            // Force the compiler to keep the work.
+            std::hint::black_box(out);
+        }
+        let elapsed = start.elapsed();
+
+        let per_msg_ms = elapsed.as_secs_f64() * 1000.0 / f64::from(iterations);
+        let per_point_us =
+            elapsed.as_secs_f64() * 1_000_000.0 / f64::from(iterations) / points_per_commitment as f64;
+        let msgs_per_sec = f64::from(iterations) / elapsed.as_secs_f64();
+
+        println!(
+            "decoded {iterations} messages × {points_per_commitment} points in {elapsed:?}"
+        );
+        println!("  {per_msg_ms:.2} ms / message");
+        println!("  {per_point_us:.2} µs / point (Point::lift_x)");
+        println!("  {msgs_per_sec:.1} messages / second sustained");
+        println!(
+            "  → one attacker saturating the event loop pins it for ~{:.1}% wall clock",
+            per_msg_ms * msgs_per_sec / 10.0
+        );
+    }
 }
