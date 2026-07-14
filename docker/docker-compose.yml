@@ -211,6 +211,7 @@ services:
       SIGNER_SIGNER__PROMETHEUS_EXPORTER_ENDPOINT: 0.0.0.0:9181
     ports:
       - "127.0.0.1:8801:8801"
+      - "127.0.0.1:4122:4122"
 
   # sbtc signer 2 ----
   postgres-2:
@@ -233,6 +234,7 @@ services:
       SIGNER_SIGNER__PROMETHEUS_EXPORTER_ENDPOINT: 0.0.0.0:9182
     ports:
       - "127.0.0.1:8802:8801"
+      - "127.0.0.1:4123:4122"
 
   # sbtc signer 3 ----
   postgres-3:
@@ -255,6 +257,7 @@ services:
       SIGNER_SIGNER__PROMETHEUS_EXPORTER_ENDPOINT: 0.0.0.0:9183
     ports:
       - "127.0.0.1:8803:8801"
+      - "127.0.0.1:4124:4122"
 
   # Blocklist client.
   # -----------------

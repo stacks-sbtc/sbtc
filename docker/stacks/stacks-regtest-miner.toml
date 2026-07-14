@@ -71,12 +71,17 @@ events_keys = [
 timeout_ms = 10_000
 
 # Add sbtc-signer as an event observers
-[[events_observer]]
-endpoint = "host.docker.internal:8801"
-events_keys = [
-    "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry::print",
-]
-timeout_ms = 10_000
+#
+# PoC note: sbtc-signer-1's event-observer entry is intentionally
+# omitted so that stopping the honest sbtc-signer-1 container during
+# the flooding PoC (report #83769) doesn't stall the miner. See the
+# `stacks/Config.toml` template's warning about missing observers.
+# [[events_observer]]
+# endpoint = "host.docker.internal:8801"
+# events_keys = [
+#     "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry::print",
+# ]
+# timeout_ms = 10_000
 
 [[events_observer]]
 endpoint = "host.docker.internal:8802"
