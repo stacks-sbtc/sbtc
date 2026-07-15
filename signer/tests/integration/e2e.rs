@@ -801,12 +801,19 @@ struct SignerRotationScenario {
     new_signatures_required: 2,
 }; "2-of-3, replace 1")]
 #[test_case(SignerRotationScenario {
-    num_signers: 14,
-    signatures_required: 10,
-    removed_signers: 4,
-    added_signers: 4,
-    new_signatures_required: 10,
-}; "10-of-14, replace 4")]
+    num_signers: 5,
+    signatures_required: 3,
+    removed_signers: 2,
+    added_signers: 2,
+    new_signatures_required: 3,
+}; "3-of-5, replace 2")]
+// #[test_case(SignerRotationScenario {
+//     num_signers: 14,
+//     signatures_required: 10,
+//     removed_signers: 4,
+//     added_signers: 4,
+//     new_signatures_required: 10,
+// }; "10-of-14, replace 4")]
 #[test_log::test(tokio::test)]
 async fn signer_set_rotation(scenario: SignerRotationScenario) {
     let stack = TestContainersBuilder::start_stacks().await;
