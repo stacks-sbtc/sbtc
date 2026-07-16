@@ -17,7 +17,6 @@ use clarity::vm::types::PrincipalData;
 use clarity::vm::types::StacksAddressExtensions as _;
 use emily_client::apis::deposit_api;
 use emily_client::models::CreateDepositRequestBody;
-use futures::future::join_all;
 use futures::stream::StreamExt as _;
 use lru::LruCache;
 use rand::rngs::OsRng;
@@ -31,9 +30,6 @@ use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::block_observer::BlockObserver;
 use signer::config::NetworkKind;
 use signer::context::Context as _;
-use signer::context::SignerEvent;
-use signer::context::SignerSignal;
-use signer::context::TxCoordinatorEvent;
 use signer::emily_client::EmilyClient;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
@@ -49,11 +45,10 @@ use signer::stacks::api::StacksClient;
 use signer::stacks::api::StacksInteract as _;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead as _;
-use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::DkgSharesStatus;
+use signer::testing;
 use signer::testing::context::*;
-use signer::testing::{self};
 use signer::transaction_coordinator::TxCoordinatorEventLoop;
 use signer::transaction_coordinator::coordinator_public_key;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
@@ -70,6 +65,7 @@ use crate::stacks::fund_stx;
 use crate::stacks::wait_for_new_nonce;
 use crate::stacks::wait_for_stx_balance;
 use crate::transaction_coordinator::IntegrationTestContext;
+use crate::transaction_coordinator::wait_for_tenure_completed;
 use crate::utxo_construction::make_deposit_request_to;
 
 #[derive(Clone)]
@@ -333,33 +329,6 @@ async fn start_signers(
     }
 
     signers
-}
-
-/// Wait until every signer has emitted `TenureCompleted` for the provided
-/// Bitcoin block hash.
-async fn wait_for_tenure_completed(
-    signers: &[IntegrationTestContext<StacksClient>],
-    block_hash: BitcoinBlockHash,
-) {
-    let wait_duration = Duration::from_secs(15);
-
-    join_all(signers.iter().map(|ctx| async {
-        ctx.wait_for_signal(wait_duration, |signal| {
-            matches!(
-                signal,
-                SignerSignal::Event(SignerEvent::TxCoordinator(
-                    TxCoordinatorEvent::TenureCompleted(block_ref),
-                )) if block_ref.block_hash == block_hash
-            )
-        })
-        .await
-        .unwrap();
-    }))
-    .await;
-
-    // It's not entirely clear why this sleep is helpful, but it appears to
-    // be necessary in CI.
-    Sleep::for_secs(2).await;
 }
 
 /// Build a deposit transaction for `depositor`, submit it to Bitcoin Core, and
