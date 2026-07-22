@@ -434,14 +434,18 @@ where
             return Ok(());
         }
 
-        let signer_public_keys = maybe_registry_signer_set_info
-            .map(|info| info.signer_set)
-            .ok_or_else(|| Error::NoKeyRotationEvent)?;
+        // If we have just run DKG again but did not successfully submit
+        // the key rotation transaction for it, then the aggregate key
+        // above is not the right one, and we should use the aggregate key
+        // in the registry if it's available.
+        let Some(signer_set_info) = maybe_registry_signer_set_info.as_ref() else {
+            return Err(Error::NoKeyRotationEvent);
+        };
 
         let bitcoin_processing_fut = self.construct_and_sign_bitcoin_sbtc_transactions(
             &bitcoin_chain_tip,
-            &aggregate_key,
-            &signer_public_keys,
+            &signer_set_info.aggregate_key,
+            &signer_set_info.signer_set,
         );
 
         if let Err(error) = bitcoin_processing_fut.await {
@@ -451,7 +455,7 @@ where
         self.construct_and_sign_stacks_response_transactions(
             &bitcoin_chain_tip,
             &wallet,
-            &aggregate_key,
+            &signer_set_info.aggregate_key,
         )
         .await?;
         tracing::debug!("coordinator tenure completed successfully");
@@ -504,8 +508,19 @@ where
             tracing::info!(
                 "🔐 beginning DKG verification before submitting rotate-key transaction"
             );
-            self.perform_dkg_verification(&bitcoin_chain_tip.block_hash, &last_dkg.aggregate_key)
-                .await?;
+            let result = self
+                .perform_dkg_verification(&bitcoin_chain_tip.block_hash, &last_dkg.aggregate_key);
+
+            // If the DKG verification fails, we don't submit the rotate
+            // key transaction, and we do not want to bail on the tenure,
+            // since there may be work for us to do. So, we return None and
+            // continue with our work, and hope for successful DKG
+            // verification in the next tenure.
+            if let Err(error) = result.await {
+                tracing::error!(%error, "DKG verification failed but we're continuing with our tenure");
+                return Ok(None);
+            }
+
             tracing::info!("🔐 DKG verification successful");
         }
 
@@ -2646,17 +2661,22 @@ mod tests {
     use crate::context::Context as _;
     use crate::emily_client::MockEmilyInteract;
     use crate::error::Error;
-    use crate::keys::{PrivateKey, PublicKey};
+    use crate::keys::PrivateKey;
+    use crate::keys::PublicKey;
     use crate::network::in_memory2::WanNetwork;
     use crate::stacks::api::MockStacksInteract;
+    use crate::storage::DbWrite as _;
     use crate::storage::memory::SharedStore;
-    use crate::storage::model::{BitcoinBlockHeight, DkgSharesStatus};
-    use crate::storage::{DbWrite as _, model};
+    use crate::storage::model;
+    use crate::storage::model::BitcoinBlockHeight;
+    use crate::storage::model::DkgSharesStatus;
     use crate::testing::context::*;
+    use crate::testing::get_rng;
     use crate::testing::transaction_coordinator::TestEnvironment;
-    use crate::testing::{self, get_rng};
+    use crate::testing::{self};
 
-    use fake::{Fake as _, Faker};
+    use fake::Fake as _;
+    use fake::Faker;
     use rand::SeedableRng as _;
     use test_case::test_case;
 

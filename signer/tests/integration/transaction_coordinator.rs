@@ -278,13 +278,29 @@ where
     assert_eq!(contract_call.function_name.as_str(), T::FUNCTION_NAME);
 }
 
+/// Trait for `IntegrationTestContext` wrappers
+pub trait SignerContextProvider<S> {
+    fn context(&self) -> &IntegrationTestContext<S>;
+}
+
+impl<S, K> SignerContextProvider<S> for (IntegrationTestContext<S>, PgStore, K, SignerNetwork) {
+    fn context(&self) -> &IntegrationTestContext<S> {
+        &self.0
+    }
+}
+
+impl<S> SignerContextProvider<S> for IntegrationTestContext<S> {
+    fn context(&self) -> &IntegrationTestContext<S> {
+        self
+    }
+}
+
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
-pub async fn wait_for_tenure_completed<S, K>(
-    signers: &[(IntegrationTestContext<S>, PgStore, K, SignerNetwork)],
-    block_hash: BitcoinBlockHash,
-) where
+pub async fn wait_for_tenure_completed<T, S>(signers: &[T], block_hash: BitcoinBlockHash)
+where
+    T: SignerContextProvider<S>,
     S: StacksInteract + Clone + Send + Sync + 'static,
 {
     let wait_duration = Duration::from_secs(15);
@@ -299,8 +315,12 @@ pub async fn wait_for_tenure_completed<S, K>(
 
     signers
         .iter()
-        .map(|(ctx, _, _, _)| async {
-            ctx.wait_for_signal(wait_duration, match_fn).await.unwrap();
+        .map(|signer| async {
+            signer
+                .context()
+                .wait_for_signal(wait_duration, match_fn)
+                .await
+                .unwrap();
         })
         .join_all()
         .await;
