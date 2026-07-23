@@ -114,8 +114,8 @@ bootstrap_signing_set = [
 bootstrap_signatures_required = 8
 
 # The hex encoded bytes of the compressed public key that locked the first
-# UTXO created by the signers. It is also aggregate key constructed during
-# the signers' first DKG.
+# UTXO created by the signers. It is also the aggregate key that was 
+# constructed during the signers' first DKG.
 #
 # Required: false
 # Environment: SIGNER_SIGNER__BOOTSTRAP_AGGREGATE_KEY
