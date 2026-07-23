@@ -113,6 +113,14 @@ bootstrap_signing_set = [
 # Required: true
 bootstrap_signatures_required = 8
 
+# The hex encoded bytes of the compressed public key that locked the first
+# UTXO created by the signers. It is also aggregate key constructed during
+# the signers' first DKG.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__BOOTSTRAP_AGGREGATE_KEY
+bootstrap_aggregate_key = "03f898f8a6ddb86dd4608dd168355ec6135fe2839222240c01942e8e7e50dd4c89"
+
 # Seconds to wait before processing a new Bitcoin block.
 # Required: true
 # Environment: SIGNER_SIGNER__BITCOIN_PROCESSING_DELAY
