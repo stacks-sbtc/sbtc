@@ -100,12 +100,9 @@ bootstrap_signing_set = [
     "035b1c31ee3412fb5e7e4c510b957689c6f30ab591082c425c58af77d6e593d7f1",
     "03d92e4ee96a6046c1ffb054b776631fc631b987819c98ecd2e97c79bd887fc24a",
     "024e8daf0693ad298802462873bcb3b29d2cd4eb001c55dd58dea6a004d737770d",
-    "02de4e3f0df932cda285ffec2fb6e57b8c3d2c0cd5eed1e32859c704c5f5cd027a",
-    "024020d254667b90161127d4197d9cecfb1e7b5a5237c34cf45391d60254d293d7",
     "0368d6742af52b9f7069570da3bdba120f7e760ea31c4bc0e5b96bba7a70f4d317",
     "03830690830ab2790433231521edbad02715ce7d8b6a8aa43f83cad3e2407b96c4",
     "03b767388de2f11326cd2c44ac2032f5bf8fcf8572b46cfff0057c5e1c5c0bd7d6",
-    "02c14b0daa6ddb9b74869fd947372a3622d2f88a871523dcd14c5c7c7f0c6c9cc0",
     "03b5b8b594438c7101bbc5fb25d1b76c4643c713481031f7d06bde1f1668c8112d",
     "03ed8edbcbb26010ae3a992ea1e4fffab3805e1303edbd3c130307b4cbcd38a481",
 ]
@@ -114,7 +111,15 @@ bootstrap_signing_set = [
 # multi-sig wallet on Stacks.
 #
 # Required: true
-bootstrap_signatures_required = 10
+bootstrap_signatures_required = 8
+
+# The hex encoded bytes of the compressed public key that locked the first
+# UTXO created by the signers. It is also the aggregate key that was 
+# constructed during the signers' first DKG.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__BOOTSTRAP_AGGREGATE_KEY
+bootstrap_aggregate_key = "03f898f8a6ddb86dd4608dd168355ec6135fe2839222240c01942e8e7e50dd4c89"
 
 # Seconds to wait before processing a new Bitcoin block.
 # Required: true
