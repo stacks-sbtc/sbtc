@@ -17,8 +17,6 @@ use blockstack_lib::chainstate::stacks::TransactionAuth;
 use blockstack_lib::chainstate::stacks::TransactionPublicKeyEncoding;
 use blockstack_lib::chainstate::stacks::TransactionSpendingCondition;
 use blockstack_lib::chainstate::stacks::TransactionVersion;
-use blockstack_lib::core::CHAIN_ID_MAINNET;
-use blockstack_lib::core::CHAIN_ID_TESTNET;
 use blockstack_lib::types::chainstate::StacksAddress;
 use blockstack_lib::util::secp256k1::Secp256k1PublicKey;
 use rand::SeedableRng as _;
@@ -66,6 +64,8 @@ pub struct SignerWallet {
     signatures_required: u16,
     /// The kind of network we are operating under.
     network_kind: NetworkKind,
+    /// The network chain id
+    network_chain_id: u32,
     /// The multi-sig address associated with the public keys.
     address: StacksAddress,
     /// The next nonce for the StacksAddress associated with the address of
@@ -110,6 +110,7 @@ impl SignerWallet {
         public_keys: I,
         signatures_required: u16,
         network_kind: NetworkKind,
+        network_chain_id: u32,
         nonce: u64,
     ) -> Result<Self, Error>
     where
@@ -152,6 +153,7 @@ impl SignerWallet {
             public_keys,
             signatures_required,
             network_kind,
+            network_chain_id,
             address: StacksAddress::from_public_keys(version, &hash_mode, num_sigs, &pubkeys)
                 .ok_or(Error::StacksMultiSig(signatures_required, num_keys))?,
             nonce: AtomicU64::new(nonce),
@@ -176,7 +178,13 @@ impl SignerWallet {
             Some(info) => {
                 let public_keys = info.signer_set;
                 let signatures_required = info.signatures_required;
-                SignerWallet::new(&public_keys, signatures_required, config.network, 0)
+                SignerWallet::new(
+                    &public_keys,
+                    signatures_required,
+                    config.network,
+                    config.network_chain_id(),
+                    0,
+                )
             }
             None => Self::load_boostrap_wallet(&ctx.config().signer),
         }
@@ -188,7 +196,13 @@ impl SignerWallet {
         let public_keys = config.bootstrap_signing_set.clone();
         let signatures_required = config.bootstrap_signatures_required;
 
-        SignerWallet::new(&public_keys, signatures_required, network_kind, 0)
+        SignerWallet::new(
+            &public_keys,
+            signatures_required,
+            network_kind,
+            config.network_chain_id(),
+            0,
+        )
     }
 
     fn hash_mode() -> OrderIndependentMultisigHashMode {
@@ -298,9 +312,9 @@ impl MultisigTx {
         // https://github.com/hirosystems/stacks.js/blob/2c57ea4e5abed76da903f5138c79c1d2eceb008b/packages/transactions/src/constants.ts#L1-L8,
         // and in the clarity docs at
         // https://docs.stacks.co/clarity/keywords#chain-id-clarity2:
-        let (version, chain_id) = match wallet.network_kind {
-            NetworkKind::Mainnet => (TransactionVersion::Mainnet, CHAIN_ID_MAINNET),
-            _ => (TransactionVersion::Testnet, CHAIN_ID_TESTNET),
+        let version = match wallet.network_kind {
+            NetworkKind::Mainnet => TransactionVersion::Mainnet,
+            _ => TransactionVersion::Testnet,
         };
 
         let conditions = payload.post_conditions();
@@ -309,7 +323,7 @@ impl MultisigTx {
 
         let tx = StacksTransaction {
             version,
-            chain_id,
+            chain_id: wallet.network_chain_id,
             auth: TransactionAuth::Standard(spending_condition),
             anchor_mode: TransactionAnchorMode::Any,
             post_condition_mode: conditions.post_condition_mode,
@@ -414,6 +428,7 @@ where
         &public_keys,
         wallet.signatures_required,
         wallet.network_kind,
+        wallet.network_chain_id,
         0,
     )?;
 
@@ -537,7 +552,14 @@ mod tests {
             .collect();
 
         let public_keys: Vec<_> = key_pairs.iter().map(|kp| kp.public_key().into()).collect();
-        let wallet = SignerWallet::new(&public_keys, signatures_required, network, 1).unwrap();
+        let wallet = SignerWallet::new(
+            &public_keys,
+            signatures_required,
+            network,
+            network.chain_id(),
+            1,
+        )
+        .unwrap();
 
         let mut tx_signer =
             MultisigTx::new_contract_call(TestContractCall::default(), &wallet, TX_FEE);
@@ -589,7 +611,14 @@ mod tests {
             .collect();
 
         let public_keys: Vec<_> = key_pairs.iter().map(|kp| kp.public_key().into()).collect();
-        let wallet = SignerWallet::new(&public_keys, signatures_required, network, 1).unwrap();
+        let wallet = SignerWallet::new(
+            &public_keys,
+            signatures_required,
+            network,
+            network.chain_id(),
+            1,
+        )
+        .unwrap();
 
         let mut tx_signer =
             MultisigTx::new_contract_call(TestContractCall::default(), &wallet, TX_FEE);
@@ -647,7 +676,7 @@ mod tests {
                 .collect();
 
         let pks1 = public_keys.clone();
-        let wallet1 = SignerWallet::new(&pks1, 5, network, 0).unwrap();
+        let wallet1 = SignerWallet::new(&pks1, 5, network, network.chain_id(), 0).unwrap();
 
         // Although it's unlikely, it's possible for the shuffle to not
         // shuffle anything, so we need to keep trying.
@@ -655,7 +684,7 @@ mod tests {
             public_keys.shuffle(&mut OsRng);
         }
 
-        let wallet2 = SignerWallet::new(&public_keys, 5, network, 0).unwrap();
+        let wallet2 = SignerWallet::new(&public_keys, 5, network, network.chain_id(), 0).unwrap();
 
         assert_eq!(wallet1.address(), wallet2.address())
     }
@@ -701,7 +730,14 @@ mod tests {
                 .collect();
         let signatures_required = 5;
         let network = NetworkKind::Regtest;
-        let wallet1 = SignerWallet::new(&signer_keys, signatures_required, network, 0).unwrap();
+        let wallet1 = SignerWallet::new(
+            &signer_keys,
+            signatures_required,
+            network,
+            network.chain_id(),
+            0,
+        )
+        .unwrap();
 
         let (_, stacks_chain_tip) = db.get_chain_tips().await;
 
@@ -765,7 +801,14 @@ mod tests {
             .take(num_keys as usize)
             .collect::<Vec<_>>();
 
-        let wallet = SignerWallet::new(&public_keys, signatures_required, network_kind, 0).unwrap();
+        let wallet = SignerWallet::new(
+            &public_keys,
+            signatures_required,
+            network_kind,
+            network_kind.chain_id(),
+            0,
+        )
+        .unwrap();
 
         let payload =
             TransactionPayload::ContractCall(TestContractCall::default().as_contract_call());

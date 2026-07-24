@@ -67,6 +67,7 @@ impl TestRotateKeySetup {
             &signer_keys,
             signatures_required,
             signer::config::NetworkKind::Regtest,
+            signer::config::NetworkKind::Regtest.chain_id(),
             0,
         )
         .unwrap();
@@ -432,6 +433,7 @@ async fn rotate_key_validation_wrong_signatures_required() {
         setup.wallet.public_keys(),
         setup.wallet.signatures_required() + 1,
         signer::config::NetworkKind::Regtest,
+        signer::config::NetworkKind::Regtest.chain_id(),
         0,
     )
     .unwrap();
