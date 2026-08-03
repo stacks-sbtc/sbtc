@@ -477,7 +477,7 @@ impl<C: Context, B> BlockObserver<C, B> {
             block_hash: tenure_info.tip_block_id,
             block_height: tenure_info.tip_height,
         };
-        tracing::debug!("updating the signer state with the current stacks chain tip");
+        tracing::info!("updating the signer state with the current stacks chain tip");
         self.context.state().set_stacks_chain_tip(stacks_chain_tip);
         Ok(())
     }
