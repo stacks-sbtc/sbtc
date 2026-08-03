@@ -44,6 +44,7 @@ use crate::storage::TransactionHandle as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
+use crate::storage::model::StacksBlockRef;
 use crate::util::FutureExt as _;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
@@ -179,9 +180,13 @@ where
                         tracing::error!(%error, "could not process bitcoin blocks");
                     }
 
-                    if let Err(error) = self.process_stacks_blocks().await {
-                        tracing::error!(%error, "could not process stacks blocks");
-                    }
+                    let stacks_chain_tip = match self.process_stacks_blocks().await {
+                        Ok(chain_tip) => chain_tip,
+                        Err(error) => {
+                            tracing::error!(%error, "could not process stacks blocks");
+                            continue;
+                        }
+                    };
 
                     if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
                         tracing::error!(%error, "could not check pending dkg shares");
@@ -189,7 +194,8 @@ where
                     }
 
                     tracing::debug!("updating the signer state");
-                    let chain_tip = match self.update_signer_state(block_hash).await {
+                    let chain_tip_fut = self.update_signer_state(block_hash, stacks_chain_tip);
+                    let chain_tip = match chain_tip_fut.await {
                         Ok(chain_tip) => chain_tip,
                         Err(error) => {
                             tracing::error!(%error, "could not update the signer state");
@@ -453,7 +459,7 @@ impl<C: Context, B> BlockObserver<C, B> {
 
     /// Process all recent stacks blocks.
     #[tracing::instrument(skip_all)]
-    async fn process_stacks_blocks(&self) -> Result<(), Error> {
+    async fn process_stacks_blocks(&self) -> Result<StacksBlockRef, Error> {
         tracing::info!("processing stacks block");
         let stacks_client = self.context.get_stacks_client();
         let db = self.context.get_storage_mut();
@@ -466,7 +472,10 @@ impl<C: Context, B> BlockObserver<C, B> {
             .await?;
 
         tracing::debug!("finished processing stacks block");
-        Ok(())
+        Ok(StacksBlockRef {
+            block_hash: tenure_info.tip_block_id,
+            block_height: tenure_info.tip_height,
+        })
     }
 
     /// Update the sBTC peg limits from Emily
@@ -552,19 +561,6 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(chain_tip)
     }
 
-    /// Set the `SignerState` object with current stacks chain tip.
-    async fn set_stacks_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
-        let db = self.context.get_storage();
-        let chain_tip = db
-            .get_stacks_chain_tip(&chain_tip.into())
-            .await?
-            .map(model::StacksBlockRef::from)
-            .ok_or_else(|| Error::NoStacksChainTip)?;
-
-        self.context.state().set_stacks_chain_tip(chain_tip);
-        Ok(())
-    }
-
     /// Update the `SignerState` object with data that is unlikely to
     /// change until the arrival of the next bitcoin block.
     ///
@@ -576,7 +572,11 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * The current aggregate key.
     /// * The current stacks chain tip.
     /// * The current bitcoin chain tip.
-    async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
+    async fn update_signer_state(
+        &self,
+        chain_tip: BlockHash,
+        stacks_chain_tip: StacksBlockRef,
+    ) -> Result<BitcoinBlockRef, Error> {
         tracing::info!("loading sbtc limits from Emily");
         self.update_sbtc_limits(chain_tip).await?;
 
@@ -584,7 +584,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         self.set_signer_set_info().await?;
 
         tracing::info!("updating the signer state with the current stacks chain tip");
-        self.set_stacks_chain_tip(chain_tip).await?;
+        self.context.state().set_stacks_chain_tip(stacks_chain_tip);
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
         self.set_bitcoin_chain_tip(chain_tip).await
