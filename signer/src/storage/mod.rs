@@ -82,6 +82,7 @@ pub trait DbRead {
 
     /// Get the stacks chain tip, defined as the highest stacks block
     /// confirmed by the bitcoin chain tip.
+    #[cfg(any(test, feature = "testing"))]
     fn get_stacks_chain_tip(
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
