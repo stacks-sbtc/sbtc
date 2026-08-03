@@ -42,6 +42,7 @@ use crate::storage::DbWrite;
 use crate::storage::Transactable as _;
 use crate::storage::TransactionHandle as _;
 use crate::storage::model;
+use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
 use crate::storage::model::StacksBlockRef;
@@ -180,23 +181,27 @@ where
                         tracing::error!(%error, "could not process bitcoin blocks");
                     }
 
-                    if let Err(error) = self.process_stacks_blocks().await {
-                        tracing::error!(%error, "could not process stacks blocks");
-                    }
+                    let Ok(chain_tip) = self.get_bitcoin_chain_tip(block_hash).await else {
+                        tracing::error!("could not get bitcoin chain tip");
+                        continue;
+                    };
 
-                    if let Err(error) = self.check_pending_dkg_shares(block_hash).await {
+                    if let Err(error) = self.check_pending_dkg_shares(&chain_tip).await {
                         tracing::error!(%error, "could not check pending dkg shares");
                         continue;
                     }
 
+                    // This updates the signer state with the stacks chain tip.
+                    if let Err(error) = self.process_stacks_blocks().await {
+                        tracing::error!(%error, "could not process stacks blocks");
+                        continue;
+                    }
+
                     tracing::debug!("updating the signer state");
-                    let chain_tip = match self.update_signer_state(block_hash).await {
-                        Ok(chain_tip) => chain_tip,
-                        Err(error) => {
-                            tracing::error!(%error, "could not update the signer state");
-                            continue;
-                        }
-                    };
+                    if let Err(error) = self.update_signer_state(chain_tip).await {
+                        tracing::error!(%error, "could not update the signer state");
+                        continue;
+                    }
 
                     tracing::info!("loading latest deposit requests from Emily");
                     if let Err(error) = self.load_latest_deposit_requests().await {
@@ -452,6 +457,18 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
+    /// Get a bitcoin block ref from a block hash.
+    async fn get_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
+        self.context
+            .get_storage()
+            .get_bitcoin_block(&chain_tip.into())
+            .await
+            .inspect_err(|error| tracing::error!(%error, "could not get bitcoin chain tip"))?
+            .map(model::BitcoinBlockRef::from)
+            .ok_or_else(|| Error::UnknownBitcoinBlock(chain_tip))
+            .inspect_err(|error| tracing::error!(%error, "could not get bitcoin chain tip"))
+    }
+
     /// Process all recent stacks blocks.
     ///
     /// # Note
@@ -483,7 +500,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 
     /// Update the sBTC peg limits from Emily
-    async fn update_sbtc_limits(&self, chain_tip: BlockHash) -> Result<(), Error> {
+    async fn update_sbtc_limits(&self, chain_tip: BitcoinBlockHash) -> Result<(), Error> {
         let limits = self.context.get_emily_client().get_limits().await?;
         let sbtc_deployed = self.context.state().sbtc_contracts_deployed();
 
@@ -507,7 +524,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         let withdrawn_total = self
             .context
             .get_storage()
-            .compute_withdrawn_total(&chain_tip.into(), rolling_limits.blocks)
+            .compute_withdrawn_total(&chain_tip, rolling_limits.blocks)
             .await?;
 
         let limits = SbtcLimits::new(
@@ -552,19 +569,6 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
-    /// Set the `SignerState` object with current bitcoin chain tip.
-    async fn set_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
-        let db = self.context.get_storage();
-        let chain_tip = db
-            .get_bitcoin_block(&chain_tip.into())
-            .await?
-            .map(model::BitcoinBlockRef::from)
-            .ok_or_else(|| Error::UnknownBitcoinBlock(chain_tip))?;
-
-        self.context.state().set_bitcoin_chain_tip(chain_tip);
-        Ok(chain_tip)
-    }
-
     /// Update the `SignerState` object with data that is unlikely to
     /// change until the arrival of the next bitcoin block.
     ///
@@ -575,19 +579,20 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * The current signer set.
     /// * The current aggregate key.
     /// * The current bitcoin chain tip.
-    async fn update_signer_state(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
+    async fn update_signer_state(&self, chain_tip: BitcoinBlockRef) -> Result<(), Error> {
         tracing::info!("loading sbtc limits from Emily");
-        self.update_sbtc_limits(chain_tip).await?;
+        self.update_sbtc_limits(chain_tip.block_hash).await?;
 
         tracing::info!("updating the signer state with the current signer set");
         self.set_signer_set_info().await?;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
-        self.set_bitcoin_chain_tip(chain_tip).await
+        self.context.state().set_bitcoin_chain_tip(chain_tip);
+        Ok(())
     }
 
     /// Checks if the latest dkg share is pending and is no longer valid
-    async fn check_pending_dkg_shares(&self, chain_tip: BlockHash) -> Result<(), Error> {
+    async fn check_pending_dkg_shares(&self, chain_tip: &BitcoinBlockRef) -> Result<(), Error> {
         let db = self.context.get_storage_mut();
 
         let last_dkg = db.get_latest_encrypted_dkg_shares().await?;
@@ -610,10 +615,6 @@ impl<C: Context, B> BlockObserver<C, B> {
             return Ok(());
         };
 
-        let chain_tip = db
-            .get_bitcoin_block(&chain_tip.into())
-            .await?
-            .ok_or(Error::NoChainTip)?;
         let verification_window = self.context.config().signer.dkg_verification_window;
 
         let max_verification_height = last_dkg
