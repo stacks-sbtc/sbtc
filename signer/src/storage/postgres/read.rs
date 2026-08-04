@@ -785,6 +785,7 @@ impl PgRead {
         .map_err(Error::SqlxQuery)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub async fn get_stacks_chain_tip<'e, E>(
         executor: &'e mut E,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
@@ -2615,6 +2616,7 @@ impl DbRead for PgStore {
         PgRead::get_bitcoin_canonical_chain_tip_ref(self.get_connection().await?.as_mut()).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_stacks_chain_tip(
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
@@ -3061,6 +3063,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_bitcoin_canonical_chain_tip_ref(tx.as_mut()).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_stacks_chain_tip(
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
