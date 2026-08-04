@@ -75,6 +75,7 @@ use signer::storage::model::WithdrawalRejectEvent;
 use signer::storage::model::WithdrawalSigner;
 use signer::storage::postgres::PgStore;
 use signer::testing;
+use signer::testing::blocks::BitcoinChain;
 use signer::testing::dummy::SignerSetConfig;
 use signer::testing::storage::model::TestData;
 use signer::testing::wallet::ContractCallWrapper;
@@ -3705,6 +3706,101 @@ async fn deposit_report_with_deposit_request_reorged() {
     assert_eq!(report.can_accept, Some(decision.can_accept));
     assert_eq!(report.can_sign, Some(decision.can_sign));
     assert_eq!(report.status, DepositConfirmationStatus::Unconfirmed);
+
+    signer::testing::storage::drop_db(db).await;
+}
+
+/// A deposit that was confirmed on a now-orphaned block AND reconfirmed on
+/// the canonical bitcoin blockchain should be reported as confirmed.
+#[tokio::test]
+async fn deposit_report_with_deposit_request_reorged_and_reconfirmed() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    // Generate some arbitrary private key for the signer, we just need
+    // something to use consistently here.
+    let private_key = signer::keys::PrivateKey::new(&mut rng);
+    let public_key = PublicKey::from_private_key(&private_key);
+
+    let canonical_chain = BitcoinChain::new_with_length(10);
+
+    // Insert all blocks from the canonical chain into the database
+    for block in &canonical_chain {
+        db.write_bitcoin_block(block).await.unwrap();
+    }
+
+    let chain_tip: model::BitcoinBlockRef = canonical_chain.chain_tip().into();
+
+    let deposit_request: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+    let txid = &deposit_request.txid;
+    let output_index = deposit_request.output_index;
+
+    db.write_deposit_request(&deposit_request).await.unwrap();
+
+    // Record this signer's vote so the report is fully populated.
+    let mut decision: model::DepositSigner = fake::Faker.fake_with_rng(&mut rng);
+    decision.output_index = deposit_request.output_index;
+    decision.txid = deposit_request.txid;
+    decision.signer_pub_key = public_key;
+    db.write_deposit_signer_decision(&decision).await.unwrap();
+
+    // The signer first observed the deposit in a block that was later
+    // orphaned.
+    let forked_chain = canonical_chain.fork_at_height(chain_tip.block_height - 1, 2);
+    let fork_tip = forked_chain.chain_tip().clone();
+
+    for block in &forked_chain {
+        db.write_bitcoin_block(block).await.unwrap();
+    }
+
+    db.write_bitcoin_transaction(&model::BitcoinTxRef {
+        txid: deposit_request.txid,
+        block_hash: fork_tip.block_hash,
+    })
+    .await
+    .unwrap();
+
+    // The deposit is confirmed on the forked chain and unconfirmed on the
+    // canonical chain.
+    let report = db
+        .get_deposit_request_report(&fork_tip.block_hash, txid, output_index, &public_key)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        report.status,
+        DepositConfirmationStatus::Confirmed(fork_tip.block_height, fork_tip.block_hash)
+    );
+
+    let report = db
+        .get_deposit_request_report(&chain_tip.block_hash, txid, output_index, &public_key)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // The deposit is unconfirmed on the canonical chain tip, so the correct
+    // status is `Unconfirmed`.
+    assert_eq!(report.status, DepositConfirmationStatus::Unconfirmed);
+
+    // The same deposit is then reconfirmed on the canonical chain.
+    db.write_bitcoin_transaction(&model::BitcoinTxRef {
+        txid: deposit_request.txid,
+        block_hash: chain_tip.block_hash,
+    })
+    .await
+    .unwrap();
+
+    let report = db
+        .get_deposit_request_report(&chain_tip.block_hash, txid, output_index, &public_key)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // The deposit is confirmed on the canonical chain tip
+    assert_eq!(
+        report.status,
+        DepositConfirmationStatus::Confirmed(chain_tip.block_height, chain_tip.block_hash)
+    );
 
     signer::testing::storage::drop_db(db).await;
 }
@@ -7940,10 +8036,7 @@ mod sqlx_transactions {
 
     use signer::{
         storage::{Transactable as _, TransactionHandle as _},
-        testing::{
-            blocks::{BitcoinChain, StacksChain},
-            storage,
-        },
+        testing::{blocks::StacksChain, storage},
     };
     use test_log::test;
 
