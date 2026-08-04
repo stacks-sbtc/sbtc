@@ -181,8 +181,8 @@ where
                         tracing::error!(%error, "could not process bitcoin blocks");
                     }
 
-                    let Ok(chain_tip) = self.get_bitcoin_chain_tip(block_hash).await else {
-                        tracing::error!("could not get bitcoin chain tip");
+                    let Ok(chain_tip) = self.resolve_block_ref(block_hash).await else {
+                        tracing::error!("could not get bitcoin block ref from the block hash");
                         continue;
                     };
 
@@ -458,7 +458,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     }
 
     /// Get a bitcoin block ref from a block hash.
-    async fn get_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
+    async fn resolve_block_ref(&self, chain_tip: BlockHash) -> Result<BitcoinBlockRef, Error> {
         self.context
             .get_storage()
             .get_bitcoin_block(&chain_tip.into())
