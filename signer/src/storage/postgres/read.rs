@@ -440,6 +440,7 @@ impl PgRead {
              AND ds.signer_pub_key = $5
             WHERE dr.txid = $3
               AND dr.output_index = $4
+            -- Always prefer a transaction's occurrence on the selected Bitcoin chain
             ORDER BY (bc.block_hash IS NOT NULL) DESC
             LIMIT 1
             "#,
