@@ -47,11 +47,3 @@ CLI=/Users/dan/repos/stacks-core/personal/target/debug/stacks-cli \
 The observer on :8804 logs `413 PAYLOAD_TOO_LARGE` for the block that
 contains the publish; the peek on :8811 dumps the same block body to
 `/tmp/poc_block_*.raw.json` so its size can be measured directly.
-
-## Files
-
-- [poc/gen_abi_bomb.py](poc/gen_abi_bomb.py) — contract generator
-- [poc/deploy_abi_bomb.sh](poc/deploy_abi_bomb.sh) — devenv deployer
-- [signer/examples/poc_observer.rs](signer/examples/poc_observer.rs) — real + peek observer
-- [signer/tests/abi_webhook_expansion_poc.rs](signer/tests/abi_webhook_expansion_poc.rs) — unit PoC
-- [signer/tests/abi_webhook_expansion_stacks_core_3_4_0_0_1.patch](signer/tests/abi_webhook_expansion_stacks_core_3_4_0_0_1.patch) — companion patch for the deployed Stacks Core tag

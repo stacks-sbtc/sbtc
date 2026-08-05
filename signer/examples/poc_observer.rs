@@ -17,17 +17,16 @@ use std::net::SocketAddr;
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::{StatusCode, header::CONTENT_LENGTH};
-use axum::middleware::{self, Next};
+use axum::middleware::Next;
 use axum::response::Response;
 use axum::routing::post;
 use serde_json::Value;
 use signer::NEW_BLOCK_BODY_LIMIT;
-use signer::api::{ApiState, get_router};
 use signer::logging::setup_logging;
-use signer::testing::context::TestContext;
 
 const PEEK_LIMIT: usize = 512 * 1024 * 1024;
 
+#[allow(unused)]
 async fn log_mw(req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
     let cl = req
@@ -69,7 +68,9 @@ async fn peek_new_block(body: String) -> StatusCode {
         .ok()
         .map(|v| {
             (
-                v.get("events").and_then(Value::as_array).map_or(0, |a| a.len()),
+                v.get("events")
+                    .and_then(Value::as_array)
+                    .map_or(0, |a| a.len()),
                 v.get("transactions")
                     .and_then(Value::as_array)
                     .map_or(0, |a| a.len()),
@@ -108,11 +109,6 @@ async fn main() {
 
     setup_logging("info,signer=info,poc_observer=info", true);
 
-    let ctx = TestContext::default_mocked();
-    let real = get_router(NEW_BLOCK_BODY_LIMIT)
-        .with_state(ApiState { ctx })
-        .layer(middleware::from_fn(log_mw));
-
     let peek = Router::new()
         .route(
             "/new_block",
@@ -120,16 +116,13 @@ async fn main() {
         )
         .fallback(|| async { StatusCode::OK });
 
-    let mut handles = Vec::new();
-    for (port, app) in [(8804u16, real), (8811u16, peek)] {
-        handles.push(tokio::spawn(async move {
-            let addr = SocketAddr::from(([0, 0, 0, 0], port));
-            let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-            tracing::info!(%addr, port, "listening");
-            axum::serve(listener, app).await.unwrap();
-        }));
-    }
-    for h in handles {
-        let _ = h.await;
-    }
+    let port = 8811;
+
+    let handle = tokio::spawn(async move {
+        let addr = SocketAddr::from(([0, 0, 0, 0], port));
+        let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        tracing::info!(%addr, port, "listening");
+        axum::serve(listener, peek).await.unwrap();
+    });
+    let _ = handle.await;
 }
