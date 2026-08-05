@@ -10,6 +10,11 @@ ignored = ["tonic", "tonic-build", "stackslib"]
 name = "demo-cli"
 path = "src/bin/demo_cli.rs"
 
+[[example]]
+name = "poc_observer"
+path = "examples/poc_observer.rs"
+required-features = ["testing"]
+
 [features]
 default = []
 testing = ["dep:fake", "dep:mockall", "sbtc/testing"]
@@ -81,6 +86,9 @@ sbtc = { workspace = true, features = ["testing"] }
 # automatically include testing functionality for debug builds (i.e. dev/test).
 # This also ensures that your IDE will recognize feature-gated code as active.
 signer = { path = ".", features = ["testing"] }
+clarity = { workspace = true, features = ["testing"] }
+stackslib = { workspace = true, features = ["testing"] }
+stacks-common = { workspace = true, features = ["testing"] }
 
 # External crates
 assert_matches.workspace = true

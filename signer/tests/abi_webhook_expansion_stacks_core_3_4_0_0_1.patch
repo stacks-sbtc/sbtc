@@ -1,0 +1,44 @@
+diff --git a/clarity/src/vm/analysis/contract_interface_builder/mod.rs b/clarity/src/vm/analysis/contract_interface_builder/mod.rs
+index 89450c4..5e7f3df 100644
+--- a/clarity/src/vm/analysis/contract_interface_builder/mod.rs
++++ b/clarity/src/vm/analysis/contract_interface_builder/mod.rs
+@@ -431,3 +431,39 @@ fn test_string_rename_utf8() {
+         "{\"name\":\"test-utf8\",\"type\":{\"string-utf8\":{\"length\":32}}}"
+     );
+ }
++
++#[test]
++fn production_tag_interface_expansion_poc() {
++    let mut source = String::from("(define-constant shared {");
++    for field in 0..1_000 {
++        if field != 0 {
++            source.push(',');
++        }
++        source.push_str(&format!("k{field}:u0"));
++    }
++    source.push_str("})");
++    for function in 0..8_200 {
++        source.push_str(&format!(
++            "(define-private (f{function}) (ok shared))"
++        ));
++    }
++
++    let (_, analysis) = crate::vm::analysis::mem_type_check(
++        &source,
++        ClarityVersion::Clarity3,
++        StacksEpochId::Epoch33,
++    )
++    .expect("generated contract must pass production-tag analysis");
++    let interface = build_contract_interface(&analysis)
++        .expect("interface must build")
++        .serialize()
++        .expect("interface must serialize");
++
++    println!(
++        "stacks_core_tag=3.4.0.0.1 source={} interface={}",
++        source.len(),
++        interface.len()
++    );
++    assert!(source.len() < 2 * 1024 * 1024);
++    assert!(interface.len() > 256 * 1024 * 1024);
++}

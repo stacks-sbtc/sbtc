@@ -1269,6 +1269,8 @@ dependencies = [
  "integer-sqrt",
  "lazy_static",
  "regex",
+ "rstest",
+ "rstest_reuse",
  "rusqlite",
  "serde",
  "serde_derive",
@@ -5565,6 +5567,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "rstest"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de1bb486a691878cd320c2f0d319ba91eeaa2e894066d8b5f8f117c000e9d962"
+dependencies = [
+ "futures",
+ "futures-timer",
+ "rstest_macros",
+ "rustc_version",
+]
+
+[[package]]
+name = "rstest_macros"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "290ca1a1c8ca7edb7c3283bd44dc35dd54fdec6253a3912e201ba1072018fca8"
+dependencies = [
+ "cfg-if 1.0.0",
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "syn 1.0.109",
+ "unicode-ident",
+]
+
+[[package]]
+name = "rstest_reuse"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45f80dcc84beab3a327bbe161f77db25f336a1452428176787c8c79ac79d7073"
+dependencies = [
+ "quote",
+ "rand 0.8.5",
+ "rustc_version",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "rtnetlink"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6531,6 +6571,7 @@ name = "stackslib"
 version = "0.0.1"
 source = "git+https://github.com/stacks-network/stacks-core?rev=1cba695b09690790b1220b0f5d149f70f78ddea5#1cba695b09690790b1220b0f5d149f70f78ddea5"
 dependencies = [
+ "chrono",
  "clarity",
  "ed25519-dalek",
  "lazy_static",
