@@ -499,10 +499,6 @@ criteria = "safe-to-deploy"
 version = "2.1.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.either]]
-version = "1.12.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.elliptic-curve]]
 version = "0.13.8"
 criteria = "safe-to-deploy"
@@ -529,14 +525,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fake]]
 version = "3.1.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fallible-iterator]]
-version = "0.3.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fallible-streaming-iterator]]
-version = "0.1.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.ferroid]]
@@ -1141,10 +1129,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.num-complex]]
 version = "0.4.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-conv]]
-version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.num_cpus]]
@@ -1826,10 +1810,6 @@ criteria = "safe-to-deploy"
 [[exemptions.uint]]
 version = "0.10.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.unarray]]
-version = "0.1.4"
-criteria = "safe-to-run"
 
 [[exemptions.unicase]]
 version = "2.7.0"
