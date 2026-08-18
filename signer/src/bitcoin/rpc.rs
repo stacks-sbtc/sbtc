@@ -358,11 +358,9 @@ fn strip_credentials(mut url: Url) -> (Url, Option<(String, String)>) {
     (url, credentials)
 }
 
-/// Implement TryFrom for BitcoinCoreClientParams to allow for easy
-/// conversion from a URL to a BitcoinCoreClient.
-impl From<&BitcoinCoreClientParams> for BitcoinCoreClient {
-    fn from(params: &BitcoinCoreClientParams) -> Self {
-        let (url, basic_auth) = strip_credentials(params.url.clone());
+impl From<BitcoinCoreClientParams> for BitcoinCoreClient {
+    fn from(params: BitcoinCoreClientParams) -> Self {
+        let (url, basic_auth) = strip_credentials(params.url);
         Self::from_url(url, basic_auth, params.timeout)
     }
 }
@@ -1095,7 +1093,7 @@ mod tests {
         let url: Url = format!("http://devnet:devnet@{}", server.socket_address())
             .parse()
             .unwrap();
-        let client = BitcoinCoreClient::from(&BitcoinCoreClientParams {
+        let client = BitcoinCoreClient::from(BitcoinCoreClientParams {
             url,
             timeout: Duration::from_secs(5),
         });

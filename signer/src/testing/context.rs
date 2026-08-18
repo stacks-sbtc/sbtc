@@ -804,7 +804,7 @@ where
         let url = config.settings.bitcoin.rpc_endpoints.first().unwrap();
         let timeout = config.settings.bitcoin.timeout;
         let bitcoin_client =
-            crate::bitcoin::rpc::BitcoinCoreClient::from(&BitcoinCoreClientParams {
+            crate::bitcoin::rpc::BitcoinCoreClient::from(BitcoinCoreClientParams {
                 url: url.clone(),
                 timeout,
             });

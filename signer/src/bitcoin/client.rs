@@ -36,7 +36,7 @@ use super::rpc::OutPointSummary;
 impl TryFrom<Vec<BitcoinCoreClientParams>> for ApiFallbackClient<BitcoinCoreClient> {
     type Error = Error;
     fn try_from(urls: Vec<BitcoinCoreClientParams>) -> Result<Self, Self::Error> {
-        let clients = urls.iter().map(BitcoinCoreClient::from).collect::<Vec<_>>();
+        let clients = urls.into_iter().map(BitcoinCoreClient::from).collect();
 
         Self::new(clients).map_err(Into::into)
     }

@@ -185,10 +185,6 @@ pub enum Error {
     #[error("failed to retrieve the raw transaction for txid {1} from bitcoin-core. {0}")]
     BitcoinCoreGetTransaction(#[source] bitcoincore_rpc::Error, bitcoin::Txid),
 
-    /// Error when creating an RPC client to bitcoin-core
-    #[error("could not create RPC client to {1}: {0}")]
-    BitcoinCoreRpcClient(#[source] jsonrpc::minreq_http::Error, String),
-
     /// The bitcoin transaction was not found in the mempool or on the
     /// bitcoin blockchain. This is thrown when we expect the transaction
     /// to exist in bitcoin core, but it does not.

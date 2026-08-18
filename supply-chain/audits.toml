@@ -159,6 +159,21 @@ who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.6.0 -> 0.7.0"
 
+[[audits.rustls]]
+who = "djordon-stacks <236454686+djordon-stacks@users.noreply.github.com>"
+criteria = "safe-to-deploy"
+delta = "0.21.6 -> 0.21.8"
+
+[[audits.rustls-webpki]]
+who = "djordon-stacks <236454686+djordon-stacks@users.noreply.github.com>"
+criteria = "safe-to-deploy"
+delta = "0.101.4 -> 0.101.7"
+
+[[audits.sct]]
+who = "djordon-stacks <236454686+djordon-stacks@users.noreply.github.com>"
+criteria = "safe-to-deploy"
+delta = "0.7.0 -> 0.7.1"
+
 [[audits.serdect]]
 who = "djordon <dan.jordon@gmail.com>"
 criteria = "safe-to-deploy"

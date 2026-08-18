@@ -511,7 +511,7 @@ mod serial {
             url: settings.bitcoin.rpc_endpoints[0].clone(),
             timeout: settings.bitcoin.timeout,
         };
-        let client = BitcoinCoreClient::from(&bitcoin_params);
+        let client = BitcoinCoreClient::from(bitcoin_params);
         let tx_info = client
             .get_tx_info(&unsigned.tx.compute_txid(), &sweep_block_hash)
             .unwrap()

@@ -27,7 +27,7 @@ impl BitcoinContainerExt for BitcoinContainer {
             url: self.url().clone(),
             timeout: Duration::from_secs(10),
         };
-        BitcoinCoreClient::from(&params)
+        BitcoinCoreClient::from(params)
     }
 
     async fn start_chain_tip_poller(&self) -> BitcoinChainTipPoller {
