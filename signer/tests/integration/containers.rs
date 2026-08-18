@@ -23,11 +23,11 @@ pub trait BitcoinContainerExt {
 
 impl BitcoinContainerExt for BitcoinContainer {
     fn get_client(&self) -> BitcoinCoreClient {
-        let params = &BitcoinCoreClientParams {
+        let params = BitcoinCoreClientParams {
             url: self.url().clone(),
             timeout: Duration::from_secs(10),
         };
-        params.try_into().expect("cannot create bitcoin client")
+        BitcoinCoreClient::from(&params)
     }
 
     async fn start_chain_tip_poller(&self) -> BitcoinChainTipPoller {

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [package.metadata.cargo-machete]
-ignored = ["tonic", "tonic-build", "stackslib"]
+ignored = ["minreq", "tonic", "tonic-build", "stackslib"]
 
 [[bin]]
 name = "demo-cli"
@@ -41,6 +41,7 @@ libp2p-identity.workspace = true
 lru.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
+minreq.workspace = true
 p256k1.workspace = true
 polynomial.workspace = true
 prost.workspace = true

@@ -29,7 +29,7 @@ mod serial {
             timeout: Duration::from_secs(10),
         };
 
-        let client = BitcoinCoreClient::try_from(&bitcoin_client_params).unwrap();
+        let client = BitcoinCoreClient::from(&bitcoin_client_params);
         let result = client.inner_client().get_block(&BlockHash::all_zeros());
 
         // This will return: JsonRpc(Rpc(RpcError { code: -5, message: "Block not found", data: None }))
@@ -59,9 +59,9 @@ mod serial {
             timeout: Duration::from_secs(10),
         };
 
-        let client = ApiFallbackClient::<BitcoinCoreClient>::new(vec![
-            BitcoinCoreClient::try_from(&bitcoin_client_params).unwrap(),
-        ])
+        let client = ApiFallbackClient::<BitcoinCoreClient>::new(vec![BitcoinCoreClient::from(
+            &bitcoin_client_params,
+        )])
         .unwrap();
 
         // Double-check that an all-zero block doesn't return an error or something else unexpected.

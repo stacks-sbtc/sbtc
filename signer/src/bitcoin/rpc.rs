@@ -344,11 +344,7 @@ pub struct BitcoinCoreClientParams {
 
 /// Strip userinfo from a Bitcoin RPC URL and return optional basic-auth
 /// credentials.
-fn strip_credentials(mut url: Url) -> Result<(Url, Option<(String, String)>), Error> {
-    if url.host_str().is_none() {
-        return Err(Error::InvalidUrl(url::ParseError::EmptyHost));
-    }
-
+fn strip_credentials(mut url: Url) -> (Url, Option<(String, String)>) {
     let credentials = if url.username().is_empty() {
         None
     } else {
@@ -359,18 +355,15 @@ fn strip_credentials(mut url: Url) -> Result<(Url, Option<(String, String)>), Er
 
     let _ = url.set_username("");
     let _ = url.set_password(None);
-    Ok((url, credentials))
+    (url, credentials)
 }
 
-/// Implement TryFrom for Url to allow for easy conversion from a URL to a
-/// BitcoinCoreClient.
-impl TryFrom<&BitcoinCoreClientParams> for BitcoinCoreClient {
-    type Error = Error;
-
-    fn try_from(params: &BitcoinCoreClientParams) -> Result<Self, Self::Error> {
-        let username = params.url.username().to_string();
-        let password = params.url.password().unwrap_or_default().to_string();
-        Self::new(params.url.as_str(), username, password, params.timeout)
+/// Implement TryFrom for BitcoinCoreClientParams to allow for easy
+/// conversion from a URL to a BitcoinCoreClient.
+impl From<&BitcoinCoreClientParams> for BitcoinCoreClient {
+    fn from(params: &BitcoinCoreClientParams) -> Self {
+        let (url, basic_auth) = strip_credentials(params.url.clone());
+        Self::from_url(url, basic_auth, params.timeout)
     }
 }
 
@@ -387,25 +380,35 @@ impl BitcoinCoreClient {
         timeout: Duration,
     ) -> Result<Self, Error> {
         let parsed = Url::parse(url).map_err(Error::InvalidUrl)?;
-        let (endpoint, url_credentials) = strip_credentials(parsed)?;
-        let credentials = if username.is_empty() {
-            url_credentials
+        let basic_auth = if username.is_empty() {
+            None
         } else {
             Some((username, password))
         };
 
+        Ok(Self::from_url(parsed, basic_auth, timeout))
+    }
+
+    /// Return a bitcoin-core RPC client.
+    ///
+    /// # Notes
+    ///
+    /// This function does not attempt to establish a connection to bitcoin-core.
+    pub fn from_url(url: Url, basic_auth: Option<(String, String)>, timeout: Duration) -> Self {
+        // The expect below cannot panic. The minreq_http::Builder::url
+        // method always returns a Result::Ok.
         let mut builder = jsonrpc::minreq_http::MinreqHttpTransport::builder()
             .timeout(timeout)
-            .url(endpoint.as_str())
-            .map_err(|error| Error::BitcoinCoreRpcClient(error, endpoint.to_string()))?;
+            .url(url.as_str())
+            .expect("jsonrpc 0.18 MinreqHttpTransport::url is infallible");
 
-        if let Some((user, pass)) = credentials {
+        if let Some((user, pass)) = basic_auth {
             builder = builder.basic_auth(user, Some(pass));
         }
 
         let transport = builder.build();
         let client = Arc::new(bitcoincore_rpc::Client::from_jsonrpc(transport.into()));
-        Ok(Self { inner: client })
+        Self { inner: client }
     }
 
     /// Return a reference to the inner bitcoin-core RPC client.
@@ -1030,7 +1033,7 @@ mod tests {
         let url: Url = "http://devnet:devnet123@127.0.0.1:18443/wallet/foo"
             .parse()
             .unwrap();
-        let (endpoint, credentials) = strip_credentials(url).unwrap();
+        let (endpoint, credentials) = strip_credentials(url);
 
         assert_eq!(endpoint.as_str(), "http://127.0.0.1:18443/wallet/foo");
         assert_eq!(
@@ -1043,7 +1046,7 @@ mod tests {
     fn sanitize_accepts_https_path_token_without_port() {
         let url_str = "https://example.btc.node.pro/abc123/";
         let url: Url = url_str.parse().unwrap();
-        let (endpoint, credentials) = strip_credentials(url).unwrap();
+        let (endpoint, credentials) = strip_credentials(url);
 
         assert_eq!(endpoint.as_str(), url_str);
         assert!(credentials.is_none());
@@ -1092,11 +1095,10 @@ mod tests {
         let url: Url = format!("http://devnet:devnet@{}", server.socket_address())
             .parse()
             .unwrap();
-        let client = BitcoinCoreClient::try_from(&BitcoinCoreClientParams {
+        let client = BitcoinCoreClient::from(&BitcoinCoreClientParams {
             url,
             timeout: Duration::from_secs(5),
-        })
-        .unwrap();
+        });
 
         client.get_best_block_hash().unwrap();
         mock.assert();
