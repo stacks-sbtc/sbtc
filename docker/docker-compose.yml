@@ -657,7 +657,7 @@ services:
       PG_USER: "postgres"
       PG_PASSWORD: "postgres"
       PG_DATABASE: "postgres"
-      # PG_SCHEMA: "public"
+      PG_SCHEMA: "public"
       STACKS_CHAIN_ID: "0x80000000"
       STACKS_CORE_EVENT_PORT: 3700
       STACKS_CORE_EVENT_HOST: "0.0.0.0"
