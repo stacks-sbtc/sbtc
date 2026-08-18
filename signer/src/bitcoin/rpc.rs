@@ -344,7 +344,7 @@ pub struct BitcoinCoreClientParams {
 
 /// Strip userinfo from a Bitcoin RPC URL and return optional basic-auth
 /// credentials.
-fn strip_credentials(url: &Url) -> Result<(Url, Option<(String, String)>), Error> {
+fn strip_credentials(mut url: Url) -> Result<(Url, Option<(String, String)>), Error> {
     if url.host_str().is_none() {
         return Err(Error::InvalidUrl(url::ParseError::EmptyHost));
     }
@@ -357,10 +357,9 @@ fn strip_credentials(url: &Url) -> Result<(Url, Option<(String, String)>), Error
         Some((username, password))
     };
 
-    let mut endpoint = url.clone();
-    let _ = endpoint.set_username("");
-    let _ = endpoint.set_password(None);
-    Ok((endpoint, credentials))
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    Ok((url, credentials))
 }
 
 /// Implement TryFrom for Url to allow for easy conversion from a URL to a
@@ -388,7 +387,7 @@ impl BitcoinCoreClient {
         timeout: Duration,
     ) -> Result<Self, Error> {
         let parsed = Url::parse(url).map_err(Error::InvalidUrl)?;
-        let (endpoint, url_credentials) = strip_credentials(&parsed)?;
+        let (endpoint, url_credentials) = strip_credentials(parsed)?;
         let credentials = if username.is_empty() {
             url_credentials
         } else {
@@ -1031,7 +1030,7 @@ mod tests {
         let url: Url = "http://devnet:devnet123@127.0.0.1:18443/wallet/foo"
             .parse()
             .unwrap();
-        let (endpoint, credentials) = strip_credentials(&url).unwrap();
+        let (endpoint, credentials) = strip_credentials(url).unwrap();
 
         assert_eq!(endpoint.as_str(), "http://127.0.0.1:18443/wallet/foo");
         assert_eq!(
@@ -1042,10 +1041,11 @@ mod tests {
 
     #[test]
     fn sanitize_accepts_https_path_token_without_port() {
-        let url: Url = "https://example.btc.node.pro/abc123/".parse().unwrap();
-        let (endpoint, credentials) = strip_credentials(&url).unwrap();
+        let url_str = "https://example.btc.node.pro/abc123/";
+        let url: Url = url_str.parse().unwrap();
+        let (endpoint, credentials) = strip_credentials(url).unwrap();
 
-        assert_eq!(endpoint.as_str(), "https://example.btc.node.pro/abc123/");
+        assert_eq!(endpoint.as_str(), url_str);
         assert!(credentials.is_none());
         assert!(endpoint.port().is_none());
     }
