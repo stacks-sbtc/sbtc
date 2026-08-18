@@ -62,9 +62,10 @@ mod serial {
         else {
             panic!("wrong error format")
         };
-        assert_eq!(
-            format!("{}", transport_error),
-            "Couldn't connect to host: connection timed out".to_string(),
+        let message = transport_error.to_string().to_lowercase();
+        assert!(
+            message.contains("timed out") || message.contains("timeout"),
+            "unexpected transport error: {transport_error}"
         )
     }
 

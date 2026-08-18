@@ -3,10 +3,10 @@
 //! Here's some info about the Bitcoin Core RPC client errors:
 //!
 //! - Example when the node is not running/unreachable:
-//!   JsonRpc(Transport(SocketError(Os { code: 111, kind: ConnectionRefused, message: "Connection refused" })))
+//!   JsonRpc(Transport(IoError(Os { code: 111, kind: ConnectionRefused, message: "Connection refused" })))
 //!
 //! - Example when authentication fails:
-//!   JsonRpc(Transport(HttpErrorCode(401)))
+//!   JsonRpc(Transport(HttpError { status_code: 401, body: "Unauthorized" }))
 //!
 //! - Example when trying to estimate fees but the node doesn't have enough data:
 //!   EstimateSmartFeeResponse(Some(["Insufficient data or no feerate found"]), 1)

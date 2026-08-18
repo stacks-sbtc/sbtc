@@ -187,7 +187,7 @@ pub enum Error {
 
     /// Error when creating an RPC client to bitcoin-core
     #[error("could not create RPC client to {1}: {0}")]
-    BitcoinCoreRpcClient(#[source] jsonrpc::http::simple_http::Error, String),
+    BitcoinCoreRpcClient(#[source] jsonrpc::minreq_http::Error, String),
 
     /// The bitcoin transaction was not found in the mempool or on the
     /// bitcoin blockchain. This is thrown when we expect the transaction
@@ -442,10 +442,6 @@ pub enum Error {
     /// This is thrown when failing to parse a hex string into an integer.
     #[error("could not parse the hex string into an integer")]
     ParseHexInt(#[source] std::num::ParseIntError),
-
-    /// Error when the port is not provided
-    #[error("a port must be specified")]
-    PortRequired,
 
     /// This is thrown when failing to parse a hex string into bytes.
     #[error("could not decode the hex string into bytes: {0}")]
