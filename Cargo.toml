@@ -46,7 +46,7 @@ bitcoinconsensus = { version = "0.106.0", default-features = false }
 bitcoincore-rpc = { version = "0.19.0", default-features = false }
 bitcoincore-rpc-json = { version = "0.19.0", default-features = false }
 jsonrpc = { version = "0.18.0", default-features = false, features = ["minreq_http"] }
-# Enables TLS for jsonrpc's minreq_http transport, which jsonrpc does not turn.
+# Enables TLS for jsonrpc's minreq_http transport, which jsonrpc does not enable.
 minreq = { version = "2.11.2", default-features = false, features = ["https"] }
 bitvec = { version = "1.0.1", default-features = false, features = ["serde"] }
 cfg-if = { version = "1.0.0", default-features = false }
