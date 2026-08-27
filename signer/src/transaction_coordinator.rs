@@ -1390,7 +1390,7 @@ where
         // Complete deposit requests should be done as soon as possible, so
         // we set the fee rate to the high priority fee.
         let tx_fee = self
-            .estimate_stacks_tx_fee(wallet, &contract_call, FeePriority::High)
+            .estimate_stacks_tx_fee(wallet, &contract_call, FeePriority::Medium)
             .await?;
 
         let multi_tx = MultisigTx::new_tx(&contract_call, wallet, tx_fee);
@@ -1484,7 +1484,7 @@ where
 
         // Estimate the fee for the stacks transaction
         let tx_fee = self
-            .estimate_stacks_tx_fee(wallet, &contract_call, FeePriority::High)
+            .estimate_stacks_tx_fee(wallet, &contract_call, FeePriority::Medium)
             .await?;
 
         let multi_tx = MultisigTx::new_tx(&contract_call, wallet, tx_fee);
