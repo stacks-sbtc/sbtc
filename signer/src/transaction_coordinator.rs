@@ -1387,8 +1387,8 @@ where
         };
         let contract_call = ContractCall::CompleteDepositV1(complete_deposit_v1.into());
 
-        // Complete deposit requests should be done as soon as possible, so
-        // we set the fee rate to the high priority fee.
+        // complete-deposit requests should confirm promptly; medium priority
+        // is appropriate without overpaying.
         let tx_fee = self
             .estimate_stacks_tx_fee(wallet, &contract_call, FeePriority::Medium)
             .await?;
