@@ -39,8 +39,14 @@ pub fn regtest_bootstrap_wallet() -> (SignerWallet, [Keypair; 3]) {
     .map(|sk| Keypair::from_seckey_str(SECP256K1, sk).unwrap());
 
     let public_keys = key_pairs.map(|kp| kp.public_key().into());
-    let wallet =
-        SignerWallet::new(&public_keys, signatures_required, NetworkKind::Testnet, 0).unwrap();
+    let wallet = SignerWallet::new(
+        &public_keys,
+        signatures_required,
+        NetworkKind::Testnet,
+        NetworkKind::Testnet.chain_id(),
+        0,
+    )
+    .unwrap();
 
     (wallet, key_pairs)
 }
