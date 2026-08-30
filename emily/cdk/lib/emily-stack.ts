@@ -111,10 +111,7 @@ export class EmilyStack extends cdk.Stack {
             limitTable.grantReadWriteData(operationLambda);
             throttleTable.grantReadWriteData(operationLambda);
 
-            const sanctionsBucket: s3.Bucket = this.createSanctionsBucket(
-                persistentResourceRemovalPolicy,
-                props,
-            );
+            const sanctionsBucket: s3.Bucket = this.createSanctionsBucket(props);
 
             const emilyApis: apig.SpecRestApi[] = this.createOrUpdateApi(
                 alias,
@@ -127,22 +124,18 @@ export class EmilyStack extends cdk.Stack {
     /**
      * Creates the private S3 bucket that backs the sanctions list served at
      * `GET /sanctions` on the public API.
-     * @param {cdk.RemovalPolicy} removalPolicy The removal policy for the bucket.
      * @param {EmilyStackProps} props The stack properties.
      * @returns {s3.Bucket} The created or updated S3 bucket.
      */
-    createSanctionsBucket(
-        removalPolicy: cdk.RemovalPolicy,
-        props: EmilyStackProps,
-    ): s3.Bucket {
+    createSanctionsBucket(props: EmilyStackProps): s3.Bucket {
         const bucketId: string = 'SanctionsLists';
         return new s3.Bucket(this, bucketId, {
             bucketName: EmilyStackUtils.getResourceName(bucketId, props).toLowerCase(),
             blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
             encryption: s3.BucketEncryption.S3_MANAGED,
             enforceSSL: true,
-            removalPolicy,
-            autoDeleteObjects: removalPolicy === cdk.RemovalPolicy.DESTROY,
+            removalPolicy: cdk.RemovalPolicy.RETAIN,
+            autoDeleteObjects: false,
         });
     }
 
