@@ -75,7 +75,8 @@ struct ComputeDepositAddress {
     #[arg(long, value_name = "HEX")]
     reclaim_script: Option<String>,
 
-    /// Maximum amount, in satoshis, that signers may deduct as fees.
+    /// Maximum Bitcoin L1 fee, in satoshis, chargeable during the signers'
+    /// sweep.
     #[arg(long, default_value_t = DEFAULT_MAX_FEE)]
     max_fee: u64,
 
