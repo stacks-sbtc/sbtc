@@ -63,14 +63,15 @@ enum Command {
         .args(["reclaim_pubkey", "reclaim_script"])
 ))]
 struct ComputeDepositAddress {
-    /// Stacks principal that will receive the minted sBTC.
+    /// The Stacks principal that will receive the minted sBTC.
     recipient: String,
 
-    /// Public key controlling the reclaim path (32-byte x-only or 33-byte compressed hex).
+    /// Hex-encoded public key that controls the reclaim path. Accepts a
+    /// 32-byte x-only or a 33-byte compressed public key.
     #[arg(long, value_name = "PUBLIC_KEY")]
     reclaim_pubkey: Option<String>,
 
-    /// Complete hex-encoded reclaim script (including its lock-time prefix).
+    /// Complete hex-encoded reclaim script, including its lock-time prefix.
     #[arg(long, value_name = "HEX")]
     reclaim_script: Option<String>,
 
@@ -78,23 +79,25 @@ struct ComputeDepositAddress {
     #[arg(long, default_value_t = DEFAULT_MAX_FEE)]
     max_fee: u64,
 
-    /// Relative reclaim lock time used with `--reclaim-pubkey`, in Bitcoin blocks.
+    /// The relative lock time, in Bitcoin blocks. Only used with `--reclaim-pubkey`.
     #[arg(long, default_value_t = DEFAULT_LOCK_TIME, conflicts_with = "reclaim_script")]
     lock_time: u32,
 
-    /// Current signer aggregate key; when omitted it is fetched from the registry.
+    /// The current signer aggregate key. When omitted, it is fetched from
+    /// the sBTC registry smart contract.
     #[arg(long, value_name = "PUBLIC_KEY")]
     aggregate_key: Option<String>,
 
-    /// Base URL for the Stacks API used to query the sBTC registry.
+    /// Base URL for the Stacks API used to query the sBTC registry smart
+    /// contract.
     #[arg(long, default_value = DEFAULT_STACKS_API_URL)]
     stacks_api_url: String,
 
-    /// Address that deployed the sBTC registry contract.
+    /// The Stacks address that deployed the sBTC registry smart contract.
     #[arg(long, default_value = DEFAULT_DEPLOYER)]
     deployer: String,
 
-    /// Bitcoin network for the resulting address.
+    /// The Bitcoin network for the resulting address.
     #[arg(long, value_enum, default_value_t = BitcoinNetwork::Mainnet)]
     network: BitcoinNetwork,
 }
