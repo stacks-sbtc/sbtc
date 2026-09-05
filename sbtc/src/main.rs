@@ -67,7 +67,7 @@ struct ComputeDepositAddress {
     recipient: String,
 
     /// Hex-encoded public key that controls the reclaim path. Accepts a
-    /// 32-byte x-only or a 33-byte compressed public key.
+    /// 32-byte x-only or 33-byte compressed key.
     #[arg(long, value_name = "PUBLIC_KEY")]
     reclaim_pubkey: Option<String>,
 
@@ -86,7 +86,7 @@ struct ComputeDepositAddress {
     /// The current signer aggregate key. When omitted, it is fetched from
     /// the sBTC registry smart contract.
     #[arg(long, value_name = "PUBLIC_KEY")]
-    aggregate_key: Option<String>,
+    signers_aggregate_pubkey: Option<String>,
 
     /// Base URL for the Stacks API used to query the sBTC registry smart
     /// contract.
@@ -137,7 +137,7 @@ async fn compute_deposit_address(args: ComputeDepositAddress) -> Result<(), Erro
     let recipient = PrincipalData::parse(&args.recipient)
         .map_err(|_| Error::InvalidRecipient(args.recipient.clone()))?;
 
-    let signers_public_key = match args.aggregate_key {
+    let signers_public_key = match args.signers_aggregate_pubkey {
         Some(key) => parse_x_only_public_key(&key)?,
         None => fetch_aggregate_key(&args.stacks_api_url, &args.deployer).await?,
     };
@@ -174,8 +174,9 @@ async fn compute_deposit_address(args: ComputeDepositAddress) -> Result<(), Erro
 }
 
 fn parse_x_only_public_key(value: &str) -> Result<XOnlyPublicKey, Error> {
-    XOnlyPublicKey::from_str(value)
-        .or_else(|_| PublicKey::from_str(value).map(|key| key.x_only_public_key().0))
+    let key = value.strip_prefix("0x").unwrap_or(value);
+    XOnlyPublicKey::from_str(key)
+        .or_else(|_| PublicKey::from_str(key).map(|key| key.x_only_public_key().0))
         .map_err(|_| Error::InvalidPublicKey(value.to_owned()))
 }
 
@@ -238,7 +239,25 @@ mod tests {
         assert_eq!(args.lock_time, DEFAULT_LOCK_TIME);
         assert_eq!(args.stacks_api_url, DEFAULT_STACKS_API_URL);
         assert_eq!(args.deployer, DEFAULT_DEPLOYER);
+        assert!(args.signers_aggregate_pubkey.is_none());
         assert!(matches!(args.network, BitcoinNetwork::Mainnet));
+    }
+
+    #[test]
+    fn signers_aggregate_pubkey_option_is_accepted() {
+        let cli = Cli::try_parse_from([
+            "sbtc",
+            "compute-deposit-address",
+            RECIPIENT,
+            "--reclaim-pubkey",
+            KEY,
+            "--signers-aggregate-pubkey",
+            KEY,
+        ])
+        .unwrap();
+        let Command::ComputeDepositAddress(args) = cli.command;
+
+        assert_eq!(args.signers_aggregate_pubkey.as_deref(), Some(KEY));
     }
 
     #[test]
@@ -292,6 +311,10 @@ mod tests {
         let compressed = parse_x_only_public_key(KEY).unwrap();
         let x_only = parse_x_only_public_key(&compressed.to_string()).unwrap();
         assert_eq!(compressed, x_only);
+        assert_eq!(
+            compressed,
+            parse_x_only_public_key(&format!("0x{KEY}")).unwrap()
+        );
     }
 
     #[test]
