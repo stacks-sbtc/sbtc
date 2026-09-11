@@ -110,6 +110,8 @@ Once running, the following services are available:
 - Stacks explorer at [localhost:3020](http://localhost:3020)
 - Mempool.space Bitcoin explorer at [localhost:8083](http://localhost:8083)
 
+The optional Rust [Emily cron2 service](./emily_cron2/README.md) reconciles deposit statuses and can be run separately from the Python cron worker.
+
 #### Update local docker builds
 
 To rebuild the containers from your current branch you can use:
