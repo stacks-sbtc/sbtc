@@ -9,7 +9,8 @@ use emily_cron2::error::Error;
 use emily_cron2::logging;
 use emily_cron2::processor::Processor;
 use tokio::signal;
-use tracing::{error, info};
+use tracing::error;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {

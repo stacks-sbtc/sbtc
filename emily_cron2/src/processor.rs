@@ -1,22 +1,33 @@
 //! Deposit reconciliation through Emily, mempool, Electrs, and Hiro APIs.
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
-use private_emily_client::apis::configuration::{ApiKey, Configuration};
+use private_emily_client::apis::configuration::ApiKey;
+use private_emily_client::apis::configuration::Configuration;
 use private_emily_client::apis::deposit_api;
-use private_emily_client::models::{
-    DepositInfo, DepositStatus, DepositUpdate, UpdateDepositsRequestBody,
-};
-use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::{Client, StatusCode};
-use tracing::{info, warn};
+use private_emily_client::models::DepositInfo;
+use private_emily_client::models::DepositStatus;
+use private_emily_client::models::DepositUpdate;
+use private_emily_client::models::UpdateDepositsRequestBody;
+use reqwest::Client;
+use reqwest::StatusCode;
+use reqwest::header::HeaderMap;
+use reqwest::header::HeaderValue;
+use tracing::info;
+use tracing::warn;
 
 use crate::config::Config;
 use crate::error::Error;
-use crate::model::{Block, Outspend, Rbf, Transaction, expired, lock_time};
+use crate::model::Block;
+use crate::model::Outspend;
+use crate::model::Rbf;
+use crate::model::Transaction;
+use crate::model::expired;
+use crate::model::lock_time;
 
 /// Reconciles Emily deposits using Bitcoin and Stacks API data.
 pub struct Processor {

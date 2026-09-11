@@ -1,7 +1,8 @@
 //! Errors returned by the deposit reconciliation service.
 
 use private_emily_client::apis;
-use private_emily_client::apis::deposit_api::{GetDepositsError, UpdateDepositsSidecarError};
+use private_emily_client::apis::deposit_api::GetDepositsError;
+use private_emily_client::apis::deposit_api::UpdateDepositsSidecarError;
 
 /// Errors from upstream clients, script validation, and reconciliation.
 #[derive(Debug, thiserror::Error)]

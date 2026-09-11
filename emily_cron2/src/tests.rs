@@ -1,12 +1,14 @@
 use clap::Parser as _;
-use mockito::{Matcher, Server};
-use serde_json::{Value, json};
+use mockito::Matcher;
+use mockito::Server;
+use serde_json::Value;
+use serde_json::json;
 
-use crate::{
-    config::Config,
-    model::{Rbf, expired, lock_time},
-    processor::Processor,
-};
+use crate::config::Config;
+use crate::model::Rbf;
+use crate::model::expired;
+use crate::model::lock_time;
+use crate::processor::Processor;
 
 fn processor(server: &Server, dry_run: bool) -> Processor {
     let mut config = Config::parse_from(["emily-cron2"]);
