@@ -445,3 +445,148 @@ async fn emily_read_errors_retain_generated_client_errors() {
         writes.assert_async().await;
     }
 }
+
+/// Arrange expired outputs so a full cycle produces the requested update count.
+async fn setup_update_backlog(server: &mut Server, count: u32) -> Vec<mockito::Mock> {
+    let deposits: Vec<Value> = (0..count)
+        .map(|index| {
+            let mut deposit = deposit("pending");
+            deposit["bitcoinTxOutputIndex"] = json!(index);
+            deposit
+        })
+        .collect();
+    let tip = server
+        .mock("GET", "/v1/blocks/tip/height")
+        .with_body("202")
+        .create_async()
+        .await;
+    let pending = server
+        .mock("GET", "/deposit")
+        .match_query(Matcher::UrlEncoded("status".into(), "pending".into()))
+        .with_header("content-type", "application/json")
+        .with_body(json!({"deposits": deposits}).to_string())
+        .create_async()
+        .await;
+    let accepted = server
+        .mock("GET", "/deposit")
+        .match_query(Matcher::UrlEncoded("status".into(), "accepted".into()))
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"deposits":[]}"#)
+        .create_async()
+        .await;
+    let transaction = server
+        .mock("GET", "/v1/tx/original")
+        .with_body(r#"{"status":{"confirmed":true,"block_height":100}}"#)
+        .create_async()
+        .await;
+    let outspends = server
+        .mock("GET", Matcher::Regex(r"^/tx/original/outspend/\d+$".into()))
+        .with_body(r#"{"spent":false}"#)
+        .expect(count as usize)
+        .create_async()
+        .await;
+    vec![tip, pending, accepted, transaction, outspends]
+}
+
+/// Match the complete set of updates in one request, including output ordering.
+async fn backlog_batch(
+    server: &mut Server,
+    outputs: std::ops::Range<u32>,
+    response_status: usize,
+    rejected_output: Option<u32>,
+    expected_calls: usize,
+) -> mockito::Mock {
+    let updates: Vec<Value> = outputs
+        .clone()
+        .map(|index| {
+            json!({
+                "bitcoinTxid": "original",
+                "bitcoinTxOutputIndex": index,
+                "status": "failed",
+                "statusMessage": "Locktime expired at height 202 and UTXO unspent"
+            })
+        })
+        .collect();
+    let outcomes: Vec<Value> = outputs
+        .map(|index| {
+            if Some(index) == rejected_output {
+                json!({"status":400, "error":"rejected"})
+            } else {
+                json!({"status":200, "error":null})
+            }
+        })
+        .collect();
+    server
+        .mock("PUT", "/deposit_private")
+        .match_header("x-api-key", "test-key")
+        .match_body(Matcher::Json(json!({"deposits":updates})))
+        .with_header("content-type", "application/json")
+        .with_status(response_status)
+        .with_body(json!({"deposits":outcomes}).to_string())
+        .expect(expected_calls)
+        .create_async()
+        .await
+}
+
+#[tokio::test]
+async fn submits_backlog_in_bounded_batches() {
+    let mut server = Server::new_async().await;
+    let reads = setup_update_backlog(&mut server, 11).await;
+    let first = backlog_batch(&mut server, 0..5, 200, None, 1).await;
+    let second = backlog_batch(&mut server, 5..10, 200, None, 1).await;
+    let last = backlog_batch(&mut server, 10..11, 200, None, 1).await;
+
+    processor(&server, false).run().await.unwrap();
+
+    for read in reads {
+        read.assert_async().await;
+    }
+    first.assert_async().await;
+    second.assert_async().await;
+    last.assert_async().await;
+}
+
+#[tokio::test]
+async fn partial_rejection_does_not_stop_later_batches() {
+    let mut server = Server::new_async().await;
+    let reads = setup_update_backlog(&mut server, 6).await;
+    // One rejection among successful updates must still fail the cycle.
+    let first = backlog_batch(&mut server, 0..5, 200, Some(2), 1).await;
+    let last = backlog_batch(&mut server, 5..6, 200, None, 1).await;
+
+    let result = processor(&server, false).run().await;
+    assert!(matches!(
+        result,
+        Err(crate::error::Error::DepositUpdatesRejected)
+    ));
+
+    for read in reads {
+        read.assert_async().await;
+    }
+    first.assert_async().await;
+    last.assert_async().await;
+}
+
+#[tokio::test]
+async fn http_failure_after_success_stops_without_retrying_batches() {
+    let mut server = Server::new_async().await;
+    let reads = setup_update_backlog(&mut server, 11).await;
+    let first = backlog_batch(&mut server, 0..5, 200, None, 1).await;
+    let second = backlog_batch(&mut server, 5..10, 503, None, 1).await;
+    let last = backlog_batch(&mut server, 10..11, 200, None, 0).await;
+
+    let result = processor(&server, false).run().await;
+    assert!(matches!(
+        result,
+        Err(crate::error::Error::EmilyUpdateDeposits(
+            private_emily_client::apis::Error::ResponseError(_)
+        ))
+    ));
+
+    for read in reads {
+        read.assert_async().await;
+    }
+    first.assert_async().await;
+    second.assert_async().await;
+    last.assert_async().await;
+}

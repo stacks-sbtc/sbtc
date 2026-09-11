@@ -66,7 +66,8 @@ output spent by signers is left alone.
 
 Compared with Python:
 
-- Follow all Emily pages and send at most one update per deposit outpoint.
+- Follow Emily pages until complete or a 10s pagination timeout, and send at most
+  one update per deposit outpoint.
 - Fetch RBF replacement transactions even when they are absent from Emily or the
   original has disappeared. RBF takes precedence over the pending-age rule.
 - Treat only transaction HTTP 404 as missing. Transport errors, other HTTP errors,
@@ -75,7 +76,6 @@ Compared with Python:
 - Require a whole reclaim-script witness element instead of a substring match.
 - Use `sbtc::deposits::ReclaimScriptInputs` to parse and validate reclaim scripts,
   including the CSV block delay and user-script restrictions.
-- Check both the HTTP result and every per-deposit status in Emily's batch response.
 
 The service remains a periodic reconciliation job: it does not make upstream reads
 atomic or prevent concurrent updates by other services. `--dry-run` makes all the

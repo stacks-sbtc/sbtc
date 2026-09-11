@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -28,6 +29,13 @@ use crate::model::Rbf;
 use crate::model::Transaction;
 use crate::model::expired;
 use crate::model::lock_time;
+
+// Emily applies updates sequentially under a short Lambda deadline. Limit each
+// request rather than submitting the full paginated backlog at once.
+const DEPOSIT_UPDATE_BATCH_SIZE: usize = 5;
+/// Cap time spent walking Emily deposit pages so a large backlog cannot
+/// stall a cycle.
+const PAGINATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Reconciles Emily deposits using Bitcoin and Stacks API data.
 pub struct Processor {
@@ -109,11 +117,12 @@ impl Processor {
         Ok(Some(response.error_for_status()?.json().await?))
     }
 
-    /// Fetch every Emily page for the requested deposit status.
+    /// Fetch Emily pages for the requested deposit status until complete or timed out.
     async fn deposits(&self, status: DepositStatus) -> Result<Vec<DepositInfo>, Error> {
         let mut deposits = Vec::new();
         let mut token = None;
         let mut seen = HashSet::new();
+        let start_time = Instant::now();
         loop {
             let page =
                 deposit_api::get_deposits(&self.emily, status, token.as_deref(), None).await?;
@@ -125,6 +134,14 @@ impl Processor {
                     return Err(Error::RepeatedPaginationToken);
                 }
                 _ => {}
+            }
+            if start_time.elapsed() > PAGINATION_TIMEOUT {
+                tracing::warn!(
+                    %status,
+                    fetched = deposits.len(),
+                    "Pagination timeout while fetching deposits; continuing with partial results"
+                );
+                break;
             }
         }
         Ok(deposits)
@@ -302,6 +319,7 @@ impl Processor {
         let mut seen = HashSet::new();
         let mut updates = Vec::new();
         let mut failed = false;
+
         for deposit in deposits {
             let outpoint = (
                 deposit.bitcoin_txid.clone(),
@@ -323,12 +341,6 @@ impl Processor {
                 }
             }
         }
-        info!(
-            tip,
-            updates = updates.len(),
-            dry_run = self.config.dry_run,
-            "Deposit reconciliation completed"
-        );
         if self.config.dry_run {
             info!(updates = %serde_json::to_string(&updates)?, "Proposed deposit updates");
         } else if !updates.is_empty() {
@@ -337,27 +349,47 @@ impl Processor {
         if failed {
             return Err(Error::IncompleteReconciliation);
         }
+        info!(
+            tip,
+            updates = updates.len(),
+            dry_run = self.config.dry_run,
+            "Deposit reconciliation completed"
+        );
         Ok(())
     }
 
-    /// Submit a batch and check each individual result, including partial failures.
+    /// Submit bounded batches, continuing past individual update rejections.
+    /// Transport or malformed-response errors stop submission until the next cycle.
     async fn submit_updates(&self, updates: &[DepositUpdate]) -> Result<(), Error> {
-        let request = UpdateDepositsRequestBody::new(updates.to_vec());
-        let response = deposit_api::update_deposits_sidecar(&self.emily, request).await?;
-        if response.deposits.len() != updates.len() {
-            return Err(Error::UnexpectedUpdateCount {
-                expected: updates.len(),
-                actual: response.deposits.len(),
-            });
-        }
         let mut failed = false;
-        for outcome in response.deposits {
-            // The generated schema distinguishes an omitted error from JSON null.
-            let error = outcome.error.flatten();
-            let succeeded = (200..300).contains(&outcome.status) && error.is_none();
-            if !succeeded {
-                failed = true;
-                warn!(status = outcome.status, error = ?error, "Emily rejected deposit update");
+        for (batch_index, batch) in updates.chunks(DEPOSIT_UPDATE_BATCH_SIZE).enumerate() {
+            let request = UpdateDepositsRequestBody::new(batch.to_vec());
+            let response = deposit_api::update_deposits_sidecar(&self.emily, request)
+                .await
+                .map_err(|error| {
+                    warn!(batch_index, updates = batch.len(), %error, "Emily update batch failed");
+                    Error::EmilyUpdateDeposits(error)
+                })?;
+            if response.deposits.len() != batch.len() {
+                return Err(Error::UnexpectedUpdateCount {
+                    expected: batch.len(),
+                    actual: response.deposits.len(),
+                });
+            }
+            for (update, outcome) in batch.iter().zip(response.deposits) {
+                // The generated schema distinguishes an omitted error from JSON null.
+                let error = outcome.error.flatten();
+                let succeeded = (200..300).contains(&outcome.status) && error.is_none();
+                if !succeeded {
+                    failed = true;
+                    warn!(
+                        txid = %update.bitcoin_txid,
+                        vout = update.bitcoin_tx_output_index,
+                        status = outcome.status,
+                        error = ?error,
+                        "Emily rejected deposit update"
+                    );
+                }
             }
         }
         if failed {
