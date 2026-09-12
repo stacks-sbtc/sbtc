@@ -1,21 +1,21 @@
-//! Errors returned by the deposit reconciliation service.
+//! Errors from upstream APIs, script validation, and reconciliation outcomes.
 
 use private_emily_client::apis;
 use private_emily_client::apis::deposit_api::GetDepositsError;
 use private_emily_client::apis::deposit_api::UpdateDepositsSidecarError;
 
-/// Errors from upstream clients, script validation, and reconciliation.
+/// Failures that stop or partially complete a reconciliation cycle.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// An HTTP request or response decoding failed.
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
 
-    /// The generated client failed to read Emily deposits.
+    /// Emily deposit listing failed (transport, HTTP error, or bad JSON).
     #[error("Emily deposit query failed: {0}")]
     EmilyGetDeposits(#[from] apis::Error<GetDepositsError>),
 
-    /// The generated client failed to submit Emily updates.
+    /// Emily batch update failed before per-deposit results were available.
     #[error("Emily deposit update failed: {0}")]
     EmilyUpdateDeposits(#[from] apis::Error<UpdateDepositsSidecarError>),
 
@@ -27,7 +27,7 @@ pub enum Error {
     #[error("invalid endpoint URL: {0}")]
     Url(#[from] url::ParseError),
 
-    /// Proposed updates could not be serialized for logging.
+    /// Proposed updates could not be serialized for dry-run logging.
     #[error("JSON serialization failed: {0}")]
     Json(#[from] serde_json::Error),
 
@@ -35,7 +35,7 @@ pub enum Error {
     #[error("invalid script hex: {0}")]
     ScriptHex(#[from] bitcoin::hex::HexToBytesError),
 
-    /// A reclaim script failed shared sBTC validation.
+    /// A reclaim script failed shared sBTC validation rules.
     #[error("sBTC validation failed: {0}")]
     Sbtc(#[from] sbtc::error::Error),
 
@@ -47,19 +47,15 @@ pub enum Error {
     #[error("invalid system time: {0}")]
     SystemTime(#[from] std::time::SystemTimeError),
 
-    /// Emily returned a continuation token already seen in this query.
-    #[error("Emily repeated a pagination token")]
-    RepeatedPaginationToken,
-
-    /// A spent output lacked its spending transaction ID or input index.
+    /// Electrs marked an output spent but omitted the spender txid or vin.
     #[error("spent output missing spending transaction or input index")]
     IncompleteOutspend,
 
-    /// Electrs identified a spending transaction that the mempool API could not find.
+    /// Electrs named a spender that the mempool API could not find.
     #[error("spending transaction {0} not found")]
     SpendingTransactionNotFound(String),
 
-    /// The spending input index did not identify an input in the transaction.
+    /// The reported spending vin was outside the transaction's input list.
     #[error("spending input index {index} is out of bounds for transaction {txid}")]
     SpendingInputOutOfBounds {
         /// Transaction reported to spend the deposit output.
@@ -68,20 +64,20 @@ pub enum Error {
         index: usize,
     },
 
-    /// Some deposits were skipped because their reconciliation failed.
+    /// At least one deposit was skipped because its lookups failed.
     #[error("one or more deposits could not be reconciled")]
     IncompleteReconciliation,
 
-    /// Emily returned a different number of results than submitted updates.
+    /// Emily returned a different number of per-deposit results than updates sent.
     #[error("Emily returned {actual} update results; expected {expected}")]
     UnexpectedUpdateCount {
-        /// Number of updates submitted to Emily.
+        /// Number of updates submitted in the batch.
         expected: usize,
         /// Number of per-deposit results returned by Emily.
         actual: usize,
     },
 
-    /// Emily rejected at least one update in a batch.
+    /// Emily rejected at least one update in a submitted batch.
     #[error("Emily rejected one or more deposit updates")]
     DepositUpdatesRejected,
 }

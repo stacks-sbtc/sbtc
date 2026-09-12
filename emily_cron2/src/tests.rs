@@ -6,8 +6,8 @@ use serde_json::json;
 
 use crate::config::Config;
 use crate::model::Rbf;
-use crate::model::expired;
-use crate::model::lock_time;
+use crate::model::is_past_expiry;
+use crate::model::reclaim_lock_time;
 use crate::processor::Processor;
 
 fn processor(server: &Server, dry_run: bool) -> Processor {
@@ -30,30 +30,28 @@ fn deposit(status: &str) -> Value {
 }
 
 async fn setup(server: &mut Server, status: &str, tip: u64) -> Vec<mockito::Mock> {
-    let mut mocks = vec![
+    vec![
         server
             .mock("GET", "/v1/blocks/tip/height")
             .match_header("x-api-key", Matcher::Missing)
             .with_body(tip.to_string())
             .create_async()
             .await,
-    ];
-    for filter in ["pending", "accepted"] {
-        mocks.push(
-            server
-                .mock("GET", "/deposit")
-                .with_header("content-type", "application/json")
-                .match_query(Matcher::UrlEncoded("status".into(), filter.into()))
-                .match_header("x-api-key", "test-key")
-                .with_body(
-                    json!({"deposits": if status == filter {vec![deposit(status)]} else {vec![]}, "nextToken": null})
-                        .to_string(),
-                )
-                .create_async()
-                .await,
-        );
-    }
-    mocks
+        server
+            .mock("GET", "/deposit")
+            .with_header("content-type", "application/json")
+            .match_query(Matcher::UrlEncoded("status".into(), "pending".into()))
+            .match_header("x-api-key", "test-key")
+            .with_body(
+                json!({
+                    "deposits": if status == "pending" { vec![deposit(status)] } else { vec![] },
+                    "nextToken": null
+                })
+                .to_string(),
+            )
+            .create_async()
+            .await,
+    ]
 }
 
 async fn update_mock(
@@ -90,7 +88,7 @@ fn locktime_and_expiry_boundaries() {
         ("0160b27551", 96),
         ("02b603b2", 950),
     ] {
-        assert_eq!(lock_time(script).unwrap(), expected);
+        assert_eq!(reclaim_lock_time(script).unwrap(), expected);
     }
     for script in [
         "",
@@ -102,11 +100,11 @@ fn locktime_and_expiry_boundaries() {
         "016051",
         "0260",
     ] {
-        assert!(lock_time(script).is_err(), "{script}");
+        assert!(reclaim_lock_time(script).is_err(), "{script}");
     }
-    assert!(!expired(100, 96, 6, 201));
-    assert!(expired(100, 96, 6, 202));
-    assert!(!expired(u64::MAX, 1, 6, u64::MAX));
+    assert!(!is_past_expiry(100, 96, 6, 201));
+    assert!(is_past_expiry(100, 96, 6, 202));
+    assert!(!is_past_expiry(u64::MAX, 1, 6, u64::MAX));
 }
 
 #[test]
@@ -118,10 +116,10 @@ fn reclaim_scripts_use_shared_sbtc_validation() {
     let user_script = ScriptBuf::from_hex("7551").unwrap();
     let reclaim = ReclaimScriptInputs::try_new(96, user_script).unwrap();
     let script = reclaim.reclaim_script().to_hex_string();
-    assert_eq!(lock_time(&script).unwrap(), 96);
+    assert_eq!(reclaim_lock_time(&script).unwrap(), 96);
 
     // The old prefix-only parser accepted OP_SUCCESSx in the user script.
-    let error = lock_time("0160b250").unwrap_err();
+    let error = reclaim_lock_time("0160b250").unwrap_err();
     assert!(matches!(
         error,
         Error::Sbtc(sbtc::error::Error::ReclaimScriptWithSuccessOp(_))
@@ -129,7 +127,7 @@ fn reclaim_scripts_use_shared_sbtc_validation() {
 
     // Shared validation also enforces the length of the user-supplied script.
     let user_script = "51".repeat(sbtc::MAX_RECLAIM_SCRIPT_LENGTH + 1);
-    let error = lock_time(&format!("0160b2{user_script}")).unwrap_err();
+    let error = reclaim_lock_time(&format!("0160b2{user_script}")).unwrap_err();
     assert!(matches!(
         error,
         Error::Sbtc(sbtc::error::Error::InvalidReclaimScriptLength(_))
@@ -173,7 +171,7 @@ async fn expiry_unspent_reclaim_and_signer_sweep() {
         (true, "aa0160b27551bb", None),
     ] {
         let mut server = Server::new_async().await;
-        let mocks = setup(&mut server, "accepted", 202).await;
+        let mocks = setup(&mut server, "pending", 202).await;
         let tx = server
             .mock("GET", "/v1/tx/original")
             .with_body(r#"{"status":{"confirmed":true,"block_height":100}}"#)
@@ -254,14 +252,13 @@ async fn rbf_fetches_replacement_outside_emily_and_waits_for_confirmations() {
 
 #[tokio::test]
 async fn only_missing_old_pending_transactions_fail() {
-    for (status, missing, old, expected) in [
-        ("pending", true, true, true),
-        ("pending", true, false, false),
-        ("pending", false, true, false),
-        ("accepted", true, true, false),
+    for (missing, old, expected) in [
+        (true, true, true),
+        (true, false, false),
+        (false, true, false),
     ] {
         let mut server = Server::new_async().await;
-        let _mocks = setup(&mut server, status, 100).await;
+        let _mocks = setup(&mut server, "pending", 100).await;
         let tx = server
             .mock("GET", "/v1/tx/original")
             .with_status(if missing { 404 } else { 200 })
@@ -276,7 +273,7 @@ async fn only_missing_old_pending_transactions_fail() {
         let block = server
             .mock("GET", "/extended/v2/blocks/block")
             .with_body(json!({"block_time": if old {0} else {u64::MAX}}).to_string())
-            .expect(usize::from(missing && status == "pending"))
+            .expect(usize::from(missing))
             .create_async()
             .await;
         let update = update_mock(
@@ -364,13 +361,6 @@ async fn pagination_dry_run_and_batch_errors() {
                 Matcher::UrlEncoded("nextToken".into(), "a+b/c=".into()),
             ]))
             .with_body(json!({"deposits":[deposit("pending")]}).to_string())
-            .create_async()
-            .await;
-        server
-            .mock("GET", "/deposit")
-            .with_header("content-type", "application/json")
-            .match_query(Matcher::UrlEncoded("status".into(), "accepted".into()))
-            .with_body(r#"{"deposits":[]}"#)
             .create_async()
             .await;
         server
@@ -467,13 +457,6 @@ async fn setup_update_backlog(server: &mut Server, count: u32) -> Vec<mockito::M
         .with_body(json!({"deposits": deposits}).to_string())
         .create_async()
         .await;
-    let accepted = server
-        .mock("GET", "/deposit")
-        .match_query(Matcher::UrlEncoded("status".into(), "accepted".into()))
-        .with_header("content-type", "application/json")
-        .with_body(r#"{"deposits":[]}"#)
-        .create_async()
-        .await;
     let transaction = server
         .mock("GET", "/v1/tx/original")
         .with_body(r#"{"status":{"confirmed":true,"block_height":100}}"#)
@@ -485,7 +468,7 @@ async fn setup_update_backlog(server: &mut Server, count: u32) -> Vec<mockito::M
         .expect(count as usize)
         .create_async()
         .await;
-    vec![tip, pending, accepted, transaction, outspends]
+    vec![tip, pending, transaction, outspends]
 }
 
 /// Match the complete set of updates in one request, including output ordering.

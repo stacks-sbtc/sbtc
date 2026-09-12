@@ -17,7 +17,7 @@ pub enum LogOutputFormat {
     Pretty,
 }
 
-/// Initialize logging, using `RUST_LOG` to override the default directives.
+/// Initialize logging. `RUST_LOG` overrides `directives` when set.
 pub fn setup_logging(directives: &str, format: LogOutputFormat) {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(directives));
     match format {
@@ -26,7 +26,6 @@ pub fn setup_logging(directives: &str, format: LogOutputFormat) {
     }
 }
 
-/// Install the structured event format used by the signer.
 fn setup_logging_json(filter: EnvFilter) {
     let layer = tracing_subscriber::fmt::layer()
         .json()
@@ -44,7 +43,6 @@ fn setup_logging_json(filter: EnvFilter) {
         .init();
 }
 
-/// Install human-readable output with terminal-aware colors.
 fn setup_logging_pretty(filter: EnvFilter) {
     let layer = tracing_subscriber::fmt::layer()
         .with_ansi(std::io::stdout().is_terminal())

@@ -2,7 +2,7 @@
 
 Rust deposit reconciliation service, independent of the Python `emily_cron`.
 Emily requests and wire types come from the generated `private-emily-client` crate.
-It reads pending and accepted deposits from the private Emily endpoint and updates
+It reads pending deposits from the private Emily endpoint and updates
 `/deposit_private` for expired unspent deposits, depositor reclaims, confirmed RBF
 replacements, and old pending transactions that have disappeared from the mempool.
 
@@ -58,16 +58,12 @@ separate Electrs URL.
 
 ## Behavior and intentional fixes
 
-The expiry threshold remains `confirmed_height + lock_time + MIN_BLOCK_CONFIRMATIONS`,
-and RBF replacements require `tip >= replacement_height + MIN_BLOCK_CONFIRMATIONS`.
-Only missing **pending** transactions older than `MAX_UNCONFIRMED_TIME` are failed
-for age. Accepted deposits remain eligible for expiry/reclaim checks. An expired
-output spent by signers is left alone.
+The expiry threshold remains `confirmed_height + lock_time + MIN_BLOCK_CONFIRMATIONS`, and RBF replacements require `tip >= replacement_height + MIN_BLOCK_CONFIRMATIONS`. Only missing **pending** transactions older than `MAX_UNCONFIRMED_TIME` are failed for age.
 
 Compared with Python:
 
-- Follow Emily pages until complete or a 10s pagination timeout, and send at most
-  one update per deposit outpoint.
+- Page through Emily deposits until complete or a 10s timeout, send updates in
+  batches of 5, and apply at most one update per deposit outpoint.
 - Fetch RBF replacement transactions even when they are absent from Emily or the
   original has disappeared. RBF takes precedence over the pending-age rule.
 - Treat only transaction HTTP 404 as missing. Transport errors, other HTTP errors,
@@ -84,9 +80,13 @@ same reads and logs the proposed JSON updates without writing them.
 ## Crate layout
 
 The package provides the `emily_cron2` library and the `emily-cron2` binary.
-The library exposes configuration, errors, logging, API models, and the deposit
-processor. The binary handles startup, scheduling, and shutdown signals. Unit
-tests live in the library's `tests` module.
+
+- `main` schedules cycles and handles shutdown signals
+- `processor` runs one cycle: fetch → reconcile → submit
+- `model` holds Bitcoin/Stacks response types and expiry helpers
+- `config` / `error` / `logging` cover settings, failures, and output format
+
+Unit tests live in the library's `tests` module.
 
 ## Tests
 

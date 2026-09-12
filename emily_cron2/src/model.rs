@@ -1,9 +1,14 @@
-//! Bitcoin and Stacks API response types and reconciliation helpers.
+//! Bitcoin and Stacks API response types, plus small reconciliation helpers.
 
-use crate::error::Error;
 use bitcoin::ScriptBuf;
 use sbtc::deposits::ReclaimScriptInputs;
 use serde::Deserialize;
+
+use crate::error::Error;
+
+// ---------------------------------------------------------------------------
+// Bitcoin transaction
+// ---------------------------------------------------------------------------
 
 /// Bitcoin transaction details returned by the mempool API.
 #[derive(Clone, Deserialize)]
@@ -25,7 +30,7 @@ pub struct TransactionStatus {
 }
 
 impl Transaction {
-    /// Return the block height only when the transaction is confirmed.
+    /// Return the confirming block height, or `None` if still unconfirmed.
     pub fn confirmed_height(&self) -> Option<u64> {
         if self.status.confirmed {
             self.status.block_height
@@ -43,6 +48,21 @@ pub struct Input {
     pub witness: Vec<String>,
 }
 
+impl Input {
+    /// True when a witness element equals the reclaim script hex (case-insensitive).
+    ///
+    /// Matches a whole stack item only; substring matches are ignored.
+    pub fn contains_reclaim_script(&self, reclaim_script: &str) -> bool {
+        self.witness
+            .iter()
+            .any(|item| item.eq_ignore_ascii_case(reclaim_script))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Electrs outspend
+// ---------------------------------------------------------------------------
+
 /// Electrs spending information for a deposit output.
 #[derive(Deserialize)]
 pub struct Outspend {
@@ -53,6 +73,10 @@ pub struct Outspend {
     /// Index of the input spending the output.
     pub vin: Option<usize>,
 }
+
+// ---------------------------------------------------------------------------
+// Mempool RBF tree
+// ---------------------------------------------------------------------------
 
 /// Replacement history returned by the mempool API.
 #[derive(Deserialize)]
@@ -79,26 +103,43 @@ pub struct ReplacementTransaction {
 }
 
 impl Replacement {
-    /// Collect transaction IDs from this replacement subtree.
+    /// Append every transaction ID in this replacement subtree to `output`.
     pub fn txids(&self, output: &mut Vec<String>) {
         if let Some(tx) = &self.tx {
             output.push(tx.txid.clone());
         }
-        for replacement in &self.replaces {
-            replacement.txids(output);
+        for child in &self.replaces {
+            child.txids(output);
         }
     }
 }
 
-/// Parse and validate the reclaim script using the shared sBTC rules.
-pub fn lock_time(script: &str) -> Result<u32, Error> {
-    let script = ScriptBuf::from_hex(script)?;
+// ---------------------------------------------------------------------------
+// Stacks block
+// ---------------------------------------------------------------------------
+
+/// Stacks block timestamp used to determine a deposit's age.
+#[derive(Deserialize)]
+pub struct Block {
+    /// Block timestamp in seconds since the Unix epoch.
+    pub block_time: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation helpers
+// ---------------------------------------------------------------------------
+
+/// Parse a reclaim script and return its CSV lock-time in Bitcoin blocks.
+pub fn reclaim_lock_time(script_hex: &str) -> Result<u32, Error> {
+    let script = ScriptBuf::from_hex(script_hex)?;
     let reclaim = ReclaimScriptInputs::parse(&script)?;
     Ok(reclaim.lock_time())
 }
 
-/// Check whether the required delay and confirmation margin have elapsed.
-pub fn expired(height: u64, lock_time: u32, confirmations: u64, tip: u64) -> bool {
+/// True when `tip` has reached `height + lock_time + confirmations`.
+///
+/// Returns `false` if the height arithmetic would overflow.
+pub fn is_past_expiry(height: u64, lock_time: u32, confirmations: u64, tip: u64) -> bool {
     let Some(reclaim_height) = height.checked_add(u64::from(lock_time)) else {
         return false;
     };
@@ -106,23 +147,4 @@ pub fn expired(height: u64, lock_time: u32, confirmations: u64, tip: u64) -> boo
         return false;
     };
     tip >= expiry_height
-}
-
-impl Input {
-    /// Check for a whole reclaim-script witness element, ignoring hex case.
-    pub fn contains_reclaim_script(&self, reclaim_script: &str) -> bool {
-        for item in &self.witness {
-            if item.eq_ignore_ascii_case(reclaim_script) {
-                return true;
-            }
-        }
-        false
-    }
-}
-
-/// Stacks block timestamp used to determine a deposit's age.
-#[derive(Deserialize)]
-pub struct Block {
-    /// Block timestamp in seconds since the Unix epoch.
-    pub block_time: u64,
 }

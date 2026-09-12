@@ -1,4 +1,4 @@
-//! Standalone Rust service for reconciling Emily deposit statuses.
+//! Binary entry point: configure logging, run cycles, stop on signal.
 
 use std::time::Duration;
 
@@ -16,25 +16,27 @@ use tracing::info;
 async fn main() -> Result<(), Error> {
     let config = Config::parse();
     logging::setup_logging("info", config.output_format);
+
     let once = config.once;
     let period = Duration::from_secs(config.poll_interval_seconds);
     let processor = Processor::new(config)?;
+
     if once {
         return processor.run().await;
     }
 
-    // Poll the watcher first so signal registration errors stop the service
-    // before it begins reconciling deposits.
+    // Register signals before the first cycle so setup errors exit cleanly.
     tokio::select! {
         biased;
-        result = run_shutdown_signal_watcher() => result?,
+        result = wait_for_shutdown_signal() => result?,
         _ = run_reconciliation_loop(&processor, period) => {},
     }
+
     info!("Emily cron2 stopped");
     Ok(())
 }
 
-/// Run sequential reconciliation cycles with a delay after each completed cycle.
+/// Run cycles forever, sleeping `period` after each completed attempt.
 async fn run_reconciliation_loop(processor: &Processor, period: Duration) {
     loop {
         if let Err(error) = processor.run().await {
@@ -44,9 +46,9 @@ async fn run_reconciliation_loop(processor: &Processor, period: Duration) {
     }
 }
 
-/// Listen for SIGHUP, SIGTERM, and SIGINT on Unix, or Ctrl-C on other systems.
+/// Wait for SIGHUP / SIGTERM / SIGINT on Unix, or Ctrl-C elsewhere.
 #[tracing::instrument(name = "shutdown-watcher")]
-async fn run_shutdown_signal_watcher() -> Result<(), Error> {
+async fn wait_for_shutdown_signal() -> Result<(), Error> {
     cfg_if! {
         if #[cfg(unix)] {
             let mut terminate = signal::unix::signal(signal::unix::SignalKind::terminate())?;
@@ -70,7 +72,6 @@ async fn run_shutdown_signal_watcher() -> Result<(), Error> {
         }
     }
 
-    // There is one worker future here; returning lets main stop it directly.
     info!("shutting down the application");
     Ok(())
 }
