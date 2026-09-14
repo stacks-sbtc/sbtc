@@ -1953,7 +1953,7 @@ pub mod test {
             }
             result => panic!(
                 "Expected OperationResult::DkgError(DkgError::DkgEndFailure), got {:?}",
-                &result
+                result
             ),
         }
     }
