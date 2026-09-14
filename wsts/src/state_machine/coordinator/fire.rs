@@ -823,8 +823,9 @@ impl Coordinator {
 
             let shares = message_nonce
                 .public_nonces
-                .iter()
-                .flat_map(|(i, _)| self.signature_shares[i].clone())
+                .keys()
+                .filter_map(|i| self.signature_shares.get(i).cloned())
+                .flatten()
                 .collect::<Vec<SignatureShare>>();
 
             debug!(
