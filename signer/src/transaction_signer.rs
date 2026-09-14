@@ -1669,13 +1669,12 @@ mod tests {
     use test_case::test_case;
 
     use crate::bitcoin::MockBitcoinInteract;
-    use crate::context::Context as _;
     use crate::emily_client::MockEmilyInteract;
     use crate::keys::PublicKey;
     use crate::stacks::api::MockStacksInteract;
     use crate::stacks::api::SignerSetInfo;
     use crate::storage::memory::SharedStore;
-    use crate::storage::{DbWrite as _, model};
+    use crate::storage::model;
     use crate::testing::context::*;
     use crate::testing::{self, get_rng};
     use crate::transaction_coordinator::TxCoordinatorEventLoop;

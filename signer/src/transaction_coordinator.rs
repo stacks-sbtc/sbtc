@@ -2658,7 +2658,6 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
 #[cfg(test)]
 mod tests {
     use crate::bitcoin::MockBitcoinInteract;
-    use crate::context::Context as _;
     use crate::emily_client::MockEmilyInteract;
     use crate::error::Error;
     use crate::keys::PrivateKey;
@@ -2670,10 +2669,10 @@ mod tests {
     use crate::storage::model;
     use crate::storage::model::BitcoinBlockHeight;
     use crate::storage::model::DkgSharesStatus;
+    use crate::testing;
     use crate::testing::context::*;
     use crate::testing::get_rng;
     use crate::testing::transaction_coordinator::TestEnvironment;
-    use crate::testing::{self};
 
     use fake::Fake as _;
     use fake::Faker;
