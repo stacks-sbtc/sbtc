@@ -1197,7 +1197,7 @@ where
     ) -> Result<(), Error> {
         let state_machine = match self.wsts_state_machines.get(state_machine_id) {
             Some(state_machine) => state_machine,
-            None => return Err(Error::MissingStateMachine(*state_machine_id)),
+            None => return Err(Error::MissingStateMachine(Box::new(*state_machine_id))),
         };
 
         let wsts_public_key = state_machine
@@ -1251,10 +1251,10 @@ where
         let state_machine = self
             .wsts_state_machines
             .get(state_machine_id)
-            .ok_or_else(|| Error::MissingStateMachine(*state_machine_id))?;
+            .ok_or_else(|| Error::MissingStateMachine(Box::new(*state_machine_id)))?;
 
         let StateMachineId::Dkg(_) = state_machine_id else {
-            return Err(Error::UnexpectedStateMachineId(*state_machine_id));
+            return Err(Error::UnexpectedStateMachineId(Box::new(*state_machine_id)));
         };
 
         let encrypted_dkg_shares = state_machine.get_encrypted_dkg_shares()?;
@@ -1361,7 +1361,7 @@ where
         // We only support DKG verification state machines here.
         let StateMachineId::DkgVerification(aggregate_key, _) = state_machine_id else {
             tracing::warn!(%state_machine_id, "🔐 unexpected state machine id for DKG verification signing round");
-            return Err(Error::UnexpectedStateMachineId(*state_machine_id));
+            return Err(Error::UnexpectedStateMachineId(Box::new(*state_machine_id)));
         };
 
         // Get our state machine, returning an error if it doesn't exist (we
@@ -1369,7 +1369,7 @@ where
         let state_machine = self
             .dkg_verification_state_machines
             .get_mut(state_machine_id)
-            .ok_or_else(|| Error::MissingStateMachine(*state_machine_id))?;
+            .ok_or_else(|| Error::MissingStateMachine(Box::new(*state_machine_id)))?;
 
         // Determine if the state machine is in an end-state.
         let is_end_state = match state_machine.state() {
@@ -1425,7 +1425,7 @@ where
             StateMachineId::DkgVerification(aggregate_key, _) => aggregate_key,
             _ => {
                 tracing::warn!("🔐 unexpected state machine id for DKG verification signing round");
-                return Err(Error::UnexpectedStateMachineId(state_machine_id));
+                return Err(Error::UnexpectedStateMachineId(Box::new(state_machine_id)));
             }
         };
 
@@ -1434,7 +1434,7 @@ where
             .get_mut(&state_machine_id);
         let Some(state_machine) = state_machine else {
             tracing::warn!("🔐 missing FROST coordinator for DKG verification");
-            return Err(Error::MissingStateMachine(state_machine_id));
+            return Err(Error::MissingStateMachine(Box::new(state_machine_id)));
         };
 
         // Validate that the sender is a valid member of the signing set and
@@ -1523,7 +1523,7 @@ where
             Some(state_machine) => state_machine.process(msg)?,
             None => {
                 tracing::warn!("missing signing round");
-                return Err(Error::MissingStateMachine(*state_machine_id));
+                return Err(Error::MissingStateMachine(Box::new(*state_machine_id)));
             }
         };
 
@@ -1550,7 +1550,7 @@ where
             // Process in the signer state machine.
             self.wsts_state_machines
                 .get_mut(state_machine_id)
-                .ok_or_else(|| Error::MissingStateMachine(*state_machine_id))?
+                .ok_or_else(|| Error::MissingStateMachine(Box::new(*state_machine_id)))?
                 .process(outbound_message)?;
 
             // If this is a DKG verification then we need to process the message
