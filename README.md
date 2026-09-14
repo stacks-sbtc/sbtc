@@ -32,7 +32,7 @@ See [`RELEASE.md`](./RELEASE.md).
 The following are the developer tools that you should install on your local machine in order to build and run the sources in this repository.
 
 - **[Cargo](https://doc.rust-lang.org/cargo/)** - [Installation Guide](https://doc.rust-lang.org/cargo/getting-started/installation.html) - Builds rust packages.
-- **[Cargo-lambda](https://www.cargo-lambda.info/)** - [Installation Guide](https://www.cargo-lambda.info/guide/getting-started.html) - Compile the package for AWS Lambda.
+- **[Cargo-lambda](https://www.cargo-lambda.info/)** - [Installation Guide](https://www.cargo-lambda.info/guide/installation.html) - Compile the package for AWS Lambda. Install with `cargo install cargo-lambda --locked --version 1.9.2`.
 - **[pnpm](https://pnpm.io)** - [Installation guide](https://pnpm.io/installation) - Manages node packages.
 - **[Make](https://www.gnu.org/software/make/)** - Development task runner; natively present on nearly every system.
 - **[Docker](https://docs.docker.com/manuals/)** - [Installation Guide](https://docs.docker.com/desktop/) - This is used for running integration tests.
@@ -74,7 +74,7 @@ Below is the output on a machine that is able to build and run all the sources a
 ```text
 --- sBTC tool versions ---
 cargo 1.94.1 (29ea6fb6a 2026-03-24)
-cargo-lambda 1.6.2 (2025-01-17Z)
+cargo-lambda 1.9.2
 pnpm 9.1.0
 GNU Make 3.81
 uv 0.8.13 (Homebrew 2025-08-21)
