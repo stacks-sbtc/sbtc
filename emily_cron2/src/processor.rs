@@ -18,8 +18,6 @@ use reqwest::Client;
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
-use tracing::info;
-use tracing::warn;
 
 use crate::config::Config;
 use crate::error::Error;
@@ -110,7 +108,7 @@ impl Processor {
 
     /// Fetch deposits, decide status updates, then submit or dry-run log them.
     pub async fn run(&self) -> Result<(), Error> {
-        let tip = self.fetch_bitcoin_tip_height().await?;
+        let tip_height = self.fetch_bitcoin_tip_height().await?;
         let deposits = self.fetch_deposits(DepositStatus::Pending).await?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
@@ -127,7 +125,7 @@ impl Processor {
                 continue;
             }
 
-            match self.reconcile(&deposit, tip, now, &mut state).await {
+            match self.reconcile(&deposit, tip_height, now, &mut state).await {
                 Ok(Some(update)) => updates.push(update),
                 Ok(None) => {}
                 Err(error) => {
@@ -152,8 +150,8 @@ impl Processor {
             return Err(Error::IncompleteReconciliation);
         }
 
-        info!(
-            tip,
+        tracing::info!(
+            tip_height,
             updates = updates.len(),
             dry_run = self.config.dry_run,
             "Deposit reconciliation completed"
@@ -216,7 +214,7 @@ impl Processor {
     async fn reconcile(
         &self,
         deposit: &DepositInfo,
-        tip: u64,
+        tip_height: u64,
         now: u64,
         state: &mut CycleState,
     ) -> Result<Option<DepositUpdate>, Error> {
@@ -224,14 +222,16 @@ impl Processor {
             .cached_transaction(&deposit.bitcoin_txid, state)
             .await?;
 
-        if let Some(height) = maybe_tx.and_then(Transaction::confirmed_height) {
-            return self.expiry_or_reclaim_update(deposit, height, tip).await;
+        if let Some(confirmed_height) = maybe_tx.and_then(Transaction::confirmed_height) {
+            return self
+                .expiry_or_reclaim_update(deposit, confirmed_height, tip_height)
+                .await;
         }
         let missing_from_mempool = maybe_tx.is_none();
 
         // Replacements may not be registered in Emily, and the original may
         // already have left the mempool after being replaced.
-        if let Some(update) = self.rbf_update(deposit, tip, state).await? {
+        if let Some(update) = self.rbf_update(deposit, tip_height, state).await? {
             return Ok(Some(update));
         }
 
@@ -252,14 +252,14 @@ impl Processor {
         &self,
         deposit: &DepositInfo,
         confirmed_height: u64,
-        tip: u64,
+        tip_height: u64,
     ) -> Result<Option<DepositUpdate>, Error> {
         let reclaim_delay = reclaim_lock_time(&deposit.reclaim_script)?;
         let deposit_expired = is_past_expiry(
             confirmed_height,
             reclaim_delay,
             self.config.min_block_confirmations,
-            tip,
+            tip_height,
         );
 
         if !deposit_expired {
@@ -280,7 +280,7 @@ impl Processor {
             return Ok(Some(deposit_update(
                 deposit,
                 DepositStatus::Failed,
-                format!("Locktime expired at height {tip} and UTXO unspent"),
+                format!("Locktime expired at height {tip_height} and UTXO unspent"),
                 None,
             )));
         }
@@ -312,7 +312,7 @@ impl Processor {
     async fn rbf_update(
         &self,
         deposit: &DepositInfo,
-        tip: u64,
+        tip_height: u64,
         state: &mut CycleState,
     ) -> Result<Option<DepositUpdate>, Error> {
         let rbf: Rbf = self
@@ -340,7 +340,7 @@ impl Processor {
             };
 
             // Same confirmation margin as expiry, with no reclaim lock-time.
-            if is_past_expiry(height, 0, self.config.min_block_confirmations, tip) {
+            if is_past_expiry(height, 0, self.config.min_block_confirmations, tip_height) {
                 return Ok(Some(deposit_update(
                     deposit,
                     DepositStatus::Rbf,
@@ -403,7 +403,7 @@ impl Processor {
             let response = deposit_api::update_deposits_sidecar(&self.emily, request)
                 .await
                 .map_err(|error| {
-                    warn!(
+                    tracing::warn!(
                         batch_index,
                         updates = batch.len(),
                         %error,
@@ -425,7 +425,7 @@ impl Processor {
                 let succeeded = (200..300).contains(&outcome.status) && error.is_none();
                 if !succeeded {
                     rejected = true;
-                    warn!(
+                    tracing::warn!(
                         txid = %update.bitcoin_txid,
                         vout = update.bitcoin_tx_output_index,
                         status = outcome.status,
@@ -469,8 +469,8 @@ impl Processor {
 
     /// Return a cached transaction, or fetch and store it when found.
     ///
-    /// `Ok(None)` means the mempool API returned HTTP 404. Missing txids are
-    /// not cached, so a later call will ask the API again.
+    /// `Ok(None)` means the the transaction is missing from the cache and
+    /// the mempool API returned HTTP 404.
     async fn cached_transaction<'a>(
         &self,
         txid: &str,
