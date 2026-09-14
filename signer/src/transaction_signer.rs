@@ -66,7 +66,6 @@ use wsts::net::SignatureType;
 /// bitcoin tenures for which we keep track of the signed stacks transactions.
 pub const STACKS_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(2).expect("2 is non zero");
 
-#[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction signer event loop
 ///
 /// This struct contains the implementation of the transaction signer

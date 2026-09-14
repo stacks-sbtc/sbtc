@@ -109,7 +109,6 @@ const FEE_RETRY_TARGET_BLOCKS: u16 = {
     taget_block
 };
 
-#[cfg_attr(doc, aquamarine::aquamarine)]
 /// # Transaction coordinator event loop
 ///
 /// This struct contains the implementation of the transaction coordinator
