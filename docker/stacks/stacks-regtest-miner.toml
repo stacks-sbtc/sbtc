@@ -20,6 +20,10 @@ microblock_frequency = 1000
 # mine_microblocks = true
 # max_microblocks = 10
 
+pox_5_sbtc_contract = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-token"
+pox_5_sbtc_registry_contract = "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS.sbtc-registry"
+pox_5_bond_admin = "ST1YEHRRYJ4GF9CYBFFN0ZVCXX1APSBEEQ5KEDN7M"
+
 [miner]
 first_attempt_time_ms = 180_000
 subsequent_attempt_time_ms = 360_000
@@ -178,6 +182,10 @@ start_height = $STACKS_33_HEIGHT
 [[burnchain.epochs]]
 epoch_name = "3.4"
 start_height = $STACKS_34_HEIGHT
+
+[[burnchain.epochs]]
+epoch_name = "4.0"
+start_height = $STACKS_40_HEIGHT
 
 [[ustx_balance]]
 address = "ST2SBXRBJJTH7GV5J93HJ62W2NRRQ46XYBK92Y039" # sBTC deployer

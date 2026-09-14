@@ -1,0 +1,28 @@
+[package]
+name = "devenv-setup"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "devenv-setup"
+path = "src/main.rs"
+
+[dependencies]
+aws-config.workspace = true
+aws-sdk-dynamodb.workspace = true
+bitcoin.workspace = true
+bitcoincore-rpc.workspace = true
+clap.workspace = true
+hex.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls"] }
+secp256k1.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

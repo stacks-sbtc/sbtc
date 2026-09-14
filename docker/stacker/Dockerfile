@@ -8,6 +8,7 @@ COPY ./stacking/package.json /root/
 # We don't have access to the root lockfile so we can't use --frozen-lockfile
 RUN pnpm install
 
-COPY ./stacking/stacking.ts ./stacking/common.ts ./stacking/monitor.ts ./stacking/tx-broadcaster.ts /root/
+COPY ./stacking/*.ts /root/
+COPY ./stacking/contracts /root/contracts
 
 CMD ["npx", "tsx", "/root/stacking.ts"]

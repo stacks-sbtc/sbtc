@@ -10,6 +10,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@clarigen/core": "^4.1.6",
+    "@noble/hashes": "^1.8.0",
+    "@scure/base": "^1.2.0",
+    "@scure/btc-signer": "^1.5.0",
+    "@stacks/blockchain-api-client": "8.15.1",
     "@stacks/encryption": "7.4.0",
     "@stacks/network": "7.3.1",
     "@stacks/stacking": "7.4.0",
