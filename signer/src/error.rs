@@ -366,7 +366,7 @@ pub enum Error {
 
     /// Could not parse the path part of a URL
     #[error("failed to construct a valid URL from {1} and {2}: {0}")]
-    PathJoin(#[source] url::ParseError, url::Url, Cow<'static, str>),
+    PathJoin(#[source] url::ParseError, Box<url::Url>, Cow<'static, str>),
 
     /// This occurs when combining many public keys would result in a
     /// "public key" that is the point at infinity.
