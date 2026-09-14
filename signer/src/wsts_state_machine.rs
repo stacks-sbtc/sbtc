@@ -274,8 +274,8 @@ impl WstsCoordinator for FireCoordinator {
         let public_dkg_shares: BTreeMap<u32, wsts::net::DkgPublicShares> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
         let party_polynomials = public_dkg_shares
-            .iter()
-            .flat_map(|(_, share)| share.comms.clone())
+            .values()
+            .flat_map(|share| share.comms.clone())
             .collect::<Vec<(u32, PolyCommitment)>>();
 
         let signer_public_keys = encrypted_shares.signer_set_public_keys();
@@ -390,8 +390,8 @@ impl WstsCoordinator for FrostCoordinator {
         let public_dkg_shares: BTreeMap<u32, wsts::net::DkgPublicShares> =
             BTreeMap::decode(encrypted_shares.public_shares.as_slice())?;
         let party_polynomials = public_dkg_shares
-            .iter()
-            .flat_map(|(_, share)| share.comms.clone())
+            .values()
+            .flat_map(|share| share.comms.clone())
             .collect::<Vec<(u32, PolyCommitment)>>();
 
         let signer_public_keys = encrypted_shares.signer_set_public_keys();

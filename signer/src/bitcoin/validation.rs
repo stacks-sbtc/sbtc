@@ -302,7 +302,7 @@ impl BitcoinPreSignRequest {
             utxo: signer_utxo,
             public_key: bitcoin::XOnlyPublicKey::from(btc_ctx.aggregate_key),
             last_fees,
-            magic_bytes: [b'T', b'3'], //TODO(#472): Use the correct magic bytes.
+            magic_bytes: *b"T3", //TODO(#472): Use the correct magic bytes.
         };
         let mut outputs = Vec::new();
 
