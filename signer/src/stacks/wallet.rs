@@ -297,8 +297,7 @@ impl MultisigTx {
         // https://github.com/hirosystems/stacks.js/blob/2c57ea4e5abed76da903f5138c79c1d2eceb008b/packages/transactions/src/constants.ts#L1-L8,
         // and in the clarity docs at
         // https://docs.stacks.co/clarity/keywords#chain-id-clarity2:
-        let chain_id = wallet.chain_id;
-        let version = if chain_id == CHAIN_ID_MAINNET {
+        let version = if wallet.chain_id == CHAIN_ID_MAINNET {
             TransactionVersion::Mainnet
         } else {
             TransactionVersion::Testnet
@@ -310,7 +309,7 @@ impl MultisigTx {
 
         let tx = StacksTransaction {
             version,
-            chain_id,
+            chain_id: wallet.chain_id,
             auth: TransactionAuth::Standard(spending_condition),
             anchor_mode: TransactionAnchorMode::Any,
             post_condition_mode: conditions.post_condition_mode,
