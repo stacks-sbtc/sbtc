@@ -1805,6 +1805,7 @@ mod tests {
     };
     use rand::rngs::OsRng;
     use secp256k1::Keypair;
+    use stacks_common::consts::CHAIN_ID_TESTNET;
     use test_case::test_case;
     use test_log::test;
 
@@ -1816,14 +1817,12 @@ mod tests {
     }
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
-        let chain_id = blockstack_lib::core::CHAIN_ID_TESTNET;
-
         let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
             .map(|kp| kp.public_key().into())
             .take(num_keys as usize)
             .collect::<Vec<_>>();
 
-        SignerWallet::new(&public_keys, signatures_required, chain_id).unwrap()
+        SignerWallet::new(&public_keys, signatures_required, CHAIN_ID_TESTNET).unwrap()
     }
 
     #[ignore = "This is an integration test that hasn't been setup for CI yet"]
@@ -2649,7 +2648,7 @@ mod tests {
         let expected: GetNodeInfoResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
-        assert_eq!(resp.network_id, 0x8000_0000);
+        assert_eq!(resp.network_id, CHAIN_ID_TESTNET);
         mock.assert();
     }
 
