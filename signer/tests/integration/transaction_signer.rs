@@ -624,7 +624,7 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
         fee_rate,
         last_fees: None,
         public_key: setup.aggregated_signer.keypair.public_key().into(),
-        magic_bytes: [b'T', b'3'],
+        magic_bytes: *b"T3",
     };
 
     // Create an unsigned transaction with the deposit request

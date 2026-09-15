@@ -598,7 +598,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
             fee_rate: 10.0,
             public_key: signers_public_key,
             last_fees: None,
-            magic_bytes: [b'T', b'3'],
+            magic_bytes: *b"T3",
         },
         accept_threshold: 4,
         num_signers: 7,
@@ -773,7 +773,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
             // aggregate key.
             public_key: signers_public_key2,
             last_fees: None,
-            magic_bytes: [b'T', b'3'],
+            magic_bytes: *b"T3",
         },
         accept_threshold: 2,
         num_signers: 3,

@@ -37,7 +37,7 @@ pub struct StacksTxid(pub [u8; 32]);
 
 impl Display for StacksTxid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.0.to_hex_string(bitcoin::hex::Case::Lower))
+        write!(f, "{}", self.0.to_hex_string(bitcoin::hex::Case::Lower))
     }
 }
 

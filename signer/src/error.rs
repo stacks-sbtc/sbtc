@@ -47,7 +47,7 @@ pub enum Error {
 
     /// Unexpected [`StateMachineId`] in the given context.
     #[error("unexpected state machine id in the given context: {0:?}")]
-    UnexpectedStateMachineId(crate::wsts_state_machine::StateMachineId),
+    UnexpectedStateMachineId(Box<crate::wsts_state_machine::StateMachineId>),
 
     /// Common error from WSTS, usually raised when a polynomial is invalid.
     #[error("common WSTS error: {0}")]
@@ -366,7 +366,7 @@ pub enum Error {
 
     /// Could not parse the path part of a URL
     #[error("failed to construct a valid URL from {1} and {2}: {0}")]
-    PathJoin(#[source] url::ParseError, url::Url, Cow<'static, str>),
+    PathJoin(#[source] url::ParseError, Box<url::Url>, Cow<'static, str>),
 
     /// This occurs when combining many public keys would result in a
     /// "public key" that is the point at infinity.
@@ -583,7 +583,7 @@ pub enum Error {
 
     /// Missing state machine
     #[error("missing state machine: {0}")]
-    MissingStateMachine(StateMachineId),
+    MissingStateMachine(Box<StateMachineId>),
 
     /// Missing key rotation
     #[error("missing key rotation")]
