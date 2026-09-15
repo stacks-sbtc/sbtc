@@ -605,9 +605,9 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
-    use stacks_common::consts::CHAIN_ID_TESTNET;
-    use stacks_common::consts::CHAIN_ID_MAINNET;
     use more_asserts::assert_lt;
+    use stacks_common::consts::CHAIN_ID_MAINNET;
+    use stacks_common::consts::CHAIN_ID_TESTNET;
     use tempfile;
     use toml_edit::DocumentMut;
 
@@ -981,7 +981,11 @@ mod tests {
 
         let settings = Settings::new_from_default_config().unwrap();
         let network = crate::context::NodeNetwork {
-            stacks_chain_id: if network == "mainnet" { CHAIN_ID_MAINNET } else { CHAIN_ID_TESTNET },
+            stacks_chain_id: if network == "mainnet" {
+                CHAIN_ID_MAINNET
+            } else {
+                CHAIN_ID_TESTNET
+            },
             bitcoin_network: match network {
                 "mainnet" => bitcoin::Network::Bitcoin,
                 "testnet" => bitcoin::Network::Testnet,
@@ -1599,7 +1603,11 @@ mod tests {
         set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
         let settings = Settings::new_from_default_config().unwrap();
         let network = crate::context::NodeNetwork {
-            stacks_chain_id: if node_mainnet { CHAIN_ID_MAINNET } else { CHAIN_ID_TESTNET },
+            stacks_chain_id: if node_mainnet {
+                CHAIN_ID_MAINNET
+            } else {
+                CHAIN_ID_TESTNET
+            },
             bitcoin_network: bitcoin::Network::Regtest,
         };
         assert_eq!(

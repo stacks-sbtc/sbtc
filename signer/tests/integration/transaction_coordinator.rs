@@ -125,6 +125,7 @@ use signer::testing::storage::DbReadTestExt as _;
 use signer::testing::storage::DbWriteTestExt as _;
 use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerInfo;
+use stacks_common::consts::CHAIN_ID_TESTNET;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::ConsensusHash;
 use stacks_common::types::chainstate::SortitionId;
@@ -6154,13 +6155,7 @@ where
         keypairs.iter().map(|kp| kp.public_key().into()).collect();
     signer_keys.sort();
 
-    let wallet = SignerWallet::new(
-        &signer_keys,
-        signatures_required,
-        signer::config::NetworkKind::Regtest,
-        0,
-    )
-    .unwrap();
+    let wallet = SignerWallet::new(&signer_keys, signatures_required, CHAIN_ID_TESTNET, 0).unwrap();
 
     (aggregated_signer, wallet, keypairs)
 }

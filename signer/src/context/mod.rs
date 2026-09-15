@@ -23,6 +23,7 @@ use crate::storage::DbWrite;
 use crate::storage::Transactable;
 
 pub use messaging::*;
+pub use signer_context::NodeNetwork;
 pub use signer_context::SignerContext;
 pub use signer_state::*;
 pub use termination::*;
@@ -33,6 +34,8 @@ pub trait Context: Clone + Sync + Send {
     fn config(&self) -> &Settings;
     /// Get the current state for the signer.
     fn state(&self) -> &Arc<SignerState>;
+    /// Get the Bitcoin and Stacks network identities.
+    fn node_network(&self) -> NodeNetwork;
     /// Subscribe to the application signalling channel, returning a receiver
     /// which can be used to listen for events.
     fn get_signal_receiver(&self) -> tokio::sync::broadcast::Receiver<SignerSignal>;

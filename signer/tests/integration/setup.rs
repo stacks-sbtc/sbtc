@@ -12,6 +12,7 @@ use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::types::chainstate::StacksAddress;
 use clarity::types::chainstate::StacksBlockId;
 use clarity::vm::types::PrincipalData;
+use stacks_common::consts::CHAIN_ID_TESTNET;
 
 use emily_client::apis::configuration::Configuration as EmilyApiConfiguration;
 use fake::Fake as _;
@@ -37,7 +38,6 @@ use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
 use signer::block_observer::Deposit;
 use signer::codec::Encode as _;
-use signer::config::NetworkKind;
 use signer::context::Context as _;
 use signer::context::SbtcLimits;
 use signer::emily_client::EmilyClient;
@@ -406,13 +406,8 @@ impl TestSweepSetup {
     /// match the row inserted by the store_dkg_shares function.
     pub async fn store_rotate_keys_event(&self, db: &PgStore) {
         let signer_set = self.signer_keys.clone();
-        let wallet = SignerWallet::new(
-            &signer_set,
-            self.signatures_required,
-            NetworkKind::Regtest,
-            0,
-        )
-        .unwrap();
+        let wallet =
+            SignerWallet::new(&signer_set, self.signatures_required, CHAIN_ID_TESTNET, 0).unwrap();
 
         let address = wallet.address().clone();
 
@@ -584,7 +579,7 @@ impl TestSignerSet {
 
     pub fn address(&self, signatures_required: u16) -> StacksAddress {
         let wallet =
-            SignerWallet::new(&self.keys, signatures_required, NetworkKind::Regtest, 0).unwrap();
+            SignerWallet::new(&self.keys, signatures_required, CHAIN_ID_TESTNET, 0).unwrap();
         wallet.address().clone()
     }
 }

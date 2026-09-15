@@ -251,7 +251,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         let mut deposit_requests = Vec::new();
         let mut deposit_request_txs = Vec::new();
         let bitcoin_client = self.context.get_bitcoin_client();
-        let is_mainnet = self.context.config().signer.network.is_mainnet();
+        let is_mainnet = self.context.node_network().is_stacks_mainnet();
 
         for request in requests {
             let deposit = request

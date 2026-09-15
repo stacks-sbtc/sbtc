@@ -18,6 +18,7 @@ use tokio::time::error::Elapsed;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::OutPointSummary;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
+use crate::context::NodeNetwork;
 use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
 use crate::stacks::api::GetNodeInfoResponse;
@@ -103,6 +104,10 @@ where
             bitcoin_client.clone(),
             stacks_client.clone(),
             emily_client.clone(),
+            NodeNetwork {
+                stacks_chain_id: stacks_common::consts::CHAIN_ID_TESTNET,
+                bitcoin_network: bitcoin::Network::Regtest,
+            },
         );
 
         Self {
@@ -262,6 +267,10 @@ where
 {
     fn config(&self) -> &Settings {
         self.inner.config()
+    }
+
+    fn node_network(&self) -> NodeNetwork {
+        self.inner.node_network()
     }
 
     fn state(&self) -> &Arc<SignerState> {

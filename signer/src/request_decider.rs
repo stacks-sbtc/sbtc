@@ -392,7 +392,7 @@ where
             return Ok(true);
         };
 
-        let network = bitcoin::Network::from(self.context.config().signer.network);
+        let network = self.context.node_network().bitcoin_network;
         let receiver_address = bitcoin::Address::from_script(&req.recipient, network.params())
             .map_err(|err| {
                 Error::WithdrawalBitcoinAddressFromScript(err, req.request_id, req.block_hash)
@@ -415,7 +415,7 @@ where
 
         // We turn all the input scriptPubKeys into addresses and check
         // those with the blocklist client.
-        let bitcoin_network = bitcoin::Network::from(self.context.config().signer.network);
+        let bitcoin_network = self.context.node_network().bitcoin_network;
         let params = bitcoin_network.params();
         let addresses = req
             .sender_script_pub_keys

@@ -560,6 +560,8 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
 /// corresponding fields returned from the `/v3/tenures/info` response.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetNodeInfoResponse {
+    /// The chain ID of the connected Stacks node.
+    pub network_id: u32,
     /// The height of the tip of the canonical bitcoin blockchain.
     pub burn_block_height: BitcoinBlockHeight,
     /// The version of the stacks node that is connected to this signer.
@@ -1790,7 +1792,6 @@ impl TryFrom<&Settings> for ApiFallbackClient<StacksClient> {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::NetworkKind;
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
     use crate::storage::memory::Store;
@@ -1815,14 +1816,14 @@ mod tests {
     }
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
-        let network_kind = NetworkKind::Regtest;
+        let chain_id = blockstack_lib::core::CHAIN_ID_TESTNET;
 
         let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
             .map(|kp| kp.public_key().into())
             .take(num_keys as usize)
             .collect::<Vec<_>>();
 
-        SignerWallet::new(&public_keys, signatures_required, network_kind, 0).unwrap()
+        SignerWallet::new(&public_keys, signatures_required, chain_id, 0).unwrap()
     }
 
     #[ignore = "This is an integration test that hasn't been setup for CI yet"]
@@ -2648,6 +2649,7 @@ mod tests {
         let expected: GetNodeInfoResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
+        assert_eq!(resp.network_id, 0x8000_0000);
         mock.assert();
     }
 

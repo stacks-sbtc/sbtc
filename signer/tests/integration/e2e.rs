@@ -32,7 +32,6 @@ use signer::{
         BitcoinBlockHashStreamProvider as _, poller::BitcoinChainTipPoller, rpc::BitcoinCoreClient,
     },
     block_observer::BlockObserver,
-    config::NetworkKind,
     context::Context as _,
     emily_client::EmilyClient,
     error::Error,
@@ -50,6 +49,7 @@ use signer::{
     transaction_signer::{STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop},
     util::{FutureExt as _, Sleep},
 };
+use stacks_common::consts::CHAIN_ID_TESTNET;
 
 use crate::{
     containers::{BitcoinContainerExt as _, StacksContainerExt as _},
@@ -78,8 +78,7 @@ async fn start_signers(
         .collect::<Vec<_>>();
 
     let public_keys: Vec<PublicKey> = keypairs.iter().map(|kp| kp.public_key().into()).collect();
-    let wallet =
-        SignerWallet::new(&public_keys, signatures_required, NetworkKind::Testnet, 0).unwrap();
+    let wallet = SignerWallet::new(&public_keys, signatures_required, CHAIN_ID_TESTNET, 0).unwrap();
 
     let tx = fund_stx(
         stacks_client,

@@ -61,6 +61,7 @@ pub struct ChainTipInfo<THash, THeight> {
 #[derive(Debug, Serialize)]
 pub struct ConfigInfo {
     pub network: String,
+    pub stacks_chain_id: u32,
     pub deployer: String,
     pub bootstrap_signatures_required: u16,
     pub bitcoin_processing_delay: u64,
@@ -133,7 +134,7 @@ pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
 
     let mut response = InfoResponse::default();
 
-    response.populate_config_info(config);
+    response.populate_config_info(config, ctx.node_network());
     response.populate_local_chain_info(ctx).await;
     response.populate_bitcoin_node_info(&bitcoin_client).await;
     response.populate_stacks_node_info(&stacks_client).await;
@@ -145,9 +146,10 @@ pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
 }
 
 impl InfoResponse {
-    fn populate_config_info(&mut self, config: &Settings) {
+    fn populate_config_info(&mut self, config: &Settings, network: crate::context::NodeNetwork) {
         self.config = Some(ConfigInfo {
-            network: config.signer.network.to_string(),
+            network: network.bitcoin_network.to_string(),
+            stacks_chain_id: network.stacks_chain_id,
             deployer: config.signer.deployer.to_string(),
             bootstrap_signatures_required: config.signer.bootstrap_signatures_required,
             bitcoin_processing_delay: config.signer.bitcoin_processing_delay.as_secs(),
@@ -582,7 +584,6 @@ mod tests {
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|settings| {
-                settings.signer.network = crate::config::NetworkKind::Regtest;
                 settings.signer.deployer = StacksAddress::burn_address(false);
                 settings.signer.bootstrap_signatures_required = 3;
                 settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
@@ -629,13 +630,21 @@ mod tests {
         let state = State(ApiState { ctx: context.clone() });
         let result = info_handler(state).await;
 
+        assert_eq!(
+            serde_json::to_value(&result).unwrap()["config"]["stacks_chain_id"],
+            context.node_network().stacks_chain_id
+        );
+
         let Some(config) = result.config else {
             panic!("config info not populated");
         };
 
         let settings = context.config().clone().signer;
 
-        assert_eq!(config.network, settings.network.to_string());
+        assert_eq!(
+            config.network,
+            context.node_network().bitcoin_network.to_string()
+        );
         assert_eq!(
             config.bootstrap_signatures_required,
             settings.bootstrap_signatures_required

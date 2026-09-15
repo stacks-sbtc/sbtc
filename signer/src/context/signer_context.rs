@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::broadcast::Sender;
 
 use crate::{
@@ -34,6 +35,8 @@ impl NodeNetwork {
 #[derive(Debug, Clone)]
 pub struct SignerContext<S, BC, ST, EM> {
     config: Settings,
+    /// The network identity reported by the connected nodes at startup.
+    node_network: NodeNetwork,
     // Handle to the app signalling channel. This keeps the channel alive
     // for the duration of the program and is used both to send messages
     // and to hand out new receivers.
@@ -71,7 +74,7 @@ where
 {
     /// Initializes a new [`SignerContext`], automatically creating clients
     /// based on the provided types.
-    pub fn init(config: Settings, db: S) -> Result<Self, Error> {
+    pub async fn init(config: Settings, db: S) -> Result<Self, Error> {
         let bitcoin_params = config
             .bitcoin
             .rpc_endpoints
@@ -85,7 +88,22 @@ where
         let st = ST::try_from(&config)?;
         let em = EM::try_from(&config.emily)?;
 
-        Ok(Self::new(config, db, bc, st, em))
+        // Call the underlying clients so fallback retries do not multiply the
+        // startup retry budget or bypass the delay between attempts.
+        let (bitcoin_info, stacks_info) = tokio::try_join!(
+            retry_node_request("Bitcoin", || bc.get_blockchain_info()),
+            retry_node_request("Stacks", || st.get_node_info()),
+        )?;
+        let network = NodeNetwork {
+            stacks_chain_id: stacks_info.network_id,
+            bitcoin_network: bitcoin_info.chain,
+        };
+        config
+            .validate_network(&network)
+            .map_err(Error::SignerConfig)?;
+        tracing::info!(?network, "discovered node network identity");
+
+        Ok(Self::new(config, db, bc, st, em, network))
     }
 }
 
@@ -96,13 +114,14 @@ where
     ST: StacksInteract + Clone + Sync + Send,
     EM: EmilyInteract + Clone + Sync + Send,
 {
-    /// Create a new signer context.
+    /// Create a signer context with supplied clients and a known network identity.
     pub fn new(
         config: Settings,
         db: S,
         bitcoin_client: BC,
         stacks_client: ST,
         emily_client: EM,
+        node_network: NodeNetwork,
     ) -> Self {
         // TODO: Decide on the channel capacity and how we should handle slow consumers.
         // NOTE: Ideally consumers which require processing time should pull the relevent
@@ -116,6 +135,7 @@ where
 
         Self {
             config,
+            node_network,
             state: Arc::new(state),
             signal_tx,
             term_tx,
@@ -136,6 +156,10 @@ where
 {
     fn config(&self) -> &Settings {
         &self.config
+    }
+
+    fn node_network(&self) -> NodeNetwork {
+        self.node_network
     }
 
     fn state(&self) -> &Arc<SignerState> {
@@ -288,5 +312,175 @@ mod tests {
 
         // Ensure that the signal was received.
         assert_eq!(recv_count.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+}
+
+/// Make an initial request and up to three retries, waiting three seconds
+/// after each failed attempt. Exhaustion prevents the signer from starting.
+async fn retry_node_request<T, F, Fut>(node: &str, mut request: F) -> Result<T, Error>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, Error>>,
+{
+    const MAX_RETRIES: u8 = 3;
+    const RETRY_DELAY: Duration = Duration::from_secs(3);
+
+    for attempt in 0..=MAX_RETRIES {
+        match request().await {
+            Ok(value) => return Ok(value),
+            Err(error) if attempt == MAX_RETRIES => {
+                tracing::error!(node, %error, "failed to discover node network identity");
+                return Err(error);
+            }
+            Err(error) => {
+                tracing::warn!(node, %error, retry = attempt + 1, "retrying node network discovery in three seconds");
+                tokio::time::sleep(RETRY_DELAY).await;
+            }
+        }
+    }
+    unreachable!("the final attempt always returns")
+}
+
+#[cfg(test)]
+mod network_discovery_tests {
+    use super::*;
+
+    use stacks_common::consts::CHAIN_ID_TESTNET;
+
+    use crate::bitcoin::rpc::BitcoinCoreClient;
+    use crate::emily_client::EmilyClient;
+    use crate::stacks::api::StacksClient;
+    use crate::util::ApiFallbackClient;
+
+    #[test_case::test_case(false, false, false; "networks known on creation")]
+    #[test_case::test_case(true, false, false; "bitcoin discovery fails")]
+    #[test_case::test_case(false, true, false; "stacks discovery fails")]
+    #[test_case::test_case(false, false, true; "network validation fails")]
+    #[tokio::test]
+    async fn init_discovers_and_validates_networks(
+        bitcoin_fails: bool,
+        stacks_fails: bool,
+        invalid_deployer: bool,
+    ) {
+        let mut bitcoin_server = mockito::Server::new_async().await;
+        let mut stacks_server = mockito::Server::new_async().await;
+        let bitcoin_mock = bitcoin_server
+            .mock("POST", "/")
+            .match_body(mockito::Matcher::PartialJson(
+                serde_json::json!({"method": "getblockchaininfo"}),
+            ))
+            .with_status(if bitcoin_fails { 500 } else { 200 })
+            .with_header("content-type", "application/json")
+            .with_body_from_request(move |request| {
+                let request: serde_json::Value =
+                    serde_json::from_slice(request.body().unwrap()).unwrap();
+                if bitcoin_fails {
+                    return serde_json::json!({"result": null, "error": {"code": -1, "message": "node unavailable"}, "id": request["id"]}).to_string().into_bytes();
+                }
+                let result: serde_json::Value = serde_json::from_str(include_str!(
+                    "../../tests/fixtures/bitcoind-getblockchaininfo-data.json"
+                ))
+                .unwrap();
+                serde_json::json!({"result": result, "error": null, "id": request["id"]})
+                    .to_string()
+                    .into_bytes()
+            })
+            .expect(if bitcoin_fails { 4 } else { 1 })
+            .create_async()
+            .await;
+        // The Bitcoin RPC library also queries the node version while decoding
+        // getblockchaininfo, to handle older softfork response formats.
+        let version_mock = bitcoin_server.mock("POST", "/")
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({"method": "getnetworkinfo"})))
+            .with_status(200)
+            .with_body_from_request(|request| {
+                let request: serde_json::Value = serde_json::from_slice(request.body().unwrap()).unwrap();
+                serde_json::json!({"result": {"version": 300000}, "error": null, "id": request["id"]}).to_string().into_bytes()
+            })
+            .expect(if bitcoin_fails { 0 } else { 1 })
+            .create_async().await;
+        let stacks_mock = stacks_server
+            .mock("GET", "/v2/info")
+            .with_status(if stacks_fails { 500 } else { 200 })
+            .with_header("content-type", "application/json")
+            .with_body(include_str!(
+                "../../tests/fixtures/stacksapi-get-node-info-test-data.json"
+            ))
+            .expect(if stacks_fails { 4 } else { 1 })
+            .create_async()
+            .await;
+        let mut config = Settings::new_from_default_config().unwrap();
+        config.bitcoin.rpc_endpoints = vec![bitcoin_server.url().parse().unwrap()];
+        config.stacks.endpoints = vec![stacks_server.url().parse().unwrap()];
+        if invalid_deployer {
+            config.signer.deployer =
+                stacks_common::types::chainstate::StacksAddress::burn_address(true);
+        }
+        let result = SignerContext::<
+            _,
+            ApiFallbackClient<BitcoinCoreClient>,
+            ApiFallbackClient<StacksClient>,
+            ApiFallbackClient<EmilyClient>,
+        >::init(config, crate::storage::memory::Store::new_shared())
+        .await;
+        if bitcoin_fails || stacks_fails {
+            assert!(result.is_err());
+        } else if invalid_deployer {
+            assert!(matches!(result, Err(Error::SignerConfig(_))));
+        } else {
+            let context = result.unwrap();
+            let expected = NodeNetwork {
+                stacks_chain_id: CHAIN_ID_TESTNET,
+                bitcoin_network: bitcoin::Network::Regtest,
+            };
+            assert_eq!(context.node_network(), expected);
+            assert_eq!(context.clone().node_network(), expected);
+        }
+        bitcoin_mock.assert_async().await;
+        version_mock.assert_async().await;
+        stacks_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn node_discovery_stops_after_success() {
+        let mut attempts = 0;
+        let result = retry_node_request("test", || {
+            attempts += 1;
+            std::future::ready(Ok(42))
+        })
+        .await;
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(attempts, 1);
+    }
+
+    #[tokio::test]
+    async fn node_discovery_retries_with_delays_and_can_recover_on_last_attempt() {
+        let mut attempts = Vec::new();
+        let result = retry_node_request("test", || {
+            attempts.push(tokio::time::Instant::now());
+            std::future::ready(if attempts.len() == 4 {
+                Ok(42)
+            } else {
+                Err(Error::SignerShutdown)
+            })
+        })
+        .await;
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(attempts.len(), 4);
+        for pair in attempts.windows(2) {
+            assert!(pair[1].duration_since(pair[0]) >= Duration::from_secs(3));
+        }
+    }
+
+    #[tokio::test]
+    async fn node_discovery_returns_error_after_three_retries() {
+        let mut attempts = 0;
+        let result = retry_node_request("test", || {
+            attempts += 1;
+            std::future::ready(Err::<(), _>(Error::SignerShutdown))
+        })
+        .await;
+        assert!(matches!(result, Err(Error::SignerShutdown)));
+        assert_eq!(attempts, 4);
     }
 }
