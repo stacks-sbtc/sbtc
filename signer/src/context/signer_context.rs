@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::broadcast::Sender;
 
 use crate::{
@@ -13,11 +12,6 @@ use crate::{
 };
 
 use super::{Context, SignerSignal, SignerState, TerminationHandle};
-
-/// The maximum number of retries for node network discovery.
-const MAX_RETRIES: usize = 3;
-/// The delay between retries for node network discovery.
-const RETRY_DELAY: Duration = Duration::from_secs(3);
 
 /// Network identity reported by the connected nodes at startup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,12 +87,10 @@ where
         let st = ST::try_from(&config)?;
         let em = EM::try_from(&config.emily)?;
 
-        // Call the underlying clients so fallback retries do not multiply the
-        // startup retry budget or bypass the delay between attempts.
-        let (bitcoin_info, stacks_info) = tokio::try_join!(
-            retry_node_request("Bitcoin", || bc.get_blockchain_info()),
-            retry_node_request("Stacks", || st.get_node_info()),
-        )?;
+        // The configured fallback clients handle retries and endpoint failover.
+        let (bitcoin_info, stacks_info) =
+            tokio::try_join!(bc.get_blockchain_info(), st.get_node_info())?;
+
         let network = NodeNetwork {
             stacks_chain_id: stacks_info.network_id,
             bitcoin_network: bitcoin_info.chain,
@@ -106,7 +98,8 @@ where
         config
             .validate_network(&network)
             .map_err(Error::SignerConfig)?;
-        tracing::info!(?network, "discovered node network identity");
+
+        tracing::debug!(?network, "discovered node network identity");
 
         Ok(Self::new(config, db, bc, st, em, network))
     }
@@ -317,84 +310,5 @@ mod tests {
 
         // Ensure that the signal was received.
         assert_eq!(recv_count.load(std::sync::atomic::Ordering::Relaxed), 1);
-    }
-}
-
-/// Make an initial request and up to three retries, waiting three seconds
-/// after each failed attempt. Exhaustion prevents the signer from starting.
-async fn retry_node_request<T, F, Fut>(node: &str, mut request: F) -> Result<T, Error>
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<T, Error>>,
-{
-    for attempt in 0..=MAX_RETRIES {
-        match request().await {
-            Ok(value) => return Ok(value),
-            Err(error) if attempt == MAX_RETRIES => {
-                tracing::error!(node, %error, "failed to discover node network identity");
-                return Err(error);
-            }
-            Err(error) => {
-                tracing::warn!(node, %error, retry = attempt + 1, "retrying node network discovery in three seconds");
-                tokio::time::sleep(RETRY_DELAY).await;
-            }
-        }
-    }
-    unreachable!("the final attempt always returns")
-}
-
-#[cfg(test)]
-mod network_discovery_tests {
-    use super::*;
-
-    use std::time::Instant;
-
-    #[tokio::test]
-    async fn node_discovery_stops_after_success() {
-        let mut attempts = 0;
-        let result = retry_node_request("test", || {
-            attempts += 1;
-            std::future::ready(Ok(42))
-        })
-        .await;
-
-        assert_eq!(result.unwrap(), 42);
-        assert_eq!(attempts, 1);
-    }
-
-    #[tokio::test]
-    async fn node_discovery_retries_with_delays_and_can_recover_on_last_attempt() {
-        let mut attempts = Vec::new();
-        let result = retry_node_request("test", || {
-            attempts.push(Instant::now());
-            std::future::ready(if attempts.len() == MAX_RETRIES + 1 {
-                Ok(42)
-            } else {
-                Err(Error::SignerShutdown)
-            })
-        })
-        .await;
-
-        assert_eq!(result.unwrap(), 42);
-        assert_eq!(attempts.len(), MAX_RETRIES + 1);
-
-        // Ensure that the delays are at least 3 seconds apart.
-        for pair in attempts.windows(2) {
-            assert!(pair[1].duration_since(pair[0]) >= RETRY_DELAY);
-        }
-    }
-
-    #[tokio::test]
-    async fn node_discovery_returns_error_after_three_retries() {
-        let mut attempts = 0;
-        let result = retry_node_request("test", || {
-            attempts += 1;
-            std::future::ready(Err::<(), _>(Error::SignerShutdown))
-        })
-        .await;
-
-        assert!(matches!(result, Err(Error::SignerShutdown)));
-        // Ensure that we made 4 attempts.
-        assert_eq!(attempts, MAX_RETRIES + 1);
     }
 }
