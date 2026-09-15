@@ -595,8 +595,8 @@ impl Coordinator {
 
             let shares = &self
                 .public_nonces
-                .iter()
-                .flat_map(|(i, _)| self.signature_shares[i].clone())
+                .keys()
+                .flat_map(|i| self.signature_shares[i].clone())
                 .collect::<Vec<SignatureShare>>();
 
             debug!(

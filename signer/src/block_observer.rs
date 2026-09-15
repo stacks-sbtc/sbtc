@@ -818,7 +818,6 @@ mod tests {
     use crate::bitcoin::rpc::GetTxResponse;
     use crate::context::SignerSignal;
     use crate::keys::PublicKey;
-    use crate::keys::SignerScriptPubKey as _;
     use crate::storage;
     use crate::storage::model::BitcoinBlockHash;
     use crate::storage::model::DkgSharesStatus;

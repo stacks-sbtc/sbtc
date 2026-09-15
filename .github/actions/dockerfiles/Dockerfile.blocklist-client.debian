@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rust:1.94.1-slim-trixie AS build
+FROM --platform=$BUILDPLATFORM rust:1.98.1-slim-trixie AS build
 
 # Docker automatically populates these arguments:
 ARG TARGETARCH

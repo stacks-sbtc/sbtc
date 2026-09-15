@@ -25,6 +25,7 @@ env:
   EMILY_HANDLER_PATH: "emily/handler"
   EMILY_CDK_PATH: "emily/cdk"
   NODE_VERSION: 20
+  CARGO_LAMBDA_VERSION: 1.9.2
 
 permissions:
   id-token: write
@@ -131,8 +132,7 @@ jobs:
 
       - name: Install Cargo Lambda
         id: install_cargo_lambda
-        run: |
-          cargo install cargo-lambda
+        run: cargo install cargo-lambda --version ${{ env.CARGO_LAMBDA_VERSION }} --locked
 
       - name: Setup Node
         id: setup_node
@@ -221,8 +221,7 @@ jobs:
 
       - name: Install Cargo Lambda
         id: install_cargo_lambda
-        run: |
-          cargo install cargo-lambda
+        run: cargo install cargo-lambda --version ${{ env.CARGO_LAMBDA_VERSION }} --locked
 
       - name: Setup Node
         id: setup_node

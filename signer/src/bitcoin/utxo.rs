@@ -2149,7 +2149,7 @@ mod tests {
                 fee_rate: 1.0,
                 public_key,
                 last_fees: None,
-                magic_bytes: [b'S', b'T'],
+                magic_bytes: *b"ST",
             },
             num_signers: 10,
             accept_threshold: 8,

@@ -57,7 +57,7 @@ where
             .map(TryInto::try_into)
             .transpose()
             .unwrap(),
-        magic_bytes: [b'T', b'3'],
+        magic_bytes: *b"T3",
     }
 }
 
