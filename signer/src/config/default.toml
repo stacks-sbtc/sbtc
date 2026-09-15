@@ -117,16 +117,6 @@ endpoints = ["http://127.0.0.1:20443"]
 # Environment: SIGNER_SIGNER__PRIVATE_KEY
 private_key = "41634762d89dfa09133a4a8e9c1378d0161d29cd0a9433b51f1e3d32947a73dc"
 
-# Specifies which network to use when constructing and sending transactions
-# on stacks and bitcoin. This corresponds to the `chain` flag in the
-# bitcoin.conf file of the connected bitcoin-core node, and the
-# `burnchain.mode` flag int he config.toml of the connected stacks-core
-# node.
-#
-# Required: true
-# Possible values: mainnet, testnet, regtest
-# Environment: SIGNER_SIGNER__NETWORK
-network = "regtest"
 
 # The address that deployed the sbtc smart contracts.
 #

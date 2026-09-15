@@ -13,6 +13,22 @@ use crate::{
 
 use super::{Context, SignerSignal, SignerState, TerminationHandle};
 
+/// Network identity reported by the connected nodes at startup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeNetwork {
+    /// The Stacks chain ID reported by `/v2/info` as `network_id`.
+    pub stacks_chain_id: u32,
+    /// The Bitcoin network reported by `getblockchaininfo`.
+    pub bitcoin_network: bitcoin::Network,
+}
+
+impl NodeNetwork {
+    /// Returns true if the Stacks chain is mainnet.
+    pub fn is_stacks_mainnet(&self) -> bool {
+        self.stacks_chain_id == stacks_common::consts::CHAIN_ID_MAINNET
+    }
+}
+
 /// Signer context which is passed to different components within the
 /// signer binary.
 #[derive(Debug, Clone)]

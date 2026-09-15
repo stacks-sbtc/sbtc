@@ -22,6 +22,7 @@ use crate::config::serialization::parse_stacks_address;
 use crate::config::serialization::private_key_deserializer;
 use crate::config::serialization::url_deserializer_single;
 use crate::config::serialization::url_deserializer_vec;
+use crate::context::NodeNetwork;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::network::libp2p::MultiaddrExt as _;
@@ -51,66 +52,6 @@ pub const MAX_SIGNERS: usize = 16;
 trait Validatable {
     /// Validate the configuration values.
     fn validate(&self, cfg: &Settings) -> Result<(), ConfigError>;
-}
-
-#[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(any(test, feature = "testing"), derive(serde::Serialize))]
-#[serde(rename_all = "lowercase")]
-/// The Stacks and Bitcoin networks to use.
-pub enum NetworkKind {
-    /// The mainnet network
-    Mainnet,
-    /// The testnet network
-    Testnet,
-    /// The regtest network. This is equivalent to Testnet when
-    /// constructing Stacks addresses and transactions.
-    Regtest,
-}
-
-impl From<NetworkKind> for bitcoin::NetworkKind {
-    fn from(value: NetworkKind) -> Self {
-        match value {
-            NetworkKind::Mainnet => bitcoin::NetworkKind::Main,
-            _ => bitcoin::NetworkKind::Test,
-        }
-    }
-}
-
-impl std::fmt::Display for NetworkKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            NetworkKind::Mainnet => write!(f, "mainnet"),
-            NetworkKind::Testnet => write!(f, "testnet"),
-            NetworkKind::Regtest => write!(f, "regtest"),
-        }
-    }
-}
-
-impl From<NetworkKind> for bitcoin::KnownHrp {
-    fn from(value: NetworkKind) -> Self {
-        match value {
-            NetworkKind::Mainnet => bitcoin::KnownHrp::Mainnet,
-            NetworkKind::Testnet => bitcoin::KnownHrp::Testnets,
-            NetworkKind::Regtest => bitcoin::KnownHrp::Regtest,
-        }
-    }
-}
-
-impl From<NetworkKind> for bitcoin::Network {
-    fn from(network: NetworkKind) -> Self {
-        match network {
-            NetworkKind::Mainnet => bitcoin::Network::Bitcoin,
-            NetworkKind::Testnet => bitcoin::Network::Testnet,
-            NetworkKind::Regtest => bitcoin::Network::Regtest,
-        }
-    }
-}
-
-impl NetworkKind {
-    /// Returns whether the network variant is Mainnet.
-    pub fn is_mainnet(&self) -> bool {
-        self == &NetworkKind::Mainnet
-    }
 }
 
 /// Top-level configuration for the signer
@@ -156,7 +97,7 @@ pub struct BitcoinConfig {
 }
 
 impl Validatable for BitcoinConfig {
-    fn validate(&self, cfg: &Settings) -> Result<(), ConfigError> {
+    fn validate(&self, _: &Settings) -> Result<(), ConfigError> {
         // At least one endpoint must be provided.
         if self.rpc_endpoints.is_empty() {
             return Err(ConfigError::Message(
@@ -197,18 +138,12 @@ impl Validatable for BitcoinConfig {
             ));
         }
 
-        if let Some(fee) = self.fallback_fee {
-            if cfg.signer.network.is_mainnet() {
-                return Err(ConfigError::Message(
-                    "[bitcoin.fallback_fee] Cannot be used in mainnet".to_string(),
-                ));
-            }
-
-            if fee <= 0.0 || !fee.is_normal() {
-                return Err(ConfigError::Message(
-                    "[bitcoin.fallback_fee] Must be a positive normal number".to_string(),
-                ));
-            }
+        if let Some(fee) = self.fallback_fee
+            && (fee <= 0.0 || !fee.is_normal())
+        {
+            return Err(ConfigError::Message(
+                "[bitcoin.fallback_fee] Must be a positive normal number".to_string(),
+            ));
         }
 
         Ok(())
@@ -250,15 +185,7 @@ impl P2PNetworkConfig {
 }
 
 impl Validatable for P2PNetworkConfig {
-    fn validate(&self, cfg: &Settings) -> Result<(), ConfigError> {
-        if [NetworkKind::Mainnet, NetworkKind::Testnet].contains(&cfg.signer.network)
-            && self.seeds.is_empty()
-        {
-            return Err(ConfigError::Message(
-                SignerConfigError::P2PSeedPeerRequired.to_string(),
-            ));
-        }
-
+    fn validate(&self, _: &Settings) -> Result<(), ConfigError> {
         // Validate that any public endpoints use protocols that are currently
         // used in the listen_on addresses.
         let listen_on_protocols = self
@@ -377,8 +304,6 @@ pub struct SignerConfig {
     pub private_key: PrivateKey,
     /// P2P network configuration
     pub p2p: P2PNetworkConfig,
-    /// P2P network configuration
-    pub network: NetworkKind,
     /// Event observer server configuration
     pub event_observer: EventObserverConfig,
     /// The address of the deployer of the sBTC smart contracts.
@@ -469,10 +394,6 @@ impl Validatable for SignerConfig {
             return Err(ConfigError::Message(err.to_string()));
         }
 
-        if self.deployer.is_mainnet() != self.network.is_mainnet() {
-            let err = SignerConfigError::NetworkDeployerMismatch;
-            return Err(ConfigError::Message(err.to_string()));
-        }
         // At least perform a simple check to see if the database endpoint is
         // valid for the supported database drivers. We only support PostgreSQL
         // for now. The rest of the URI we delegate to the database driver for
@@ -485,8 +406,9 @@ impl Validatable for SignerConfig {
 
         // The requirement here is that the bootstrap wallet in the config
         // is a valid wallet, and all of those checks are done by the
-        // `SignerWallet::load_boostrap_wallet` function.
-        if let Err(err) = SignerWallet::load_boostrap_wallet(self) {
+        // `SignerWallet::load_boostrap_wallet` function. The chain ID here
+        // only serves key/threshold validation.
+        if let Err(err) = SignerWallet::load_boostrap_wallet(self, 0) {
             return Err(ConfigError::Message(err.to_string()));
         }
 
@@ -627,6 +549,24 @@ impl Settings {
         Ok(settings)
     }
 
+    /// Validate settings that depend on the network reported by the nodes.
+    /// Called at startup after network discovery and before starting services.
+    pub fn validate_network(&self, network: &NodeNetwork) -> Result<(), ConfigError> {
+        if self.signer.deployer.is_mainnet() != network.is_stacks_mainnet() {
+            return Err(ConfigError::Message(
+                SignerConfigError::NetworkDeployerMismatch.to_string(),
+            ));
+        }
+
+        let is_bitcoin_mainnet = network.bitcoin_network == bitcoin::Network::Bitcoin;
+        if is_bitcoin_mainnet && self.signer.p2p.seeds.is_empty() {
+            return Err(ConfigError::Message(
+                SignerConfigError::P2PSeedPeerRequired.to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Perform validation on the configuration.
     fn validate(&self) -> Result<(), ConfigError> {
         self.bitcoin.validate(self)?;
@@ -665,6 +605,8 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
+    use stacks_common::consts::CHAIN_ID_TESTNET;
+    use stacks_common::consts::CHAIN_ID_MAINNET;
     use more_asserts::assert_lt;
     use tempfile;
     use toml_edit::DocumentMut;
@@ -711,7 +653,6 @@ mod tests {
             )
             .unwrap()
         );
-        assert_eq!(settings.signer.network, NetworkKind::Regtest);
 
         assert_eq!(settings.signer.p2p.seeds, vec![]);
         assert_eq!(
@@ -982,28 +923,6 @@ mod tests {
     }
 
     #[test]
-    fn default_config_toml_loads_signer_network_with_environment() {
-        clear_env();
-
-        let new = "testnet";
-        // We set the p2p seeds here as we'll otherwise fail p2p seed validation
-        // when the network is mainnet or testnet.
-        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://seed-1:4122");
-        set_var("SIGNER_SIGNER__NETWORK", new);
-
-        let settings = Settings::new_from_default_config().unwrap();
-        assert_eq!(settings.signer.network, NetworkKind::Testnet);
-
-        // We unset the p2p seeds here as they're not required for regtest.
-        set_var("SIGNER_SIGNER__P2P__SEEDS", "");
-        let new = "regtest";
-        set_var("SIGNER_SIGNER__NETWORK", new);
-
-        let settings = Settings::new_from_default_config().unwrap();
-        assert_eq!(settings.signer.network, NetworkKind::Regtest);
-    }
-
-    #[test]
     fn sbtc_bitcoin_start_height() {
         clear_env();
 
@@ -1050,7 +969,6 @@ mod tests {
     fn bitcoin_fallback_fee_in_network(network: &str, fallback_fee: &str, is_valid: bool) {
         clear_env();
 
-        set_var("SIGNER_SIGNER__NETWORK", network);
         if !fallback_fee.is_empty() {
             set_var("SIGNER_BITCOIN__FALLBACK_FEE", fallback_fee);
         }
@@ -1061,7 +979,16 @@ mod tests {
         let address = StacksAddress::burn_address(network == "mainnet");
         set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
 
-        let settings = Settings::new_from_default_config();
+        let settings = Settings::new_from_default_config().unwrap();
+        let network = crate::context::NodeNetwork {
+            stacks_chain_id: if network == "mainnet" { CHAIN_ID_MAINNET } else { CHAIN_ID_TESTNET },
+            bitcoin_network: match network {
+                "mainnet" => bitcoin::Network::Bitcoin,
+                "testnet" => bitcoin::Network::Testnet,
+                _ => bitcoin::Network::Regtest,
+            },
+        };
+        let settings = settings.validate_network(&network);
 
         if is_valid {
             settings.expect("should be valid");
@@ -1644,52 +1571,41 @@ mod tests {
         ))
     }
 
-    #[test_case::test_case(NetworkKind::Mainnet; "mainnet network, testnet deployer")]
-    #[test_case::test_case(NetworkKind::Testnet; "testnet network, mainnet deployer")]
-    fn network_mismatch_network_of_deployer(network: NetworkKind) {
+    #[test_case::test_case(bitcoin::Network::Bitcoin, false; "mainnet requires seeds")]
+    #[test_case::test_case(bitcoin::Network::Testnet, false; "testnet requires seeds")]
+    #[test_case::test_case(bitcoin::Network::Signet, false; "signet requires seeds")]
+    #[test_case::test_case(bitcoin::Network::Regtest, true; "regtest permits no seeds")]
+    fn discovered_network_seed_requirement(bitcoin_network: bitcoin::Network, valid: bool) {
         clear_env();
-
-        let is_mainnet = network == NetworkKind::Mainnet;
-        // The deployer address always has the opposite network kind.
-        let address = StacksAddress::burn_address(!is_mainnet);
-        set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
-        // Let's set the network. maybe use strum for this in the future
-        let network = match network {
-            NetworkKind::Mainnet => "mainnet",
-            NetworkKind::Testnet => "testnet",
-            NetworkKind::Regtest => "regtest",
+        let settings = Settings::new_from_default_config().unwrap();
+        assert!(settings.signer.p2p.seeds.is_empty());
+        let network = crate::context::NodeNetwork {
+            stacks_chain_id: CHAIN_ID_TESTNET,
+            bitcoin_network,
         };
-        set_var("SIGNER_SIGNER__NETWORK", network);
-        // We need to set at least one seed when deploying to mainnet.
-        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
-
-        assert!(matches!(
-            Settings::new_from_default_config(),
-            Err(ConfigError::Message(msg)) if msg == SignerConfigError::NetworkDeployerMismatch.to_string()
-        ));
+        assert_eq!(settings.validate_network(&network).is_ok(), valid);
     }
 
-    #[test_case::test_case(NetworkKind::Mainnet; "mainnet")]
-    #[test_case::test_case(NetworkKind::Testnet; "testnet")]
-    #[test_case::test_case(NetworkKind::Regtest; "regtest")]
-    fn network_matches_network_of_deployer(network: NetworkKind) {
+    #[test_case::test_case(true, true; "mainnet matches")]
+    #[test_case::test_case(false, false; "testnet matches")]
+    #[test_case::test_case(true, false; "mainnet mismatch")]
+    #[test_case::test_case(false, true; "testnet mismatch")]
+    fn network_matches_deployer(node_mainnet: bool, deployer_mainnet: bool) {
         clear_env();
-
-        let is_mainnet = network == NetworkKind::Mainnet;
-        // The deployer address always has the opposite network kind.
-        let address = StacksAddress::burn_address(is_mainnet);
-        set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
-        // Let's set the network. maybe use strum for this in the future
-        let network = match network {
-            NetworkKind::Mainnet => "mainnet",
-            NetworkKind::Testnet => "testnet",
-            NetworkKind::Regtest => "regtest",
-        };
-        set_var("SIGNER_SIGNER__NETWORK", network);
-        // We need to set at least one seed when deploying to mainnet.
+        set_var(
+            "SIGNER_SIGNER__DEPLOYER",
+            StacksAddress::burn_address(deployer_mainnet).to_string(),
+        );
         set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
-
-        assert!(Settings::new_from_default_config().is_ok());
+        let settings = Settings::new_from_default_config().unwrap();
+        let network = crate::context::NodeNetwork {
+            stacks_chain_id: if node_mainnet { CHAIN_ID_MAINNET } else { CHAIN_ID_TESTNET },
+            bitcoin_network: bitcoin::Network::Regtest,
+        };
+        assert_eq!(
+            settings.validate_network(&network).is_ok(),
+            node_mainnet == deployer_mainnet
+        );
     }
 
     #[test]
