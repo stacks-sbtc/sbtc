@@ -108,7 +108,6 @@ impl SignerWallet {
         public_keys: I,
         signatures_required: u16,
         chain_id: u32,
-        nonce: u64,
     ) -> Result<Self, Error>
     where
         I: IntoIterator<Item = &'a PublicKey>,
@@ -152,7 +151,7 @@ impl SignerWallet {
             chain_id,
             address: StacksAddress::from_public_keys(version, &hash_mode, num_sigs, &pubkeys)
                 .ok_or(Error::StacksMultiSig(signatures_required, num_keys))?,
-            nonce: AtomicU64::new(nonce),
+            nonce: AtomicU64::new(0),
         })
     }
 
@@ -174,7 +173,7 @@ impl SignerWallet {
             Some(info) => {
                 let public_keys = info.signer_set;
                 let signatures_required = info.signatures_required;
-                SignerWallet::new(&public_keys, signatures_required, chain_id, 0)
+                SignerWallet::new(&public_keys, signatures_required, chain_id)
             }
             None => Self::load_boostrap_wallet(&ctx.config().signer, chain_id),
         }
@@ -188,7 +187,7 @@ impl SignerWallet {
         let public_keys = config.bootstrap_signing_set.clone();
         let signatures_required = config.bootstrap_signatures_required;
 
-        SignerWallet::new(&public_keys, signatures_required, chain_id, 0)
+        SignerWallet::new(&public_keys, signatures_required, chain_id)
     }
 
     fn hash_mode() -> OrderIndependentMultisigHashMode {
@@ -412,7 +411,7 @@ where
     // generate. We create a new wallet so that we don't alter the state of the
     // wallet that was passed in, which will increment nonces for new
     // transactions.
-    let wallet = SignerWallet::new(&public_keys, wallet.signatures_required, wallet.chain_id, 0)?;
+    let wallet = SignerWallet::new(&public_keys, wallet.signatures_required, wallet.chain_id)?;
 
     let mut multisig_tx = MultisigTx::new_tx(payload, &wallet, 0);
     for private_key in private_keys
@@ -537,7 +536,7 @@ mod tests {
             .collect();
 
         let public_keys: Vec<_> = key_pairs.iter().map(|kp| kp.public_key().into()).collect();
-        let wallet = SignerWallet::new(&public_keys, signatures_required, network, 1).unwrap();
+        let wallet = SignerWallet::new(&public_keys, signatures_required, network).unwrap();
 
         let mut tx_signer =
             MultisigTx::new_contract_call(TestContractCall::default(), &wallet, TX_FEE);
@@ -589,7 +588,7 @@ mod tests {
             .collect();
 
         let public_keys: Vec<_> = key_pairs.iter().map(|kp| kp.public_key().into()).collect();
-        let wallet = SignerWallet::new(&public_keys, signatures_required, network, 1).unwrap();
+        let wallet = SignerWallet::new(&public_keys, signatures_required, network).unwrap();
 
         let mut tx_signer =
             MultisigTx::new_contract_call(TestContractCall::default(), &wallet, TX_FEE);
@@ -647,7 +646,7 @@ mod tests {
                 .collect();
 
         let pks1 = public_keys.clone();
-        let wallet1 = SignerWallet::new(&pks1, 5, network, 0).unwrap();
+        let wallet1 = SignerWallet::new(&pks1, 5, network).unwrap();
 
         // Although it's unlikely, it's possible for the shuffle to not
         // shuffle anything, so we need to keep trying.
@@ -655,7 +654,7 @@ mod tests {
             public_keys.shuffle(&mut OsRng);
         }
 
-        let wallet2 = SignerWallet::new(&public_keys, 5, network, 0).unwrap();
+        let wallet2 = SignerWallet::new(&public_keys, 5, network).unwrap();
 
         assert_eq!(wallet1.address(), wallet2.address())
     }
@@ -701,7 +700,7 @@ mod tests {
                 .collect();
         let signatures_required = 5;
         let network = CHAIN_ID_TESTNET;
-        let wallet1 = SignerWallet::new(&signer_keys, signatures_required, network, 0).unwrap();
+        let wallet1 = SignerWallet::new(&signer_keys, signatures_required, network).unwrap();
 
         let (_, stacks_chain_tip) = db.get_chain_tips().await;
 
@@ -813,7 +812,7 @@ mod tests {
             .take(num_keys as usize)
             .collect::<Vec<_>>();
 
-        let wallet = SignerWallet::new(&public_keys, signatures_required, chain_id, 0).unwrap();
+        let wallet = SignerWallet::new(&public_keys, signatures_required, chain_id).unwrap();
 
         let payload =
             TransactionPayload::ContractCall(TestContractCall::default().as_contract_call());

@@ -1677,7 +1677,7 @@ mod tests {
             SecretKey::new(&mut rng),
         ];
         let public_keys = secret_keys.map(|sk| sk.public_key(SECP256K1).into());
-        let wallet = SignerWallet::new(&public_keys, 2, CHAIN_ID_TESTNET, 0).unwrap();
+        let wallet = SignerWallet::new(&public_keys, 2, CHAIN_ID_TESTNET).unwrap();
         let deployer = StacksAddress::burn_address(false);
         let aggregate_key: PublicKey = fake::Faker.fake_with_rng(&mut rng);
 

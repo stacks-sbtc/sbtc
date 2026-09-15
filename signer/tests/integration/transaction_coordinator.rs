@@ -6155,7 +6155,7 @@ where
         keypairs.iter().map(|kp| kp.public_key().into()).collect();
     signer_keys.sort();
 
-    let wallet = SignerWallet::new(&signer_keys, signatures_required, CHAIN_ID_TESTNET, 0).unwrap();
+    let wallet = SignerWallet::new(&signer_keys, signatures_required, CHAIN_ID_TESTNET).unwrap();
 
     (aggregated_signer, wallet, keypairs)
 }

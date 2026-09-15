@@ -199,7 +199,6 @@ async fn start_signers(
         &public_keys,
         signer_set.signatures_required,
         CHAIN_ID_TESTNET,
-        0,
     )
     .unwrap();
 

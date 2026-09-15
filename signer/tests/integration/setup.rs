@@ -407,7 +407,7 @@ impl TestSweepSetup {
     pub async fn store_rotate_keys_event(&self, db: &PgStore) {
         let signer_set = self.signer_keys.clone();
         let wallet =
-            SignerWallet::new(&signer_set, self.signatures_required, CHAIN_ID_TESTNET, 0).unwrap();
+            SignerWallet::new(&signer_set, self.signatures_required, CHAIN_ID_TESTNET).unwrap();
 
         let address = wallet.address().clone();
 
@@ -578,8 +578,7 @@ impl TestSignerSet {
     }
 
     pub fn address(&self, signatures_required: u16) -> StacksAddress {
-        let wallet =
-            SignerWallet::new(&self.keys, signatures_required, CHAIN_ID_TESTNET, 0).unwrap();
+        let wallet = SignerWallet::new(&self.keys, signatures_required, CHAIN_ID_TESTNET).unwrap();
         wallet.address().clone()
     }
 }

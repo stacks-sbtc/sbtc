@@ -1823,7 +1823,7 @@ mod tests {
             .take(num_keys as usize)
             .collect::<Vec<_>>();
 
-        SignerWallet::new(&public_keys, signatures_required, chain_id, 0).unwrap()
+        SignerWallet::new(&public_keys, signatures_required, chain_id).unwrap()
     }
 
     #[ignore = "This is an integration test that hasn't been setup for CI yet"]
