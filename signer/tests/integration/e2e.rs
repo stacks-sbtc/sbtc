@@ -78,8 +78,14 @@ async fn start_signers(
         .collect::<Vec<_>>();
 
     let public_keys: Vec<PublicKey> = keypairs.iter().map(|kp| kp.public_key().into()).collect();
-    let wallet =
-        SignerWallet::new(&public_keys, signatures_required, NetworkKind::Testnet, 0).unwrap();
+    let wallet = SignerWallet::new(
+        &public_keys,
+        signatures_required,
+        NetworkKind::Testnet,
+        NetworkKind::Testnet.chain_id(),
+        0,
+    )
+    .unwrap();
 
     let tx = fund_stx(
         stacks_client,
