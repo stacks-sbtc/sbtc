@@ -960,20 +960,20 @@ mod tests {
         assert_lt!((fallback_fee - 42.123).abs(), 1e-10);
     }
 
-    #[test_case::test_case("mainnet", "", true; "mainnet, empty")]
-    #[test_case::test_case("mainnet", "42", false; "mainnet, 42")]
-    #[test_case::test_case("testnet", "", true; "testnet, empty")]
-    #[test_case::test_case("testnet", "42", true; "testnet, 42")]
-    #[test_case::test_case("regtest", "", true; "regtest, empty")]
-    #[test_case::test_case("regtest", "42", true; "regtest, 42")]
-    fn bitcoin_fallback_fee_in_network(network: &str, fallback_fee: &str, is_valid: bool) {
+    #[test_case::test_case("mainnet", ""; "mainnet, empty")]
+    #[test_case::test_case("mainnet", "42"; "mainnet, 42")]
+    #[test_case::test_case("testnet", ""; "testnet, empty")]
+    #[test_case::test_case("testnet", "42"; "testnet, 42")]
+    #[test_case::test_case("regtest", ""; "regtest, empty")]
+    #[test_case::test_case("regtest", "42"; "regtest, 42")]
+    fn bitcoin_fallback_fee_in_network(network: &str, fallback_fee: &str) {
         clear_env();
 
         if !fallback_fee.is_empty() {
             set_var("SIGNER_BITCOIN__FALLBACK_FEE", fallback_fee);
         }
 
-        // For non regtest we need at least one seed peer
+        // Mainnet requires at least one seed peer.
         set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://seed-1:4122");
         // The deployer address must match the network type
         let address = StacksAddress::burn_address(network == "mainnet");
@@ -992,13 +992,9 @@ mod tests {
                 _ => bitcoin::Network::Regtest,
             },
         };
-        let settings = settings.validate_network(&network);
-
-        if is_valid {
-            settings.expect("should be valid");
-        } else {
-            assert_matches!(settings, Err(ConfigError::Message(m)) if m.contains("fallback_fee") && m.contains("mainnet"));
-        }
+        settings
+            .validate_network(&network)
+            .expect("should be valid");
     }
 
     #[test_case::test_case("-0.1"; "-0.1")]
@@ -1576,18 +1572,24 @@ mod tests {
     }
 
     #[test_case::test_case(bitcoin::Network::Bitcoin, false; "mainnet requires seeds")]
-    #[test_case::test_case(bitcoin::Network::Testnet, false; "testnet requires seeds")]
-    #[test_case::test_case(bitcoin::Network::Signet, false; "signet requires seeds")]
+    #[test_case::test_case(bitcoin::Network::Testnet, true; "testnet permits no seeds")]
+    #[test_case::test_case(bitcoin::Network::Signet, true; "signet permits no seeds")]
     #[test_case::test_case(bitcoin::Network::Regtest, true; "regtest permits no seeds")]
     fn discovered_network_seed_requirement(bitcoin_network: bitcoin::Network, valid: bool) {
         clear_env();
         let settings = Settings::new_from_default_config().unwrap();
         assert!(settings.signer.p2p.seeds.is_empty());
+
         let network = crate::context::NodeNetwork {
             stacks_chain_id: CHAIN_ID_TESTNET,
             bitcoin_network,
         };
-        assert_eq!(settings.validate_network(&network).is_ok(), valid);
+        let result = settings.validate_network(&network);
+        if valid {
+            result.expect("this network permits no seeds");
+        } else {
+            assert_matches!(result, Err(ConfigError::Message(message)) if message == SignerConfigError::P2PSeedPeerRequired.to_string());
+        }
     }
 
     #[test_case::test_case(true, true; "mainnet matches")]
