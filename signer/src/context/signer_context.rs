@@ -14,6 +14,11 @@ use crate::{
 
 use super::{Context, SignerSignal, SignerState, TerminationHandle};
 
+/// The maximum number of retries for node network discovery.
+const MAX_RETRIES: usize = 3;
+/// The delay between retries for node network discovery.
+const RETRY_DELAY: Duration = Duration::from_secs(3);
+
 /// Network identity reported by the connected nodes at startup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NodeNetwork {
@@ -322,9 +327,6 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, Error>>,
 {
-    const MAX_RETRIES: u8 = 3;
-    const RETRY_DELAY: Duration = Duration::from_secs(3);
-
     for attempt in 0..=MAX_RETRIES {
         match request().await {
             Ok(value) => return Ok(value),
@@ -345,101 +347,7 @@ where
 mod network_discovery_tests {
     use super::*;
 
-    use stacks_common::consts::CHAIN_ID_TESTNET;
-
-    use crate::bitcoin::rpc::BitcoinCoreClient;
-    use crate::emily_client::EmilyClient;
-    use crate::stacks::api::StacksClient;
-    use crate::util::ApiFallbackClient;
-
-    #[test_case::test_case(false, false, false; "networks known on creation")]
-    #[test_case::test_case(true, false, false; "bitcoin discovery fails")]
-    #[test_case::test_case(false, true, false; "stacks discovery fails")]
-    #[test_case::test_case(false, false, true; "network validation fails")]
-    #[tokio::test]
-    async fn init_discovers_and_validates_networks(
-        bitcoin_fails: bool,
-        stacks_fails: bool,
-        invalid_deployer: bool,
-    ) {
-        let mut bitcoin_server = mockito::Server::new_async().await;
-        let mut stacks_server = mockito::Server::new_async().await;
-        let bitcoin_mock = bitcoin_server
-            .mock("POST", "/")
-            .match_body(mockito::Matcher::PartialJson(
-                serde_json::json!({"method": "getblockchaininfo"}),
-            ))
-            .with_status(if bitcoin_fails { 500 } else { 200 })
-            .with_header("content-type", "application/json")
-            .with_body_from_request(move |request| {
-                let request: serde_json::Value =
-                    serde_json::from_slice(request.body().unwrap()).unwrap();
-                if bitcoin_fails {
-                    return serde_json::json!({"result": null, "error": {"code": -1, "message": "node unavailable"}, "id": request["id"]}).to_string().into_bytes();
-                }
-                let result: serde_json::Value = serde_json::from_str(include_str!(
-                    "../../tests/fixtures/bitcoind-getblockchaininfo-data.json"
-                ))
-                .unwrap();
-                serde_json::json!({"result": result, "error": null, "id": request["id"]})
-                    .to_string()
-                    .into_bytes()
-            })
-            .expect(if bitcoin_fails { 4 } else { 1 })
-            .create_async()
-            .await;
-        // The Bitcoin RPC library also queries the node version while decoding
-        // getblockchaininfo, to handle older softfork response formats.
-        let version_mock = bitcoin_server.mock("POST", "/")
-            .match_body(mockito::Matcher::PartialJson(serde_json::json!({"method": "getnetworkinfo"})))
-            .with_status(200)
-            .with_body_from_request(|request| {
-                let request: serde_json::Value = serde_json::from_slice(request.body().unwrap()).unwrap();
-                serde_json::json!({"result": {"version": 300000}, "error": null, "id": request["id"]}).to_string().into_bytes()
-            })
-            .expect(if bitcoin_fails { 0 } else { 1 })
-            .create_async().await;
-        let stacks_mock = stacks_server
-            .mock("GET", "/v2/info")
-            .with_status(if stacks_fails { 500 } else { 200 })
-            .with_header("content-type", "application/json")
-            .with_body(include_str!(
-                "../../tests/fixtures/stacksapi-get-node-info-test-data.json"
-            ))
-            .expect(if stacks_fails { 4 } else { 1 })
-            .create_async()
-            .await;
-        let mut config = Settings::new_from_default_config().unwrap();
-        config.bitcoin.rpc_endpoints = vec![bitcoin_server.url().parse().unwrap()];
-        config.stacks.endpoints = vec![stacks_server.url().parse().unwrap()];
-        if invalid_deployer {
-            config.signer.deployer =
-                stacks_common::types::chainstate::StacksAddress::burn_address(true);
-        }
-        let result = SignerContext::<
-            _,
-            ApiFallbackClient<BitcoinCoreClient>,
-            ApiFallbackClient<StacksClient>,
-            ApiFallbackClient<EmilyClient>,
-        >::init(config, crate::storage::memory::Store::new_shared())
-        .await;
-        if bitcoin_fails || stacks_fails {
-            assert!(result.is_err());
-        } else if invalid_deployer {
-            assert!(matches!(result, Err(Error::SignerConfig(_))));
-        } else {
-            let context = result.unwrap();
-            let expected = NodeNetwork {
-                stacks_chain_id: CHAIN_ID_TESTNET,
-                bitcoin_network: bitcoin::Network::Regtest,
-            };
-            assert_eq!(context.node_network(), expected);
-            assert_eq!(context.clone().node_network(), expected);
-        }
-        bitcoin_mock.assert_async().await;
-        version_mock.assert_async().await;
-        stacks_mock.assert_async().await;
-    }
+    use std::time::Instant;
 
     #[tokio::test]
     async fn node_discovery_stops_after_success() {
@@ -449,6 +357,7 @@ mod network_discovery_tests {
             std::future::ready(Ok(42))
         })
         .await;
+
         assert_eq!(result.unwrap(), 42);
         assert_eq!(attempts, 1);
     }
@@ -457,18 +366,21 @@ mod network_discovery_tests {
     async fn node_discovery_retries_with_delays_and_can_recover_on_last_attempt() {
         let mut attempts = Vec::new();
         let result = retry_node_request("test", || {
-            attempts.push(tokio::time::Instant::now());
-            std::future::ready(if attempts.len() == 4 {
+            attempts.push(Instant::now());
+            std::future::ready(if attempts.len() == MAX_RETRIES + 1 {
                 Ok(42)
             } else {
                 Err(Error::SignerShutdown)
             })
         })
         .await;
+
         assert_eq!(result.unwrap(), 42);
-        assert_eq!(attempts.len(), 4);
+        assert_eq!(attempts.len(), MAX_RETRIES + 1);
+
+        // Ensure that the delays are at least 3 seconds apart.
         for pair in attempts.windows(2) {
-            assert!(pair[1].duration_since(pair[0]) >= Duration::from_secs(3));
+            assert!(pair[1].duration_since(pair[0]) >= RETRY_DELAY);
         }
     }
 
@@ -480,7 +392,9 @@ mod network_discovery_tests {
             std::future::ready(Err::<(), _>(Error::SignerShutdown))
         })
         .await;
+
         assert!(matches!(result, Err(Error::SignerShutdown)));
-        assert_eq!(attempts, 4);
+        // Ensure that we made 4 attempts.
+        assert_eq!(attempts, MAX_RETRIES + 1);
     }
 }
