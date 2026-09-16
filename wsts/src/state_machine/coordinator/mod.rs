@@ -755,7 +755,7 @@ pub mod test {
         match &operation_results[0] {
             OperationResult::SignError(SignError::Coordinator(Error::Aggregator(AggregatorError::BadPartySigs(parties)))) => {
 		if parties != &bad_parties {
-		    panic!("Expected BadPartySigs from {:?}, got {:?}", &bad_parties, &operation_results[0]);
+		    panic!("Expected BadPartySigs from {:?}, got {:?}", bad_parties, operation_results[0]);
 		}
 	    }
             _ => panic!("Expected OperationResult::SignError(SignError::Coordinator(Error::Aggregator(AggregatorError::BadPartySigs(parties))))"),

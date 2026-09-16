@@ -6817,7 +6817,7 @@ mod p2p_peers {
 mod get_pending_accepted_withdrawal_requests {
     use signer::{
         bitcoin::validation::WithdrawalValidationResult,
-        testing::storage::{self, DbReadTestExt as _, DbWriteTestExt as _},
+        testing::storage::{self, DbWriteTestExt as _},
     };
 
     use super::*;

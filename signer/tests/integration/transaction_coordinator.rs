@@ -5703,10 +5703,7 @@ mod get_eligible_pending_withdrawal_requests {
         storage::model::{
             BitcoinBlock, BitcoinBlockHeight, StacksBlock, WithdrawalRequest, WithdrawalSigner,
         },
-        testing::{
-            blocks::{BitcoinChain, StacksChain},
-            storage::{DbReadTestExt as _, DbWriteTestExt as _},
-        },
+        testing::blocks::{BitcoinChain, StacksChain},
         transaction_coordinator::{GetPendingRequestsParams, TxCoordinatorEventLoop},
     };
 

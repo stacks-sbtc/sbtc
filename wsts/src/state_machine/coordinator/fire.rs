@@ -823,8 +823,8 @@ impl Coordinator {
 
             let shares = message_nonce
                 .public_nonces
-                .iter()
-                .flat_map(|(i, _)| self.signature_shares[i].clone())
+                .keys()
+                .flat_map(|i| self.signature_shares[i].clone())
                 .collect::<Vec<SignatureShare>>();
 
             debug!(
@@ -1953,7 +1953,7 @@ pub mod test {
             }
             result => panic!(
                 "Expected OperationResult::DkgError(DkgError::DkgEndFailure), got {:?}",
-                &result
+                result
             ),
         }
     }

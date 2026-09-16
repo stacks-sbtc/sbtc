@@ -62,7 +62,7 @@ pub mod test_helpers {
             if let Err(signer_secret_errors) =
                 signer.compute_secrets(&private_shares, &public_shares)
             {
-                secret_errors.extend(signer_secret_errors.into_iter());
+                secret_errors.extend(signer_secret_errors);
             }
         }
 
@@ -104,7 +104,7 @@ pub mod test_helpers {
         let mut secret_errors = HashMap::new();
         for signer in signers.iter_mut() {
             if let Err(signer_secret_errors) = signer.compute_secrets(&private_shares, &polys) {
-                secret_errors.extend(signer_secret_errors.into_iter());
+                secret_errors.extend(signer_secret_errors);
             }
         }
 
@@ -236,7 +236,7 @@ pub mod test_helpers {
             if let Err(signer_secret_errors) =
                 signer.compute_secrets(&private_shares, &public_shares)
             {
-                secret_errors.extend(signer_secret_errors.into_iter());
+                secret_errors.extend(signer_secret_errors);
             }
         }
 
