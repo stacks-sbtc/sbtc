@@ -85,7 +85,7 @@ pub trait Context: Clone + Sync + Send {
                     _ = watch_receiver.wait_for_shutdown() => {
                         let signal = SignerSignal::Command(SignerCommand::Shutdown);
                         // Once we see a shutdown signal, we can forward it
-                        // a long and then stop.
+                        // along and then stop.
                         let _ = sender.send(signal).await;
                         break;
                     }

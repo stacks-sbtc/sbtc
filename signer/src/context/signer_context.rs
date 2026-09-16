@@ -35,7 +35,7 @@ impl NodeNetwork {
 #[derive(Debug, Clone)]
 pub struct SignerContext<S, BC, ST, EM> {
     config: Settings,
-    /// The Bitcoin and Stacks networks identities.
+    /// The Bitcoin and Stacks network identities.
     node_network: Arc<OnceCell<NodeNetwork>>,
     // Handle to the app signalling channel. This keeps the channel alive
     // for the duration of the program and is used both to send messages

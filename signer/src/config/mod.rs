@@ -88,7 +88,7 @@ pub struct BitcoinConfig {
     #[serde(deserialize_with = "duration_seconds_deserializer")]
     pub timeout: std::time::Duration,
 
-    /// A test-only optional fallback fee rate in sats/vbyte to use when the
+    /// An optional fallback fee rate in sats/vbyte to use when the
     /// initial fee rate is too high to construct any transaction package.
     /// When set, this value is used directly as the retry fee rate.
     /// When `None`, the signer estimates a lower fee rate by targeting a longer
