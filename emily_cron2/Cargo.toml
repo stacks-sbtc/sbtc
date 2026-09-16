@@ -21,6 +21,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 mockito.workspace = true
+test-case.workspace = true
 
 [lints]
 workspace = true

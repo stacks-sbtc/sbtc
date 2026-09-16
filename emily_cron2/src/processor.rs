@@ -7,6 +7,7 @@ use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use bitcoin::ScriptBuf;
 use private_emily_client::apis::configuration::ApiKey;
 use private_emily_client::apis::configuration::Configuration;
 use private_emily_client::apis::deposit_api;
@@ -18,6 +19,7 @@ use reqwest::Client;
 use reqwest::StatusCode;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
+use sbtc::deposits::ReclaimScriptInputs;
 
 use crate::config::Config;
 use crate::error::Error;
@@ -26,7 +28,6 @@ use crate::model::Outspend;
 use crate::model::Rbf;
 use crate::model::Transaction;
 use crate::model::is_past_expiry;
-use crate::model::reclaim_lock_time;
 
 /// Emily applies deposit updates sequentially under a short Lambda deadline.
 /// Keep each write small so a large backlog cannot miss the deadline.
@@ -254,10 +255,11 @@ impl Processor {
         confirmed_height: u64,
         tip_height: u64,
     ) -> Result<Option<DepositUpdate>, Error> {
-        let reclaim_delay = reclaim_lock_time(&deposit.reclaim_script)?;
+        let script = ScriptBuf::from_hex(&deposit.reclaim_script)?;
+        let reclaim = ReclaimScriptInputs::parse(&script)?;
         let deposit_expired = is_past_expiry(
             confirmed_height,
-            reclaim_delay,
+            reclaim.lock_time(),
             self.config.min_block_confirmations,
             tip_height,
         );
@@ -529,4 +531,554 @@ fn deposit_update(
     );
     update.replaced_by_tx = replaced_by_tx.map(Some);
     update
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser as _;
+    use mockito::Matcher;
+    use mockito::Server;
+    use serde_json::Value;
+    use serde_json::json;
+    use test_case::test_case;
+
+    use crate::config::Config;
+    use crate::error::Error;
+
+    use super::Processor;
+
+    /// Valid 32-byte Bitcoin txids used in HTTP fixtures.
+    const DEPOSIT_TXID: &str = "52193ceeee4110ca2cf415820914bc42305758907d5f9b43d00540649d7c6fc9";
+    const SPENDER_TXID: &str = "afe18f246b9624b17b21f2ebf84594bb75b582209d55dfc0b6edb34bfb785c3a";
+    const REPLACEMENT_TXID: &str =
+        "75b02b9884ec41c05f2cfa6e20823328321518dd0b027e7b609b63d4d1ea7c78";
+
+    fn mempool_tx_path(txid: &str) -> String {
+        format!("/v1/tx/{txid}")
+    }
+
+    fn electrs_outspend_path(txid: &str, vout: u32) -> String {
+        format!("/tx/{txid}/outspend/{vout}")
+    }
+
+    fn mempool_rbf_path(txid: &str) -> String {
+        format!("/v1/tx/{txid}/rbf")
+    }
+
+    fn processor(server: &Server, dry_run: bool) -> Processor {
+        let mut config = Config::parse_from(["emily-cron2"]);
+        config.private_emily_endpoint = server.url();
+        config.mempool_api_url = server.url();
+        config.electrs_api_url = server.url();
+        config.hiro_api_url = server.url();
+        config.emily_api_key = "test-key".into();
+        config.min_block_confirmations = 6;
+        config.max_unconfirmed_time = 86400;
+        config.dry_run = dry_run;
+        Processor::new(config).unwrap()
+    }
+
+    fn deposit(status: &str) -> Value {
+        json!({
+            "bitcoinTxid": DEPOSIT_TXID,
+            "bitcoinTxOutputIndex": 2,
+            "status": status,
+            "lastUpdateBlockHash": "block",
+            "reclaimScript": "0160b27551",
+            "amount": 1000,
+            "depositScript": "",
+            "lastUpdateHeight": 1,
+            "recipient": "SN3R84XZYA63QS28932XQF3G1J8R9PC3W76P9CSQS"
+        })
+    }
+
+    async fn setup(server: &mut Server, status: &str, tip: u64) -> Vec<mockito::Mock> {
+        vec![
+            server
+                .mock("GET", "/v1/blocks/tip/height")
+                .match_header("x-api-key", Matcher::Missing)
+                .with_body(tip.to_string())
+                .create_async()
+                .await,
+            server
+                .mock("GET", "/deposit")
+                .with_header("content-type", "application/json")
+                .match_query(Matcher::UrlEncoded("status".into(), "pending".into()))
+                .match_header("x-api-key", "test-key")
+                .with_body(
+                    json!({
+                        "deposits": if status == "pending" { vec![deposit(status)] } else { vec![] },
+                        "nextToken": null
+                    })
+                    .to_string(),
+                )
+                .create_async()
+                .await,
+        ]
+    }
+
+    async fn update_mock(
+        server: &mut Server,
+        status: &str,
+        message: &str,
+        replacement: Option<&str>,
+        count: usize,
+    ) -> mockito::Mock {
+        let mut update = json!({
+            "bitcoinTxid": DEPOSIT_TXID, "bitcoinTxOutputIndex": 2,
+            "status": status, "statusMessage": message
+        });
+        if let Some(txid) = replacement {
+            update["replacedByTx"] = json!(txid);
+        }
+        server
+            .mock("PUT", "/deposit_private")
+            .with_header("content-type", "application/json")
+            .match_header("x-api-key", "test-key")
+            .match_body(Matcher::Json(json!({"deposits": [update]})))
+            .with_body(r#"{"deposits":[{"status":200,"error":null}]}"#)
+            .expect(count)
+            .create_async()
+            .await
+    }
+
+    #[test_case(false, ""; "expired_unspent")]
+    #[test_case(true, "0160b27551"; "depositor_reclaim")]
+    #[test_case(true, "signature"; "signer_sweep")]
+    #[test_case(true, "aa0160b27551bb"; "reclaim_substring_ignored")]
+    #[tokio::test]
+    async fn expiry_unspent_reclaim_and_signer_sweep(spent: bool, witness: &str) {
+        let expected = match (spent, witness) {
+            (false, _) => Some("Locktime expired at height 202 and UTXO unspent".to_string()),
+            (true, "0160b27551") => {
+                Some(format!("Depositor reclaim detected in tx {SPENDER_TXID}"))
+            }
+            _ => None,
+        };
+        let deposit_tx_path = mempool_tx_path(DEPOSIT_TXID);
+        let outspend_path = electrs_outspend_path(DEPOSIT_TXID, 2);
+        let spender_tx_path = mempool_tx_path(SPENDER_TXID);
+
+        let mut server = Server::new_async().await;
+        let mocks = setup(&mut server, "pending", 202).await;
+        let tx = server
+            .mock("GET", deposit_tx_path.as_str())
+            .with_body(r#"{"status":{"confirmed":true,"block_height":100}}"#)
+            .create_async()
+            .await;
+        let outspend = server
+            .mock("GET", outspend_path.as_str())
+            .with_body(json!({"spent":spent,"txid":SPENDER_TXID,"vin":0}).to_string())
+            .create_async()
+            .await;
+        let spending = server
+            .mock("GET", spender_tx_path.as_str())
+            .with_body(
+                json!({"status":{"confirmed":true},"vin":[{"witness":[witness]}]}).to_string(),
+            )
+            .expect(usize::from(spent))
+            .create_async()
+            .await;
+        let update = update_mock(
+            &mut server,
+            "failed",
+            expected.as_deref().unwrap_or(""),
+            None,
+            usize::from(expected.is_some()),
+        )
+        .await;
+        processor(&server, false).run().await.unwrap();
+        for mock in mocks {
+            mock.assert_async().await;
+        }
+        tx.assert_async().await;
+        outspend.assert_async().await;
+        spending.assert_async().await;
+        update.assert_async().await;
+    }
+
+    #[test_case(105; "below_confirmation_threshold")]
+    #[test_case(106; "meets_confirmation_threshold")]
+    #[tokio::test]
+    async fn rbf_fetches_replacement_outside_emily_and_waits_for_confirmations(tip: u64) {
+        let deposit_tx_path = mempool_tx_path(DEPOSIT_TXID);
+        let rbf_path = mempool_rbf_path(DEPOSIT_TXID);
+        let replacement_tx_path = mempool_tx_path(REPLACEMENT_TXID);
+        let rbf_message = format!("Replaced by confirmed tx {REPLACEMENT_TXID}");
+        let expect_rbf = tip >= 106;
+        let mut server = Server::new_async().await;
+        let _mocks = setup(&mut server, "pending", tip).await;
+        let deposit_tx = server
+            .mock("GET", deposit_tx_path.as_str())
+            .with_status(404)
+            .create_async()
+            .await;
+        let rbf = server
+            .mock("GET", rbf_path.as_str())
+            .with_body(
+                json!({
+                    "replacements": {
+                        "tx": {"txid": REPLACEMENT_TXID},
+                        "replaces": [{"tx": {"txid": DEPOSIT_TXID}}]
+                    }
+                })
+                .to_string(),
+            )
+            .create_async()
+            .await;
+        let replacement = server
+            .mock("GET", replacement_tx_path.as_str())
+            .with_body(r#"{"status":{"confirmed":true,"block_height":100}}"#)
+            .create_async()
+            .await;
+        let block = server
+            .mock("GET", "/extended/v2/blocks/block")
+            .with_body(r#"{"block_time":18446744073709551615}"#)
+            .expect(usize::from(!expect_rbf))
+            .create_async()
+            .await;
+        let update = update_mock(
+            &mut server,
+            "rbf",
+            &rbf_message,
+            Some(REPLACEMENT_TXID),
+            usize::from(expect_rbf),
+        )
+        .await;
+        processor(&server, false).run().await.unwrap();
+        deposit_tx.assert_async().await;
+        rbf.assert_async().await;
+        replacement.assert_async().await;
+        block.assert_async().await;
+        update.assert_async().await;
+    }
+
+    #[test_case(true, true, true; "missing_and_old")]
+    #[test_case(true, false, false; "missing_but_recent")]
+    #[test_case(false, true, false; "in_mempool_even_if_old")]
+    #[tokio::test]
+    async fn only_missing_old_pending_transactions_fail(missing: bool, old: bool, expected: bool) {
+        let deposit_tx_path = mempool_tx_path(DEPOSIT_TXID);
+        let rbf_path = mempool_rbf_path(DEPOSIT_TXID);
+        let mut server = Server::new_async().await;
+        let _mocks = setup(&mut server, "pending", 100).await;
+        let tx = server
+            .mock("GET", deposit_tx_path.as_str())
+            .with_status(if missing { 404 } else { 200 })
+            .with_body(r#"{"status":{"confirmed":false}}"#)
+            .create_async()
+            .await;
+        let rbf = server
+            .mock("GET", rbf_path.as_str())
+            .with_body(r#"{"replacements":null}"#)
+            .create_async()
+            .await;
+        let block = server
+            .mock("GET", "/extended/v2/blocks/block")
+            .with_body(json!({"block_time": if old {0} else {u64::MAX}}).to_string())
+            .expect(usize::from(missing))
+            .create_async()
+            .await;
+        let update = update_mock(
+            &mut server,
+            "failed",
+            "Pending for too long (86400 seconds)",
+            None,
+            usize::from(expected),
+        )
+        .await;
+        processor(&server, false).run().await.unwrap();
+        tx.assert_async().await;
+        rbf.assert_async().await;
+        block.assert_async().await;
+        update.assert_async().await;
+    }
+
+    #[test_case("tx"; "mempool_transaction")]
+    #[test_case("outspend"; "electrs_outspend")]
+    #[test_case("block"; "hiro_block")]
+    #[tokio::test]
+    async fn upstream_failures_never_become_deposit_failures(which: &str) {
+        let deposit_tx_path = mempool_tx_path(DEPOSIT_TXID);
+        let outspend_path = electrs_outspend_path(DEPOSIT_TXID, 2);
+        let rbf_path = mempool_rbf_path(DEPOSIT_TXID);
+        let block_path = "/extended/v2/blocks/block".to_string();
+        let failing_path = match which {
+            "outspend" => outspend_path,
+            "block" => block_path,
+            _ => deposit_tx_path.clone(),
+        };
+
+        let mut server = Server::new_async().await;
+        let _mocks = setup(&mut server, "pending", 202).await;
+        if which != "tx" {
+            server
+                .mock("GET", deposit_tx_path.as_str())
+                .with_status(if which == "block" { 404 } else { 200 })
+                .with_body(r#"{"status":{"confirmed":true,"block_height":100}}"#)
+                .create_async()
+                .await;
+        }
+        server
+            .mock("GET", rbf_path.as_str())
+            .with_body(r#"{"replacements":null}"#)
+            .expect_at_most(1)
+            .create_async()
+            .await;
+        let failure = server
+            .mock("GET", failing_path.as_str())
+            .with_status(503)
+            .create_async()
+            .await;
+        let writes = server
+            .mock("PUT", "/deposit_private")
+            .with_header("content-type", "application/json")
+            .expect(0)
+            .create_async()
+            .await;
+        assert!(processor(&server, false).run().await.is_err());
+        failure.assert_async().await;
+        writes.assert_async().await;
+    }
+
+    #[test_case(true, 200; "dry_run_skips_writes")]
+    #[test_case(false, 400; "rejected_update")]
+    #[test_case(false, 503; "update_http_error")]
+    #[tokio::test]
+    async fn pagination_dry_run_and_batch_errors(dry_run: bool, update_status: usize) {
+        let mut server = Server::new_async().await;
+        server
+            .mock("GET", "/v1/blocks/tip/height")
+            .match_header("x-api-key", Matcher::Missing)
+            .with_body("202")
+            .create_async()
+            .await;
+        let first = server
+            .mock("GET", "/deposit")
+            .with_header("content-type", "application/json")
+            .match_query(Matcher::UrlEncoded("status".into(), "pending".into()))
+            .with_body(r#"{"deposits":[],"nextToken":"a+b/c="}"#)
+            .create_async()
+            .await;
+        let second = server
+            .mock("GET", "/deposit")
+            .with_header("content-type", "application/json")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("status".into(), "pending".into()),
+                Matcher::UrlEncoded("nextToken".into(), "a+b/c=".into()),
+            ]))
+            .with_body(json!({"deposits":[deposit("pending")]}).to_string())
+            .create_async()
+            .await;
+        let deposit_tx_path = mempool_tx_path(DEPOSIT_TXID);
+        let outspend_path = electrs_outspend_path(DEPOSIT_TXID, 2);
+        server
+            .mock("GET", deposit_tx_path.as_str())
+            .with_body(r#"{"status":{"confirmed":true,"block_height":100}}"#)
+            .create_async()
+            .await;
+        server
+            .mock("GET", outspend_path.as_str())
+            .with_body(r#"{"spent":false}"#)
+            .create_async()
+            .await;
+        let update = server
+            .mock("PUT", "/deposit_private")
+            .with_header("content-type", "application/json")
+            .with_status(if update_status == 503 { 503 } else { 200 })
+            .with_body(
+                json!({"deposits":[{"status":update_status,"error":"rejected"}]}).to_string(),
+            )
+            .expect(usize::from(!dry_run))
+            .create_async()
+            .await;
+        assert_eq!(processor(&server, dry_run).run().await.is_ok(), dry_run);
+        first.assert_async().await;
+        second.assert_async().await;
+        update.assert_async().await;
+    }
+
+    #[test_case(200; "malformed_json")]
+    #[test_case(503; "http_error")]
+    #[tokio::test]
+    async fn emily_read_errors_retain_generated_client_errors(status: usize) {
+        use private_emily_client::apis;
+
+        let mut server = Server::new_async().await;
+        let tip = server
+            .mock("GET", "/v1/blocks/tip/height")
+            .match_header("x-api-key", Matcher::Missing)
+            .with_body("202")
+            .create_async()
+            .await;
+        let read = server
+            .mock("GET", "/deposit")
+            .match_query(Matcher::UrlEncoded("status".into(), "pending".into()))
+            .match_header("x-api-key", "test-key")
+            .with_header("content-type", "application/json")
+            .with_status(status)
+            .with_body("invalid JSON")
+            .create_async()
+            .await;
+        let writes = server
+            .mock("PUT", "/deposit_private")
+            .expect(0)
+            .create_async()
+            .await;
+
+        let error = processor(&server, false).run().await.unwrap_err();
+        if status == 200 {
+            assert!(matches!(
+                error,
+                Error::EmilyGetDeposits(apis::Error::Serde(_))
+            ));
+        } else {
+            assert!(matches!(
+                error,
+                Error::EmilyGetDeposits(apis::Error::ResponseError(_))
+            ));
+        }
+        tip.assert_async().await;
+        read.assert_async().await;
+        writes.assert_async().await;
+    }
+
+    /// Arrange expired outputs so a full cycle produces the requested update count.
+    async fn setup_update_backlog(server: &mut Server, count: u32) -> Vec<mockito::Mock> {
+        let deposits: Vec<Value> = (0..count)
+            .map(|index| {
+                let mut deposit = deposit("pending");
+                deposit["bitcoinTxOutputIndex"] = json!(index);
+                deposit
+            })
+            .collect();
+        let tip = server
+            .mock("GET", "/v1/blocks/tip/height")
+            .with_body("202")
+            .create_async()
+            .await;
+        let pending = server
+            .mock("GET", "/deposit")
+            .match_query(Matcher::UrlEncoded("status".into(), "pending".into()))
+            .with_header("content-type", "application/json")
+            .with_body(json!({"deposits": deposits}).to_string())
+            .create_async()
+            .await;
+        let deposit_tx_path = mempool_tx_path(DEPOSIT_TXID);
+        let transaction = server
+            .mock("GET", deposit_tx_path.as_str())
+            .with_body(r#"{"status":{"confirmed":true,"block_height":100}}"#)
+            .create_async()
+            .await;
+        let outspends = server
+            .mock(
+                "GET",
+                Matcher::Regex(format!("^/tx/{DEPOSIT_TXID}/outspend/\\d+$")),
+            )
+            .with_body(r#"{"spent":false}"#)
+            .expect(count as usize)
+            .create_async()
+            .await;
+        vec![tip, pending, transaction, outspends]
+    }
+
+    /// Match the complete set of updates in one request, including output ordering.
+    async fn backlog_batch(
+        server: &mut Server,
+        outputs: std::ops::Range<u32>,
+        response_status: usize,
+        rejected_output: Option<u32>,
+        expected_calls: usize,
+    ) -> mockito::Mock {
+        let updates: Vec<Value> = outputs
+            .clone()
+            .map(|index| {
+                json!({
+                    "bitcoinTxid": DEPOSIT_TXID,
+                    "bitcoinTxOutputIndex": index,
+                    "status": "failed",
+                    "statusMessage": "Locktime expired at height 202 and UTXO unspent"
+                })
+            })
+            .collect();
+        let outcomes: Vec<Value> = outputs
+            .map(|index| {
+                if Some(index) == rejected_output {
+                    json!({"status":400, "error":"rejected"})
+                } else {
+                    json!({"status":200, "error":null})
+                }
+            })
+            .collect();
+        server
+            .mock("PUT", "/deposit_private")
+            .match_header("x-api-key", "test-key")
+            .match_body(Matcher::Json(json!({"deposits":updates})))
+            .with_header("content-type", "application/json")
+            .with_status(response_status)
+            .with_body(json!({"deposits":outcomes}).to_string())
+            .expect(expected_calls)
+            .create_async()
+            .await
+    }
+
+    #[tokio::test]
+    async fn submits_backlog_in_bounded_batches() {
+        let mut server = Server::new_async().await;
+        let reads = setup_update_backlog(&mut server, 11).await;
+        let first = backlog_batch(&mut server, 0..5, 200, None, 1).await;
+        let second = backlog_batch(&mut server, 5..10, 200, None, 1).await;
+        let last = backlog_batch(&mut server, 10..11, 200, None, 1).await;
+
+        processor(&server, false).run().await.unwrap();
+
+        for read in reads {
+            read.assert_async().await;
+        }
+        first.assert_async().await;
+        second.assert_async().await;
+        last.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn partial_rejection_does_not_stop_later_batches() {
+        let mut server = Server::new_async().await;
+        let reads = setup_update_backlog(&mut server, 6).await;
+        // One rejection among successful updates must still fail the cycle.
+        let first = backlog_batch(&mut server, 0..5, 200, Some(2), 1).await;
+        let last = backlog_batch(&mut server, 5..6, 200, None, 1).await;
+
+        let result = processor(&server, false).run().await;
+        assert!(matches!(result, Err(Error::DepositUpdatesRejected)));
+
+        for read in reads {
+            read.assert_async().await;
+        }
+        first.assert_async().await;
+        last.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn http_failure_after_success_stops_without_retrying_batches() {
+        let mut server = Server::new_async().await;
+        let reads = setup_update_backlog(&mut server, 11).await;
+        let first = backlog_batch(&mut server, 0..5, 200, None, 1).await;
+        let second = backlog_batch(&mut server, 5..10, 503, None, 1).await;
+        let last = backlog_batch(&mut server, 10..11, 200, None, 0).await;
+
+        let result = processor(&server, false).run().await;
+        assert!(matches!(
+            result,
+            Err(Error::EmilyUpdateDeposits(
+                private_emily_client::apis::Error::ResponseError(_)
+            ))
+        ));
+
+        for read in reads {
+            read.assert_async().await;
+        }
+        first.assert_async().await;
+        second.assert_async().await;
+        last.assert_async().await;
+    }
 }

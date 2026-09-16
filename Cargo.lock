@@ -1836,6 +1836,7 @@ dependencies = [
  "sbtc",
  "serde",
  "serde_json",
+ "test-case",
  "thiserror 2.0.11",
  "tokio",
  "tracing",

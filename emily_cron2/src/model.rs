@@ -1,14 +1,6 @@
 //! Bitcoin and Stacks API response types, plus small reconciliation helpers.
 
-use bitcoin::ScriptBuf;
-use sbtc::deposits::ReclaimScriptInputs;
 use serde::Deserialize;
-
-use crate::error::Error;
-
-// ---------------------------------------------------------------------------
-// Bitcoin transaction
-// ---------------------------------------------------------------------------
 
 /// Bitcoin transaction details returned by the mempool API.
 #[derive(Clone, Deserialize)]
@@ -59,10 +51,6 @@ impl Input {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Electrs outspend
-// ---------------------------------------------------------------------------
-
 /// Electrs spending information for a deposit output.
 #[derive(Deserialize)]
 pub struct Outspend {
@@ -73,10 +61,6 @@ pub struct Outspend {
     /// Index of the input spending the output.
     pub vin: Option<usize>,
 }
-
-// ---------------------------------------------------------------------------
-// Mempool RBF tree
-// ---------------------------------------------------------------------------
 
 /// Replacement history returned by the mempool API.
 #[derive(Deserialize)]
@@ -114,26 +98,11 @@ impl Replacement {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Stacks block
-// ---------------------------------------------------------------------------
-
 /// Stacks block timestamp used to determine a deposit's age.
 #[derive(Deserialize)]
 pub struct Block {
     /// Block timestamp in seconds since the Unix epoch.
     pub block_time: u64,
-}
-
-// ---------------------------------------------------------------------------
-// Reconciliation helpers
-// ---------------------------------------------------------------------------
-
-/// Parse a reclaim script and return its CSV lock-time in Bitcoin blocks.
-pub fn reclaim_lock_time(script_hex: &str) -> Result<u32, Error> {
-    let script = ScriptBuf::from_hex(script_hex)?;
-    let reclaim = ReclaimScriptInputs::parse(&script)?;
-    Ok(reclaim.lock_time())
 }
 
 /// True when `tip` has reached `height + lock_time + confirmations`.
@@ -147,4 +116,16 @@ pub fn is_past_expiry(height: u64, lock_time: u32, confirmations: u64, tip: u64)
         return false;
     };
     tip >= expiry_height
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locktime_and_expiry_boundaries() {
+        assert!(!is_past_expiry(100, 96, 6, 201));
+        assert!(is_past_expiry(100, 96, 6, 202));
+        assert!(!is_past_expiry(u64::MAX, 1, 6, u64::MAX));
+    }
 }
