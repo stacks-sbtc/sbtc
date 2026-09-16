@@ -59,6 +59,15 @@ pub struct ChainTipInfo<THash, THeight> {
     pub block_height: THeight,
 }
 
+/// Converts a [`bitcoin::Network`] to a string representation of the
+/// network, with the "Bitcoin" network name being changed to "mainnet".
+fn bitcoin_network(network: bitcoin::Network) -> String {
+    match network {
+        bitcoin::Network::Bitcoin => "mainnet".to_string(),
+        _ => network.to_string(),
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ConfigInfo {
     pub network: String,
@@ -152,7 +161,7 @@ pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
 impl InfoResponse {
     fn populate_config_info(&mut self, config: &Settings, network: NodeNetwork) {
         self.config = Some(ConfigInfo {
-            network: network.bitcoin_network.to_string(),
+            network: bitcoin_network(network.bitcoin_network),
             stacks_chain_id: network.stacks_chain_id.as_u32(),
             deployer: config.signer.deployer.to_string(),
             bootstrap_signatures_required: config.signer.bootstrap_signatures_required,
