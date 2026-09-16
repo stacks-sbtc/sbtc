@@ -106,6 +106,7 @@ use signer::keys::PrivateKey;
 use signer::network::in_memory2::SignerNetwork;
 use signer::network::in_memory2::WanNetwork;
 use signer::request_decider::RequestDeciderEventLoop;
+use signer::stacks::api::StacksChainId;
 use signer::stacks::contracts::AcceptWithdrawalV1;
 use signer::stacks::contracts::AsContractCall;
 use signer::stacks::contracts::RejectWithdrawalV1;
@@ -125,7 +126,6 @@ use signer::testing::storage::DbReadTestExt as _;
 use signer::testing::storage::DbWriteTestExt as _;
 use signer::testing::transaction_coordinator::select_coordinator;
 use signer::testing::wsts::SignerInfo;
-use stacks_common::consts::CHAIN_ID_TESTNET;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::ConsensusHash;
 use stacks_common::types::chainstate::SortitionId;
@@ -6155,7 +6155,8 @@ where
         keypairs.iter().map(|kp| kp.public_key().into()).collect();
     signer_keys.sort();
 
-    let wallet = SignerWallet::new(&signer_keys, signatures_required, CHAIN_ID_TESTNET).unwrap();
+    let wallet =
+        SignerWallet::new(&signer_keys, signatures_required, StacksChainId::TESTNET).unwrap();
 
     (aggregated_signer, wallet, keypairs)
 }

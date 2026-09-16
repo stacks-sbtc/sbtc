@@ -9,13 +9,13 @@ use clarity::vm::types::TupleData;
 use sbtc::testing::regtest::Recipient;
 use secp256k1::Keypair;
 use secp256k1::SECP256K1;
-use stacks_common::consts::CHAIN_ID_TESTNET;
 use stacks_common::types::chainstate::StacksAddress;
 
 use crate::context::Context;
 use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
+use crate::stacks::api::StacksChainId;
 use crate::stacks::contracts::AsContractCall;
 use crate::stacks::contracts::AsTxPayload;
 use crate::stacks::contracts::ReqContext;
@@ -39,7 +39,8 @@ pub fn regtest_bootstrap_wallet() -> (SignerWallet, [Keypair; 3]) {
     .map(|sk| Keypair::from_seckey_str(SECP256K1, sk).unwrap());
 
     let public_keys = key_pairs.map(|kp| kp.public_key().into());
-    let wallet = SignerWallet::new(&public_keys, signatures_required, CHAIN_ID_TESTNET).unwrap();
+    let wallet =
+        SignerWallet::new(&public_keys, signatures_required, StacksChainId::TESTNET).unwrap();
 
     (wallet, key_pairs)
 }

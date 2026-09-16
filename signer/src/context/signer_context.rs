@@ -8,7 +8,7 @@ use crate::{
     config::{EmilyClientConfig, Settings},
     emily_client::EmilyInteract,
     error::Error,
-    stacks::api::StacksInteract,
+    stacks::api::{StacksChainId, StacksInteract},
     storage::{DbRead, DbWrite, Transactable},
 };
 
@@ -18,15 +18,15 @@ use super::{Context, SignerSignal, SignerState, TerminationHandle};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NodeNetwork {
     /// The Stacks chain ID reported by `/v2/info` as `network_id`.
-    pub stacks_chain_id: u32,
+    pub stacks_chain_id: StacksChainId,
     /// The Bitcoin network reported by `getblockchaininfo`.
     pub bitcoin_network: bitcoin::Network,
 }
 
 impl NodeNetwork {
-    /// Returns true if the Stacks chain is mainnet.
+    /// Returns true if the connected Stacks node is on mainnet.
     pub fn is_stacks_mainnet(&self) -> bool {
-        self.stacks_chain_id == stacks_common::consts::CHAIN_ID_MAINNET
+        self.stacks_chain_id.is_mainnet()
     }
 }
 
@@ -247,14 +247,13 @@ mod tests {
         atomic::{AtomicU8, Ordering},
     };
 
-    use stacks_common::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
     use tokio::sync::Notify;
 
     use super::NodeNetwork;
     use crate::{
         context::{Context as _, SignerEvent, SignerSignal},
         error::Error,
-        stacks::api::GetNodeInfoResponse,
+        stacks::api::{GetNodeInfoResponse, StacksChainId},
         storage::{memory::SharedStore, model::BitcoinBlockRef},
         testing::context::*,
     };
@@ -267,11 +266,11 @@ mod tests {
     >;
 
     const EXPECTED_NETWORK: NodeNetwork = NodeNetwork {
-        stacks_chain_id: CHAIN_ID_TESTNET,
+        stacks_chain_id: StacksChainId::TESTNET,
         bitcoin_network: bitcoin::Network::Regtest,
     };
 
-    fn node_info(chain_id: u32) -> GetNodeInfoResponse {
+    fn node_info(chain_id: StacksChainId) -> GetNodeInfoResponse {
         let mut info: GetNodeInfoResponse = serde_json::from_str(include_str!(
             "../../tests/fixtures/stacksapi-get-node-info-test-data.json"
         ))
@@ -317,9 +316,11 @@ mod tests {
 
     #[tokio::test]
     async fn node_network_retries_after_rpc_error() {
-        let context =
-            context_with_network_responses([Err(Error::Dummy), Ok(node_info(CHAIN_ID_TESTNET))])
-                .await;
+        let context = context_with_network_responses([
+            Err(Error::Dummy),
+            Ok(node_info(StacksChainId::TESTNET)),
+        ])
+        .await;
 
         assert!(matches!(context.node_network().await, Err(Error::Dummy)));
         assert!(context.inner.node_network.get().is_none());
@@ -332,8 +333,8 @@ mod tests {
     async fn node_network_retries_after_validation_error() {
         // The test config uses a testnet deployer, so mainnet fails validation.
         let context = context_with_network_responses([
-            Ok(node_info(CHAIN_ID_MAINNET)),
-            Ok(node_info(CHAIN_ID_TESTNET)),
+            Ok(node_info(StacksChainId::MAINNET)),
+            Ok(node_info(StacksChainId::TESTNET)),
         ])
         .await;
 

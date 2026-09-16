@@ -12,7 +12,7 @@ use bitcoincore_rpc::RpcApi as _;
 use blockstack_lib::types::chainstate::StacksAddress;
 use clarity::types::chainstate::StacksBlockId;
 use clarity::vm::types::PrincipalData;
-use stacks_common::consts::CHAIN_ID_TESTNET;
+use signer::stacks::api::StacksChainId;
 
 use emily_client::apis::configuration::Configuration as EmilyApiConfiguration;
 use fake::Fake as _;
@@ -406,8 +406,8 @@ impl TestSweepSetup {
     /// match the row inserted by the store_dkg_shares function.
     pub async fn store_rotate_keys_event(&self, db: &PgStore) {
         let signer_set = self.signer_keys.clone();
-        let wallet =
-            SignerWallet::new(&signer_set, self.signatures_required, CHAIN_ID_TESTNET).unwrap();
+        let chain_id = StacksChainId::TESTNET;
+        let wallet = SignerWallet::new(&signer_set, self.signatures_required, chain_id).unwrap();
 
         let address = wallet.address().clone();
 
@@ -578,7 +578,8 @@ impl TestSignerSet {
     }
 
     pub fn address(&self, signatures_required: u16) -> StacksAddress {
-        let wallet = SignerWallet::new(&self.keys, signatures_required, CHAIN_ID_TESTNET).unwrap();
+        let chain_id = StacksChainId::TESTNET;
+        let wallet = SignerWallet::new(&self.keys, signatures_required, chain_id).unwrap();
         wallet.address().clone()
     }
 }

@@ -26,6 +26,7 @@ use crate::context::NodeNetwork;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::network::libp2p::MultiaddrExt as _;
+use crate::stacks::api::StacksChainId;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::model::BitcoinBlockHeight;
 
@@ -408,7 +409,7 @@ impl Validatable for SignerConfig {
         // is a valid wallet, and all of those checks are done by the
         // `SignerWallet::load_boostrap_wallet` function. The chain ID here
         // only serves key/threshold validation.
-        if let Err(err) = SignerWallet::load_boostrap_wallet(self, 0) {
+        if let Err(err) = SignerWallet::load_boostrap_wallet(self, StacksChainId::TESTNET) {
             return Err(ConfigError::Message(err.to_string()));
         }
 
@@ -606,8 +607,6 @@ mod tests {
 
     use assert_matches::assert_matches;
     use more_asserts::assert_lt;
-    use stacks_common::consts::CHAIN_ID_MAINNET;
-    use stacks_common::consts::CHAIN_ID_TESTNET;
     use tempfile;
     use toml_edit::DocumentMut;
 
@@ -982,9 +981,9 @@ mod tests {
         let settings = Settings::new_from_default_config().unwrap();
         let network = crate::context::NodeNetwork {
             stacks_chain_id: if network == "mainnet" {
-                CHAIN_ID_MAINNET
+                StacksChainId::MAINNET
             } else {
-                CHAIN_ID_TESTNET
+                StacksChainId::TESTNET
             },
             bitcoin_network: match network {
                 "mainnet" => bitcoin::Network::Bitcoin,
@@ -1581,7 +1580,7 @@ mod tests {
         assert!(settings.signer.p2p.seeds.is_empty());
 
         let network = crate::context::NodeNetwork {
-            stacks_chain_id: CHAIN_ID_TESTNET,
+            stacks_chain_id: StacksChainId::TESTNET,
             bitcoin_network,
         };
         let result = settings.validate_network(&network);
@@ -1606,9 +1605,9 @@ mod tests {
         let settings = Settings::new_from_default_config().unwrap();
         let network = crate::context::NodeNetwork {
             stacks_chain_id: if node_mainnet {
-                CHAIN_ID_MAINNET
+                StacksChainId::MAINNET
             } else {
-                CHAIN_ID_TESTNET
+                StacksChainId::TESTNET
             },
             bitcoin_network: bitcoin::Network::Regtest,
         };

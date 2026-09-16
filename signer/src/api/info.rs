@@ -153,7 +153,7 @@ impl InfoResponse {
     fn populate_config_info(&mut self, config: &Settings, network: NodeNetwork) {
         self.config = Some(ConfigInfo {
             network: network.bitcoin_network.to_string(),
-            stacks_chain_id: network.stacks_chain_id,
+            stacks_chain_id: network.stacks_chain_id.as_u32(),
             deployer: config.signer.deployer.to_string(),
             bootstrap_signatures_required: config.signer.bootstrap_signatures_required,
             bitcoin_processing_delay: config.signer.bitcoin_processing_delay.as_secs(),
@@ -634,9 +634,10 @@ mod tests {
         let state = State(ApiState { ctx: context.clone() });
         let result = info_handler(state).await;
 
+        let network = context.node_network().await.unwrap();
         assert_eq!(
             serde_json::to_value(&result).unwrap()["config"]["stacks_chain_id"],
-            context.node_network().await.unwrap().stacks_chain_id
+            network.stacks_chain_id.as_u32()
         );
 
         let Some(config) = result.config else {

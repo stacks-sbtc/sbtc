@@ -1,11 +1,11 @@
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
-use stacks_common::consts::CHAIN_ID_TESTNET;
 
 use sbtc::testing::regtest;
 use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
+use signer::stacks::api::StacksChainId;
 use signer::stacks::contracts::AsContractCall as _;
 use signer::stacks::contracts::ReqContext;
 use signer::stacks::contracts::RotateKeysErrorMsg;
@@ -65,7 +65,7 @@ impl TestRotateKeySetup {
             signer::testing::wallet::create_signers_keys(rng, &aggregated_signer, num_signers);
 
         let wallet =
-            SignerWallet::new(&signer_keys, signatures_required, CHAIN_ID_TESTNET).unwrap();
+            SignerWallet::new(&signer_keys, signatures_required, StacksChainId::TESTNET).unwrap();
 
         // Create the transaction as if included in the current stacks chain tip
         let bitcoin_chain_tip = db
@@ -427,7 +427,7 @@ async fn rotate_key_validation_wrong_signatures_required() {
     let wallet_other = SignerWallet::new(
         setup.wallet.public_keys(),
         setup.wallet.signatures_required() + 1,
-        CHAIN_ID_TESTNET,
+        StacksChainId::TESTNET,
     )
     .unwrap();
     let rotate_key_tx_other = RotateKeysV1::new(

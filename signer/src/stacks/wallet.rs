@@ -20,7 +20,6 @@ use blockstack_lib::chainstate::stacks::TransactionVersion;
 use rand::SeedableRng as _;
 use secp256k1::Message;
 use secp256k1::ecdsa::RecoverableSignature;
-use stacks_common::consts::CHAIN_ID_MAINNET;
 use stacks_common::types::chainstate::StacksAddress;
 use stacks_common::util::secp256k1::Secp256k1PublicKey;
 
@@ -32,6 +31,7 @@ use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::signature::RecoverableEcdsaSignature as _;
 use crate::signature::SighashDigest as _;
+use crate::stacks::api::StacksChainId;
 use crate::stacks::contracts::AsTxPayload;
 
 /// Stacks multisig addresses are Hash160 hashes of bitcoin Scripts (more
@@ -63,7 +63,7 @@ pub struct SignerWallet {
     /// multi-sig transaction.
     signatures_required: u16,
     /// The chain ID reported by the connected Stacks node.
-    chain_id: u32,
+    chain_id: StacksChainId,
     /// The multi-sig address associated with the public keys.
     address: StacksAddress,
     /// The next nonce for the StacksAddress associated with the address of
@@ -107,7 +107,7 @@ impl SignerWallet {
     pub fn new<'a, I>(
         public_keys: I,
         signatures_required: u16,
-        chain_id: u32,
+        chain_id: StacksChainId,
     ) -> Result<Self, Error>
     where
         I: IntoIterator<Item = &'a PublicKey>,
@@ -132,9 +132,10 @@ impl SignerWallet {
 
         let num_sigs = signatures_required as usize;
         let hash_mode = Self::hash_mode().to_address_hash_mode();
-        let version = match chain_id {
-            CHAIN_ID_MAINNET => C32_ADDRESS_VERSION_MAINNET_MULTISIG,
-            _ => C32_ADDRESS_VERSION_TESTNET_MULTISIG,
+        let version = if chain_id.is_mainnet() {
+            C32_ADDRESS_VERSION_MAINNET_MULTISIG
+        } else {
+            C32_ADDRESS_VERSION_TESTNET_MULTISIG
         };
 
         // The [`StacksAddress::from_public_keys`] call below should never
@@ -182,7 +183,7 @@ impl SignerWallet {
     /// Load the bootstrap wallet implicitly defined in the signer config.
     pub fn load_boostrap_wallet(
         config: &SignerConfig,
-        chain_id: u32,
+        chain_id: StacksChainId,
     ) -> Result<SignerWallet, Error> {
         let public_keys = config.bootstrap_signing_set.clone();
         let signatures_required = config.bootstrap_signatures_required;
@@ -297,7 +298,7 @@ impl MultisigTx {
         // https://github.com/hirosystems/stacks.js/blob/2c57ea4e5abed76da903f5138c79c1d2eceb008b/packages/transactions/src/constants.ts#L1-L8,
         // and in the clarity docs at
         // https://docs.stacks.co/clarity/keywords#chain-id-clarity2:
-        let version = if wallet.chain_id == CHAIN_ID_MAINNET {
+        let version = if wallet.chain_id.is_mainnet() {
             TransactionVersion::Mainnet
         } else {
             TransactionVersion::Testnet
@@ -309,7 +310,7 @@ impl MultisigTx {
 
         let tx = StacksTransaction {
             version,
-            chain_id: wallet.chain_id,
+            chain_id: wallet.chain_id.as_u32(),
             auth: TransactionAuth::Standard(spending_condition),
             anchor_mode: TransactionAnchorMode::Any,
             post_condition_mode: conditions.post_condition_mode,
@@ -435,7 +436,6 @@ mod tests {
     use rand::seq::SliceRandom as _;
     use secp256k1::Keypair;
     use secp256k1::SECP256K1;
-    use stacks_common::consts::CHAIN_ID_TESTNET;
     use test_case::test_case;
 
     use crate::context::Context;
@@ -518,9 +518,9 @@ mod tests {
          WalletSpec {signatures_required: 4, num_keys: 7},
          WalletSpec {signatures_required: 70, num_keys: 100}],
         [true, false],
-        [CHAIN_ID_MAINNET, CHAIN_ID_TESTNET]
+        [StacksChainId::MAINNET, StacksChainId::TESTNET]
     )]
-    fn multi_sig_works(wallet_spec: WalletSpec, max_sigs: bool, network: u32) {
+    fn multi_sig_works(wallet_spec: WalletSpec, max_sigs: bool, network: StacksChainId) {
         // We do the following:
         // 1. Construct the specified multi-sig wallet.
         // 2. Construct any old transaction. In this case it is a contract
@@ -573,13 +573,13 @@ mod tests {
     /// If one of the signers signs a digest with the wrong key, then we
     /// will reject it. We also reject the case where they sign the wrong
     /// digest with a "correct" key.
-    #[test_case(false, false, CHAIN_ID_MAINNET; "incorrect key, incorrect digest, mainnet")]
-    #[test_case(false, true, CHAIN_ID_MAINNET; "incorrect key, correct digest, mainnet")]
-    #[test_case(true, false, CHAIN_ID_MAINNET; "correct key, incorrect digest, mainnet")]
-    #[test_case(false, false, CHAIN_ID_TESTNET; "incorrect key, incorrect digest, testnet")]
-    #[test_case(false, true, CHAIN_ID_TESTNET; "incorrect key, correct digest, testnet")]
-    #[test_case(true, false, CHAIN_ID_TESTNET; "correct key, incorrect digest, testnet")]
-    fn cannot_accept_invalid_sig(correct_key: bool, correct_digest: bool, network: u32) {
+    #[test_case(false, false, StacksChainId::MAINNET; "incorrect key, incorrect digest, mainnet")]
+    #[test_case(false, true, StacksChainId::MAINNET; "incorrect key, correct digest, mainnet")]
+    #[test_case(true, false, StacksChainId::MAINNET; "correct key, incorrect digest, mainnet")]
+    #[test_case(false, false, StacksChainId::TESTNET; "incorrect key, incorrect digest, testnet")]
+    #[test_case(false, true, StacksChainId::TESTNET; "incorrect key, correct digest, testnet")]
+    #[test_case(true, false, StacksChainId::TESTNET; "correct key, incorrect digest, testnet")]
+    fn cannot_accept_invalid_sig(correct_key: bool, correct_digest: bool, network: StacksChainId) {
         let signatures_required = 4;
         let num_keys = 7;
         let key_pairs: Vec<Keypair> = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
@@ -629,9 +629,9 @@ mod tests {
         assert!(!tx_signer.signatures.values().all(Option::is_none));
     }
 
-    #[test_case(CHAIN_ID_MAINNET; "Mainnet")]
-    #[test_case(CHAIN_ID_TESTNET; "Testnet")]
-    fn public_key_order_independence_signer_wallet(network: u32) {
+    #[test_case(StacksChainId::MAINNET; "Mainnet")]
+    #[test_case(StacksChainId::TESTNET; "Testnet")]
+    fn public_key_order_independence_signer_wallet(network: StacksChainId) {
         // Generally, for a stacks multi-sig wallet, the stacks address
         // changes depending on the ordering of the given list of public
         // keys. We don't want the address to depend on the ordering of
@@ -698,7 +698,7 @@ mod tests {
                 .take(50)
                 .collect();
         let signatures_required = 5;
-        let network = CHAIN_ID_TESTNET;
+        let network = StacksChainId::TESTNET;
         let wallet1 = SignerWallet::new(&signer_keys, signatures_required, network).unwrap();
 
         let (_, stacks_chain_tip) = db.get_chain_tips().await;
@@ -749,11 +749,11 @@ mod tests {
         SignerWallet::load_boostrap_wallet(&ctx.config().signer, chain_id).unwrap();
     }
 
-    #[test_case(CHAIN_ID_MAINNET)]
-    #[test_case(CHAIN_ID_TESTNET)]
-    #[test_case(0x8000_1234)]
+    #[test_case(StacksChainId::MAINNET)]
+    #[test_case(StacksChainId::TESTNET)]
+    #[test_case(StacksChainId::new(0x8000_1234))]
     #[tokio::test]
-    async fn wallet_preserves_discovered_chain_id(chain_id: u32) {
+    async fn wallet_preserves_discovered_chain_id(chain_id: StacksChainId) {
         let base = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -773,10 +773,10 @@ mod tests {
         let wallet = SignerWallet::load(&context).await.unwrap();
         let tx = MultisigTx::new_contract_call(TestContractCall::default(), &wallet, TX_FEE);
         let is_stacks_mainnet = context.node_network().await.unwrap().is_stacks_mainnet();
-        assert_eq!(tx.tx().chain_id, chain_id);
+        assert_eq!(tx.tx().chain_id, chain_id.as_u32());
         assert_eq!(wallet.address().is_mainnet(), is_stacks_mainnet);
 
-        let expected_version = if chain_id == CHAIN_ID_MAINNET {
+        let expected_version = if chain_id == StacksChainId::MAINNET {
             TransactionVersion::Mainnet
         } else {
             TransactionVersion::Testnet
@@ -793,7 +793,7 @@ mod tests {
         let payload = TestContractCall::default();
         let tx = MultisigTx::new_contract_call(payload, &registered_wallet, TX_FEE);
 
-        assert_eq!(tx.tx().chain_id, chain_id);
+        assert_eq!(tx.tx().chain_id, chain_id.as_u32());
     }
 
     #[test_case(1, 1)]
@@ -804,7 +804,7 @@ mod tests {
         const SIGNATURE_SIZE: u64 = 66;
         const PUBKEY_SIZE: u64 = 34;
 
-        let chain_id = CHAIN_ID_TESTNET;
+        let chain_id = StacksChainId::TESTNET;
 
         let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
             .map(|kp| kp.public_key().into())

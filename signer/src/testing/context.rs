@@ -24,6 +24,7 @@ use crate::keys::PrivateKey;
 use crate::stacks::api::GetNodeInfoResponse;
 use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::SignerSetInfo;
+use crate::stacks::api::StacksChainId;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
@@ -105,7 +106,7 @@ where
             stacks_client.clone(),
             emily_client.clone(),
             Some(NodeNetwork {
-                stacks_chain_id: stacks_common::consts::CHAIN_ID_TESTNET,
+                stacks_chain_id: StacksChainId::TESTNET,
                 bitcoin_network: bitcoin::Network::Regtest,
             }),
         );

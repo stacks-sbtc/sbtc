@@ -27,6 +27,7 @@ use sbtc::testing::{
     regtest::{BITCOIN_CORE_FALLBACK_FEE, Recipient},
 };
 use secp256k1::Keypair;
+use signer::stacks::api::StacksChainId;
 use signer::{
     bitcoin::{
         BitcoinBlockHashStreamProvider as _, poller::BitcoinChainTipPoller, rpc::BitcoinCoreClient,
@@ -49,7 +50,6 @@ use signer::{
     transaction_signer::{STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop},
     util::{FutureExt as _, Sleep},
 };
-use stacks_common::consts::CHAIN_ID_TESTNET;
 
 use crate::{
     containers::{BitcoinContainerExt as _, StacksContainerExt as _},
@@ -78,7 +78,8 @@ async fn start_signers(
         .collect::<Vec<_>>();
 
     let public_keys: Vec<PublicKey> = keypairs.iter().map(|kp| kp.public_key().into()).collect();
-    let wallet = SignerWallet::new(&public_keys, signatures_required, CHAIN_ID_TESTNET).unwrap();
+    let wallet =
+        SignerWallet::new(&public_keys, signatures_required, StacksChainId::TESTNET).unwrap();
 
     let tx = fund_stx(
         stacks_client,

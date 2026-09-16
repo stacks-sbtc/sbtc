@@ -40,6 +40,7 @@ use signer::network::in_memory2::SignerNetwork;
 use signer::network::in_memory2::SignerNetworkInstance;
 use signer::network::in_memory2::WanNetwork;
 use signer::request_decider::RequestDeciderEventLoop;
+use signer::stacks::api::StacksChainId;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::StacksInteract as _;
 use signer::stacks::wallet::SignerWallet;
@@ -54,7 +55,6 @@ use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::TxSignerEventLoop;
 use signer::util::FutureExt as _;
 use signer::util::Sleep;
-use stacks_common::consts::CHAIN_ID_TESTNET;
 use wsts::net::Message as WstsNetMessage;
 
 use crate::containers::BitcoinContainerExt as _;
@@ -198,7 +198,7 @@ async fn start_signers(
     let wallet = SignerWallet::new(
         &public_keys,
         signer_set.signatures_required,
-        CHAIN_ID_TESTNET,
+        StacksChainId::TESTNET,
     )
     .unwrap();
 
