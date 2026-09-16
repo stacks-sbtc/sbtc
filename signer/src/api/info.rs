@@ -4,6 +4,7 @@ use axum::{Json, extract::State, response::IntoResponse};
 use clarity::types::chainstate::StacksBlockId;
 use serde::Serialize;
 
+use crate::context::NodeNetwork;
 use crate::{
     bitcoin::BitcoinInteract,
     config::Settings,
@@ -149,7 +150,7 @@ pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
 }
 
 impl InfoResponse {
-    fn populate_config_info(&mut self, config: &Settings, network: crate::context::NodeNetwork) {
+    fn populate_config_info(&mut self, config: &Settings, network: NodeNetwork) {
         self.config = Some(ConfigInfo {
             network: network.bitcoin_network.to_string(),
             stacks_chain_id: network.stacks_chain_id,
