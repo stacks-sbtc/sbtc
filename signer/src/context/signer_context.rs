@@ -156,6 +156,11 @@ where
                 };
                 self.config
                     .validate_network(&network)
+                    .inspect_err(|error| {
+                        // A configuration validation failure is fatal.
+                        tracing::error!(%error, ?network, "node network validation failed; shutting down");
+                        self.get_termination_handle().signal_shutdown();
+                    })
                     .map_err(Error::SignerConfig)?;
                 tracing::debug!(?network, "discovered node network identity");
                 Ok(network)
@@ -242,6 +247,7 @@ impl<Storage, Bitcoin, Stacks, Emily> SignerContext<Storage, Bitcoin, Stacks, Em
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
     use std::sync::{
         Arc,
         atomic::{AtomicU8, Ordering},
@@ -322,30 +328,39 @@ mod tests {
         ])
         .await;
 
-        assert!(matches!(context.node_network().await, Err(Error::Dummy)));
+        let termination = context.get_termination_handle();
+
+        assert_matches!(context.node_network().await, Err(Error::Dummy));
         assert!(context.inner.node_network.get().is_none());
+        assert!(!termination.shutdown_signalled());
 
         assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
         assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
+        assert!(!termination.shutdown_signalled());
     }
 
     #[tokio::test]
-    async fn node_network_retries_after_validation_error() {
+    async fn node_network_validation_error_signals_shutdown() {
         // The test config uses a testnet deployer, so mainnet fails validation.
-        let context = context_with_network_responses([
-            Ok(node_info(StacksChainId::MAINNET)),
-            Ok(node_info(StacksChainId::TESTNET)),
-        ])
-        .await;
+        let context = context_with_network_responses([Ok(node_info(StacksChainId::MAINNET))]).await;
+        let other_component = context.clone();
+        let mut termination = other_component.get_termination_handle();
+        assert!(!termination.shutdown_signalled());
 
-        assert!(matches!(
-            context.node_network().await,
-            Err(Error::SignerConfig(_))
-        ));
+        // Handling the error must not prevent other components from shutting down.
+        assert_matches!(context.node_network().await, Err(Error::SignerConfig(_)));
         assert!(context.inner.node_network.get().is_none());
+        assert!(termination.shutdown_signalled());
 
-        assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
-        assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            termination.wait_for_shutdown(),
+        )
+        .await
+        .expect("network validation failure must notify shutdown listeners");
+
+        // Components that subscribe afterward also see the shutdown state.
+        assert!(context.get_termination_handle().shutdown_signalled());
     }
 
     /// This test shows that cloning a context and signalling on the original

@@ -93,7 +93,6 @@ pub struct BitcoinConfig {
     /// When set, this value is used directly as the retry fee rate.
     /// When `None`, the signer estimates a lower fee rate by targeting a longer
     /// confirmation window.
-    /// This is for tests only, it fails validation in mainnet.
     pub fallback_fee: Option<f64>,
 }
 
@@ -1587,7 +1586,7 @@ mod tests {
         if valid {
             result.expect("this network permits no seeds");
         } else {
-            assert_matches!(result, Err(ConfigError::Message(message)) if message == SignerConfigError::P2PSeedPeerRequired.to_string());
+            std::assert_matches!(result, Err(ConfigError::Message(message)) if message == SignerConfigError::P2PSeedPeerRequired.to_string());
         }
     }
 
