@@ -498,7 +498,7 @@ async fn blocklist_client_retry(num_failures: u8, failing_iters: u8) {
     let request = requests.pop().unwrap();
     let outpoint = setup.deposit_request.outpoint;
 
-    let bitcoin_network = ctx.node_network().bitcoin_network;
+    let bitcoin_network = ctx.node_network().await.unwrap().bitcoin_network;
     let sender_address =
         bitcoin::Address::from_script(&request.sender_script_pub_keys[0], bitcoin_network.params())
             .unwrap();
@@ -660,7 +660,7 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
         assert_eq!(deposit_requests.len(), 1);
     }
 
-    let bitcoin_network = ctx.node_network().bitcoin_network;
+    let bitcoin_network = ctx.node_network().await.unwrap().bitcoin_network;
     let address_to_check = if is_withdrawal {
         bitcoin::Address::from_script(
             &withdrawal_requests.first().unwrap().recipient,

@@ -34,8 +34,10 @@ pub trait Context: Clone + Sync + Send {
     fn config(&self) -> &Settings;
     /// Get the current state for the signer.
     fn state(&self) -> &Arc<SignerState>;
-    /// Get the Bitcoin and Stacks network identities.
-    fn node_network(&self) -> NodeNetwork;
+    /// Discover and validate the Bitcoin and Stacks network identities on
+    /// first use. Successful results are cached; failures are returned and
+    /// can be retried.
+    fn node_network(&self) -> impl std::future::Future<Output = Result<NodeNetwork, Error>> + Send;
     /// Subscribe to the application signalling channel, returning a receiver
     /// which can be used to listen for events.
     fn get_signal_receiver(&self) -> tokio::sync::broadcast::Receiver<SignerSignal>;

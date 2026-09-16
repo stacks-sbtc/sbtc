@@ -550,7 +550,7 @@ impl Settings {
     }
 
     /// Validate settings that depend on the network reported by the nodes.
-    /// Called at startup after network discovery and before starting services.
+    /// Called when the node network identity is first discovered.
     pub fn validate_network(&self, network: &NodeNetwork) -> Result<(), ConfigError> {
         if self.signer.deployer.is_mainnet() != network.is_stacks_mainnet() {
             return Err(ConfigError::Message(

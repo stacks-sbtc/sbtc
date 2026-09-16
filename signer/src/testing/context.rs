@@ -104,10 +104,10 @@ where
             bitcoin_client.clone(),
             stacks_client.clone(),
             emily_client.clone(),
-            NodeNetwork {
+            Some(NodeNetwork {
                 stacks_chain_id: stacks_common::consts::CHAIN_ID_TESTNET,
                 bitcoin_network: bitcoin::Network::Regtest,
-            },
+            }),
         );
 
         Self {
@@ -269,8 +269,8 @@ where
         self.inner.config()
     }
 
-    fn node_network(&self) -> NodeNetwork {
-        self.inner.node_network()
+    async fn node_network(&self) -> Result<NodeNetwork, Error> {
+        self.inner.node_network().await
     }
 
     fn state(&self) -> &Arc<SignerState> {

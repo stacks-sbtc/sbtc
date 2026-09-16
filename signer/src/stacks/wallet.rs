@@ -165,7 +165,7 @@ impl SignerWallet {
     where
         C: Context,
     {
-        let chain_id = ctx.node_network().stacks_chain_id;
+        let chain_id = ctx.node_network().await?.stacks_chain_id;
 
         // This should be the signer set info from the key rotation
         // transaction that was most recently confirmed.
@@ -737,15 +737,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn loading_signer_wallet_from_config() {
+    #[tokio::test]
+    async fn loading_signer_wallet_from_config() {
         let ctx = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .build();
 
         // Let's try to load the wallet from our test config.
-        let chain_id = ctx.node_network().stacks_chain_id;
+        let chain_id = ctx.node_network().await.unwrap().stacks_chain_id;
         SignerWallet::load_boostrap_wallet(&ctx.config().signer, chain_id).unwrap();
     }
 
@@ -764,15 +764,15 @@ mod tests {
             base.bitcoin_client,
             base.stacks_client,
             base.emily_client,
-            NodeNetwork {
+            Some(NodeNetwork {
                 stacks_chain_id: chain_id,
                 bitcoin_network: bitcoin::Network::Regtest,
-            },
+            }),
         );
 
         let wallet = SignerWallet::load(&context).await.unwrap();
         let tx = MultisigTx::new_contract_call(TestContractCall::default(), &wallet, TX_FEE);
-        let is_stacks_mainnet = context.node_network().is_stacks_mainnet();
+        let is_stacks_mainnet = context.node_network().await.unwrap().is_stacks_mainnet();
         assert_eq!(tx.tx().chain_id, chain_id);
         assert_eq!(wallet.address().is_mainnet(), is_stacks_mainnet);
 

@@ -134,7 +134,10 @@ pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
 
     let mut response = InfoResponse::default();
 
-    response.populate_config_info(config, ctx.node_network());
+    match ctx.node_network().await {
+        Ok(network) => response.populate_config_info(config, network),
+        Err(error) => tracing::warn!(%error, "could not discover node network identity"),
+    }
     response.populate_local_chain_info(ctx).await;
     response.populate_bitcoin_node_info(&bitcoin_client).await;
     response.populate_stacks_node_info(&stacks_client).await;
@@ -632,7 +635,7 @@ mod tests {
 
         assert_eq!(
             serde_json::to_value(&result).unwrap()["config"]["stacks_chain_id"],
-            context.node_network().stacks_chain_id
+            context.node_network().await.unwrap().stacks_chain_id
         );
 
         let Some(config) = result.config else {
@@ -640,11 +643,9 @@ mod tests {
         };
 
         let settings = context.config().clone().signer;
+        let bitcoin_network = context.node_network().await.unwrap().bitcoin_network;
 
-        assert_eq!(
-            config.network,
-            context.node_network().bitcoin_network.to_string()
-        );
+        assert_eq!(config.network, bitcoin_network.to_string());
         assert_eq!(
             config.bootstrap_signatures_required,
             settings.bootstrap_signatures_required

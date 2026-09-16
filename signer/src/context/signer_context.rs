@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tokio::sync::OnceCell;
 use tokio::sync::broadcast::Sender;
 
 use crate::{
@@ -13,7 +14,7 @@ use crate::{
 
 use super::{Context, SignerSignal, SignerState, TerminationHandle};
 
-/// Network identity reported by the connected nodes at startup.
+/// Network identity reported by the connected nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NodeNetwork {
     /// The Stacks chain ID reported by `/v2/info` as `network_id`.
@@ -34,8 +35,8 @@ impl NodeNetwork {
 #[derive(Debug, Clone)]
 pub struct SignerContext<S, BC, ST, EM> {
     config: Settings,
-    /// The network identity reported by the connected nodes at startup.
-    node_network: NodeNetwork,
+    /// The Bitcoin and Stacks networks identities.
+    node_network: Arc<OnceCell<NodeNetwork>>,
     // Handle to the app signalling channel. This keeps the channel alive
     // for the duration of the program and is used both to send messages
     // and to hand out new receivers.
@@ -87,21 +88,7 @@ where
         let st = ST::try_from(&config)?;
         let em = EM::try_from(&config.emily)?;
 
-        // The configured fallback clients handle retries and endpoint failover.
-        let (bitcoin_info, stacks_info) =
-            tokio::try_join!(bc.get_blockchain_info(), st.get_node_info())?;
-
-        let network = NodeNetwork {
-            stacks_chain_id: stacks_info.network_id,
-            bitcoin_network: bitcoin_info.chain,
-        };
-        config
-            .validate_network(&network)
-            .map_err(Error::SignerConfig)?;
-
-        tracing::debug!(?network, "discovered node network identity");
-
-        Ok(Self::new(config, db, bc, st, em, network))
+        Ok(Self::new(config, db, bc, st, em, None))
     }
 }
 
@@ -112,14 +99,14 @@ where
     ST: StacksInteract + Clone + Sync + Send,
     EM: EmilyInteract + Clone + Sync + Send,
 {
-    /// Create a signer context with supplied clients and a known network identity.
+    /// Create a signer context.
     pub fn new(
         config: Settings,
         db: S,
         bitcoin_client: BC,
         stacks_client: ST,
         emily_client: EM,
-        node_network: NodeNetwork,
+        node_network: Option<NodeNetwork>,
     ) -> Self {
         // TODO: Decide on the channel capacity and how we should handle slow consumers.
         // NOTE: Ideally consumers which require processing time should pull the relevent
@@ -133,7 +120,7 @@ where
 
         Self {
             config,
-            node_network,
+            node_network: Arc::new(OnceCell::new_with(node_network)),
             state: Arc::new(state),
             signal_tx,
             term_tx,
@@ -156,8 +143,25 @@ where
         &self.config
     }
 
-    fn node_network(&self) -> NodeNetwork {
+    async fn node_network(&self) -> Result<NodeNetwork, Error> {
         self.node_network
+            .get_or_try_init(|| async {
+                let (bitcoin_info, stacks_info) = tokio::try_join!(
+                    self.bitcoin_client.get_blockchain_info(),
+                    self.stacks_client.get_node_info()
+                )?;
+                let network = NodeNetwork {
+                    stacks_chain_id: stacks_info.network_id,
+                    bitcoin_network: bitcoin_info.chain,
+                };
+                self.config
+                    .validate_network(&network)
+                    .map_err(Error::SignerConfig)?;
+                tracing::debug!(?network, "discovered node network identity");
+                Ok(network)
+            })
+            .await
+            .copied()
     }
 
     fn state(&self) -> &Arc<SignerState> {
@@ -243,13 +247,105 @@ mod tests {
         atomic::{AtomicU8, Ordering},
     };
 
+    use stacks_common::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
     use tokio::sync::Notify;
 
-    use crate::storage::model::BitcoinBlockRef;
+    use super::NodeNetwork;
     use crate::{
         context::{Context as _, SignerEvent, SignerSignal},
+        error::Error,
+        stacks::api::GetNodeInfoResponse,
+        storage::{memory::SharedStore, model::BitcoinBlockRef},
         testing::context::*,
     };
+
+    type MockContext = TestContext<
+        SharedStore,
+        WrappedMockBitcoinInteract,
+        WrappedMockStacksInteract,
+        WrappedMockEmilyInteract,
+    >;
+
+    const EXPECTED_NETWORK: NodeNetwork = NodeNetwork {
+        stacks_chain_id: CHAIN_ID_TESTNET,
+        bitcoin_network: bitcoin::Network::Regtest,
+    };
+
+    fn node_info(chain_id: u32) -> GetNodeInfoResponse {
+        let mut info: GetNodeInfoResponse = serde_json::from_str(include_str!(
+            "../../tests/fixtures/stacksapi-get-node-info-test-data.json"
+        ))
+        .unwrap();
+        info.network_id = chain_id;
+        info
+    }
+
+    /// Start with an empty cache and return the supplied Stacks responses in order.
+    /// Bitcoin always reports regtest. Each response allows one discovery attempt.
+    async fn context_with_network_responses<const N: usize>(
+        responses: [Result<GetNodeInfoResponse, Error>; N],
+    ) -> MockContext {
+        let mut context = TestContext::default_mocked();
+        // TestContext normally seeds a known network, bypassing discovery.
+        context.inner.node_network = Arc::new(tokio::sync::OnceCell::new());
+        context
+            .with_bitcoin_client(|client| {
+                client.expect_get_blockchain_info().times(N).returning(|| {
+                    Box::pin(async {
+                        // Allow concurrent callers to reach the uninitialized cache.
+                        tokio::task::yield_now().await;
+                        Ok(serde_json::from_str(include_str!(
+                            "../../tests/fixtures/bitcoind-getblockchaininfo-data.json"
+                        ))
+                        .unwrap())
+                    })
+                });
+            })
+            .await;
+        context
+            .with_stacks_client(|client| {
+                for response in responses {
+                    client
+                        .expect_get_node_info()
+                        .once()
+                        .return_once(move || Box::pin(async move { response }));
+                }
+            })
+            .await;
+        context
+    }
+
+    #[tokio::test]
+    async fn node_network_retries_after_rpc_error() {
+        let context =
+            context_with_network_responses([Err(Error::Dummy), Ok(node_info(CHAIN_ID_TESTNET))])
+                .await;
+
+        assert!(matches!(context.node_network().await, Err(Error::Dummy)));
+        assert!(context.inner.node_network.get().is_none());
+
+        assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
+        assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
+    }
+
+    #[tokio::test]
+    async fn node_network_retries_after_validation_error() {
+        // The test config uses a testnet deployer, so mainnet fails validation.
+        let context = context_with_network_responses([
+            Ok(node_info(CHAIN_ID_MAINNET)),
+            Ok(node_info(CHAIN_ID_TESTNET)),
+        ])
+        .await;
+
+        assert!(matches!(
+            context.node_network().await,
+            Err(Error::SignerConfig(_))
+        ));
+        assert!(context.inner.node_network.get().is_none());
+
+        assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
+        assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
+    }
 
     /// This test shows that cloning a context and signalling on the original
     /// context will also signal on the cloned context. But it also demonstrates
