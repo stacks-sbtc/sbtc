@@ -6,6 +6,7 @@ mod signer_state;
 mod termination;
 
 use std::collections::BTreeSet;
+use std::future::Future;
 use std::sync::Arc;
 
 use tokio::sync::broadcast::error::RecvError;
@@ -34,10 +35,8 @@ pub trait Context: Clone + Sync + Send {
     fn config(&self) -> &Settings;
     /// Get the current state for the signer.
     fn state(&self) -> &Arc<SignerState>;
-    /// Discover and validate the Bitcoin and Stacks network identities on
-    /// first use. Successful results are cached; failures are returned and
-    /// can be retried.
-    fn node_network(&self) -> impl std::future::Future<Output = Result<NodeNetwork, Error>> + Send;
+    /// Return the Bitcoin and Stacks network identities.
+    fn node_network(&self) -> impl Future<Output = Result<NodeNetwork, Error>> + Send;
     /// Subscribe to the application signalling channel, returning a receiver
     /// which can be used to listen for events.
     fn get_signal_receiver(&self) -> tokio::sync::broadcast::Receiver<SignerSignal>;
