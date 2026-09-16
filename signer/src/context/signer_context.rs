@@ -248,19 +248,15 @@ impl<Storage, Bitcoin, Stacks, Emily> SignerContext<Storage, Bitcoin, Stacks, Em
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use std::assert_matches;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicU8, Ordering},
-    };
+    use std::sync::atomic::{AtomicU8, Ordering};
 
     use tokio::sync::Notify;
 
-    use super::NodeNetwork;
     use crate::{
-        context::{Context as _, SignerEvent, SignerSignal},
-        error::Error,
-        stacks::api::{GetNodeInfoResponse, StacksChainId},
+        context::SignerEvent,
+        stacks::api::GetNodeInfoResponse,
         storage::{memory::SharedStore, model::BitcoinBlockRef},
         testing::context::*,
     };
