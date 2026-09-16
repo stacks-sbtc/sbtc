@@ -84,12 +84,10 @@ pub trait Context: Clone + Sync + Send {
                 tokio::select! {
                     _ = watch_receiver.wait_for_shutdown() => {
                         let signal = SignerSignal::Command(SignerCommand::Shutdown);
-                        // An error means that the channel has been closed.
-                        // This is most likely due to the receiver being
-                        // closed so we can bail.
-                        if sender.send(signal).await.is_err() {
-                            break;
-                        }
+                        // Once we see a shutdown signal, we can forward it
+                        // a long and then stop.
+                        let _ = sender.send(signal).await;
+                        break;
                     }
                     item = signal_stream.recv() => {
                         match item {
