@@ -162,6 +162,7 @@ where
                         self.get_termination_handle().signal_shutdown();
                     })
                     .map_err(Error::SignerConfig)?;
+
                 tracing::debug!(?network, "discovered node network identity");
                 Ok(network)
             })
@@ -359,8 +360,15 @@ mod tests {
         .await
         .expect("network validation failure must notify shutdown listeners");
 
-        // Components that subscribe afterward also see the shutdown state.
-        assert!(context.get_termination_handle().shutdown_signalled());
+        // Components still starting when validation failed must also stop.
+        let mut late_subscriber = context.get_termination_handle();
+        assert!(late_subscriber.shutdown_signalled());
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            late_subscriber.wait_for_shutdown(),
+        )
+        .await
+        .expect("listeners created after shutdown must not wait for another signal");
     }
 
     /// This test shows that cloning a context and signalling on the original
