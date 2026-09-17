@@ -43,17 +43,12 @@ impl TerminationHandle {
             }
         });
     }
-    /// Blocks until a shutdown signal is received.
+    /// Wait until shutdown is signalled, returning immediately if it
+    /// already has been.
     pub async fn wait_for_shutdown(&mut self) {
-        loop {
-            // Wait for the termination channel to be updated. If it's updated
-            // and the value is true, we break out of the loop.
-            // We ignore the result here because it's impossible for the sender
-            // to be dropped while this instance is alive (it holds its own sender).
-            let _ = self.1.changed().await;
-            if *self.1.borrow_and_update() {
-                break;
-            }
-        }
+        // Check the current value as well as future changes so late
+        // subscribers cannot miss shutdown. The channel cannot close while
+        // we hold a sender.
+        let _ = self.1.wait_for(|shutdown| *shutdown).await;
     }
 }

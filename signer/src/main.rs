@@ -128,8 +128,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ApiFallbackClient<StacksClient>,
         ApiFallbackClient<EmilyClient>,
     >::init(settings, db)
-    .inspect_err(|err| {
-        tracing::error!(%err, "failed to initialize the signer context");
+    .await
+    .inspect_err(|error| {
+        tracing::error!(%error, "failed to initialize the signer context");
     })?;
 
     // TODO: We should first check "another source of truth" for the current
