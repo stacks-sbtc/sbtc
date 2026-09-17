@@ -852,7 +852,7 @@ pub mod test {
             test::{
                 bad_signature_share_request, check_signature_shares, coordinator_state_machine,
                 empty_private_shares, empty_public_shares, invalid_nonce, new_coordinator,
-                run_dkg_sign, start_dkg_round,
+                run_dkg_sign, signature_share_uses_configured_key_ids, start_dkg_round,
             },
             Config, Coordinator as CoordinatorTrait, State,
         },
@@ -918,6 +918,11 @@ pub mod test {
     #[test]
     fn bad_signature_share_request_v2() {
         bad_signature_share_request::<FrostCoordinator>(5, 2);
+    }
+
+    #[test]
+    fn signature_share_uses_configured_key_ids_v2() {
+        signature_share_uses_configured_key_ids::<FrostCoordinator>(5, 2);
     }
 
     #[test]
