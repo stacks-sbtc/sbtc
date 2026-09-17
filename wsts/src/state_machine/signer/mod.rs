@@ -598,11 +598,11 @@ impl Signer {
         debug!(signer_id = %self.signer_id, "received a valid SignatureShareRequest");
 
         if signer_id_set.contains(&self.signer_id) {
-            let key_ids: Vec<u32> = sign_request
-                .nonce_responses
+            let key_ids: Vec<u32> = signer_id_set
                 .iter()
-                .flat_map(|nr| nr.key_ids.iter().copied())
-                .collect::<Vec<u32>>();
+                .filter_map(|signer_id| self.public_keys.signer_key_ids.get(&signer_id).cloned())
+                .flatten()
+                .collect();
 
             let signer_ids = signer_id_set.into_iter().collect::<Vec<_>>();
             let msg = &sign_request.message;
