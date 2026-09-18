@@ -600,7 +600,7 @@ impl Signer {
         if signer_id_set.contains(&self.signer_id) {
             let key_ids: Vec<u32> = signer_id_set
                 .iter()
-                .filter_map(|signer_id| self.public_keys.signer_key_ids.get(&signer_id).cloned())
+                .filter_map(|signer_id| self.public_keys.signer_key_ids.get(signer_id).cloned())
                 .flatten()
                 .collect();
 

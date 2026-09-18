@@ -1020,7 +1020,7 @@ pub mod test {
         }
 
         // We want to check that the calling process with faulty/bogus key
-        // IDs always produces the same signature share, wince the
+        // IDs always produces the same signature share, since the
         // assumption being that the supplied key IDs are ignored.
         let mut second_signer = signers[0].clone();
         let valid_response = signers[0].process(&valid_request, &mut rng).unwrap();
