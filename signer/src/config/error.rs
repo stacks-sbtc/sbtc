@@ -17,9 +17,9 @@ pub enum SignerConfigError {
     #[error("Invalid P2P URI: Failed to parse: {0}")]
     InvalidP2PUri(#[from] url::ParseError),
 
-    /// The NetworkKind set in the config must match the network kind of
-    /// the deployer address.
-    #[error("The network set in the config must match the network kind of the deployer address")]
+    /// The discovered Stacks network must match the network kind of the
+    /// deployer address.
+    #[error("The connected Stacks network must match the network kind of the deployer address")]
     NetworkDeployerMismatch,
 
     /// Invalid P2P URI
@@ -50,11 +50,10 @@ pub enum SignerConfigError {
     #[error("Invalid P2P URI: Host is required")]
     P2PHostRequired,
 
-    /// When the network kind is 'mainnet' or 'testnet', at least one P2P seed peer is required.
-    /// Otherwise, we'll allow mDNS to discover any local peers (for testing).
-    #[error(
-        "At least one P2P seed peer is required when the network kind is 'mainnet' or 'testnet'."
-    )]
+    /// On Bitcoin mainnet, at least one P2P seed peer is required.
+    /// Otherwise, we'll allow mDNS to discover any local peers (for
+    /// testing).
+    #[error("At least one P2P seed peer is required on Bitcoin mainnet.")]
     P2PSeedPeerRequired,
 
     /// A public endpoint uses a protocol which is not enabled in the listen_on
