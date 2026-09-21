@@ -1089,7 +1089,7 @@ pub mod test {
                     bad_signature_share_request, check_signature_shares, coordinator_state_machine,
                     empty_private_shares, empty_public_shares, feedback_messages,
                     feedback_mutated_messages, gen_nonces, invalid_nonce, new_coordinator,
-                    run_dkg_sign, setup, start_dkg_round,
+                    run_dkg_sign, setup, signature_share_uses_configured_key_ids, start_dkg_round,
                 },
                 Config, Coordinator as CoordinatorTrait, State,
             },
@@ -1855,6 +1855,11 @@ pub mod test {
     #[test]
     fn bad_signature_share_request_v2() {
         bad_signature_share_request::<FireCoordinator>(5, 2);
+    }
+
+    #[test]
+    fn signature_share_uses_configured_key_ids_v2() {
+        signature_share_uses_configured_key_ids::<FireCoordinator>(5, 2);
     }
 
     #[test]
