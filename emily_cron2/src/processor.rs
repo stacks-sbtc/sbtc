@@ -112,7 +112,9 @@ impl Processor {
     /// Fetch deposits, decide status updates, then submit or dry-run log them.
     pub async fn run(&self) -> Result<(), Error> {
         let tip_height = self.fetch_bitcoin_tip_height().await?;
-        let deposits = self.fetch_deposits(DepositStatus::Pending).await?;
+        let mut deposits = self.fetch_deposits(DepositStatus::Pending).await?;
+        deposits.extend(self.fetch_deposits(DepositStatus::Accepted).await?);
+
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
         let mut state = CycleState::new();
