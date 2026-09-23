@@ -270,6 +270,8 @@ impl Processor {
             return Ok(None);
         }
 
+        // Electrs `/tx/{txid}/outspend/{vout}` returns HTTP 200 `{"spent":false}`
+        // for an unspent output, a missing txid, and an out-of-range vout.
         let outspend: Outspend = self
             .get_json(
                 &self.config.electrs_api_url,
@@ -456,6 +458,9 @@ impl Processor {
     }
 
     /// Fetch a mempool transaction, treating only HTTP 404 as "missing".
+    ///
+    /// A missing txid is HTTP 404 from the mempool API (`/v1/tx/{txid}`) and
+    /// from Electrs (`/tx/{txid}`).
     async fn fetch_transaction(&self, txid: &str) -> Result<Option<Transaction>, Error> {
         let path = format!("{}/{txid}", self.mempool_tx_path_prefix()?);
         let response = self
@@ -473,7 +478,7 @@ impl Processor {
 
     /// Return a cached transaction, or fetch and store it when found.
     ///
-    /// `Ok(None)` means the the transaction is missing from the cache and
+    /// `Ok(None)` means the transaction is missing from the cache and
     /// the mempool API returned HTTP 404.
     async fn cached_transaction<'a>(
         &self,

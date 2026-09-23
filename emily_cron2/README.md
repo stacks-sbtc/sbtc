@@ -35,7 +35,7 @@ Each setting except `RUST_LOG` also has a corresponding CLI option; see `--help`
 
 ## Behavior and intentional fixes
 
-This service will only change the status of a deposit if RBF is such that the current bitcoin chain tip height is greater than `replacement_height + MIN_BLOCK_CONFIRMATIONS`. Only missing pending transactions older than `MAX_UNCONFIRMED_TIME` are marked as failed.
+This service will only change the status of a deposit if RBF is such that the current bitcoin chain tip height is at least `replacement_height + MIN_BLOCK_CONFIRMATIONS`. Only missing pending transactions older than `MAX_UNCONFIRMED_TIME` are marked as failed.
 
 The service remains a periodic reconciliation job: it does not make upstream reads
 atomic or prevent concurrent updates by other services. `--dry-run` makes all the

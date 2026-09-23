@@ -1,4 +1,4 @@
-FROM rust:1.94.1-slim-trixie AS builder
+FROM rust:1.98.1-slim-trixie AS builder
 WORKDIR /code/sbtc
 COPY . .
 RUN cargo build --locked -p emily-cron2
