@@ -23,6 +23,7 @@ use sbtc::deposits::ReclaimScriptInputs;
 
 use crate::config::Config;
 use crate::error::Error;
+use crate::model::BitcoinBlockHeight;
 use crate::model::Block;
 use crate::model::Outspend;
 use crate::model::Rbf;
@@ -152,7 +153,7 @@ impl Processor {
         }
 
         tracing::info!(
-            tip_height,
+            %tip_height,
             updates = updates.len(),
             dry_run = self.config.dry_run,
             "Deposit reconciliation completed"
@@ -215,7 +216,7 @@ impl Processor {
     async fn reconcile(
         &self,
         deposit: &DepositInfo,
-        tip_height: u64,
+        tip_height: BitcoinBlockHeight,
         now: u64,
         state: &mut CycleState,
     ) -> Result<Option<DepositUpdate>, Error> {
@@ -252,8 +253,8 @@ impl Processor {
     async fn expiry_or_reclaim_update(
         &self,
         deposit: &DepositInfo,
-        confirmed_height: u64,
-        tip_height: u64,
+        confirmed_height: BitcoinBlockHeight,
+        tip_height: BitcoinBlockHeight,
     ) -> Result<Option<DepositUpdate>, Error> {
         let script = ScriptBuf::from_hex(&deposit.reclaim_script)?;
         let reclaim = ReclaimScriptInputs::parse(&script)?;
@@ -314,7 +315,7 @@ impl Processor {
     async fn rbf_update(
         &self,
         deposit: &DepositInfo,
-        tip_height: u64,
+        tip_height: BitcoinBlockHeight,
         state: &mut CycleState,
     ) -> Result<Option<DepositUpdate>, Error> {
         let rbf: Rbf = self
@@ -448,7 +449,7 @@ impl Processor {
     // HTTP helpers
     // -----------------------------------------------------------------------
 
-    async fn fetch_bitcoin_tip_height(&self) -> Result<u64, Error> {
+    async fn fetch_bitcoin_tip_height(&self) -> Result<BitcoinBlockHeight, Error> {
         self.get_json(&self.config.mempool_api_url, "/v1/blocks/tip/height")
             .await
     }

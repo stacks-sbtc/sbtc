@@ -2,6 +2,35 @@
 
 use serde::Deserialize;
 
+/// Height of a Bitcoin block.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(transparent)]
+pub struct BitcoinBlockHeight(u64);
+
+impl BitcoinBlockHeight {
+    /// Wrap a raw Bitcoin block height.
+    pub const fn new(height: u64) -> Self {
+        Self(height)
+    }
+
+    /// Add `rhs` blocks, returning `None` on overflow.
+    pub fn checked_add(self, rhs: u64) -> Option<Self> {
+        self.0.checked_add(rhs).map(Self)
+    }
+}
+
+impl From<u64> for BitcoinBlockHeight {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for BitcoinBlockHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Bitcoin transaction details returned by the mempool API.
 #[derive(Clone, Deserialize)]
 pub struct Transaction {
@@ -18,12 +47,12 @@ pub struct TransactionStatus {
     /// Whether the transaction is included in a Bitcoin block.
     pub confirmed: bool,
     /// Height of the confirming block, when known.
-    pub block_height: Option<u64>,
+    pub block_height: Option<BitcoinBlockHeight>,
 }
 
 impl Transaction {
     /// Return the confirming block height, or `None` if still unconfirmed.
-    pub fn confirmed_height(&self) -> Option<u64> {
+    pub fn confirmed_height(&self) -> Option<BitcoinBlockHeight> {
         if self.status.confirmed {
             self.status.block_height
         } else {
@@ -108,7 +137,12 @@ pub struct Block {
 /// True when `tip` has reached `height + lock_time + confirmations`.
 ///
 /// Returns `false` if the height arithmetic would overflow.
-pub fn is_past_expiry(height: u64, lock_time: u32, confirmations: u64, tip: u64) -> bool {
+pub fn is_past_expiry(
+    height: BitcoinBlockHeight,
+    lock_time: u32,
+    confirmations: u64,
+    tip: BitcoinBlockHeight,
+) -> bool {
     let Some(reclaim_height) = height.checked_add(u64::from(lock_time)) else {
         return false;
     };
@@ -124,8 +158,8 @@ mod tests {
 
     #[test]
     fn locktime_and_expiry_boundaries() {
-        assert!(!is_past_expiry(100, 96, 6, 201));
-        assert!(is_past_expiry(100, 96, 6, 202));
-        assert!(!is_past_expiry(u64::MAX, 1, 6, u64::MAX));
+        assert!(!is_past_expiry(100.into(), 96, 6, 201.into()));
+        assert!(is_past_expiry(100.into(), 96, 6, 202.into()));
+        assert!(!is_past_expiry(u64::MAX.into(), 1, 6, u64::MAX.into()));
     }
 }
