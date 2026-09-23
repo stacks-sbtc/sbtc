@@ -979,6 +979,70 @@ pub mod test {
         }
     }
 
+    /// A regression test that the signature shares use the key IDs from
+    /// the signer's configuration.
+    pub fn signature_share_uses_configured_key_ids<C>(num_signers: u32, keys_per_signer: u32)
+    where
+        C: CoordinatorTrait,
+    {
+        let mut rng = OsRng;
+        let (mut coordinators, mut signers) = run_dkg::<C>(num_signers, keys_per_signer);
+        let msg = b"configured key IDs";
+
+        let nonce_request = coordinators
+            .first_mut()
+            .unwrap()
+            .start_signing_round(msg, SignatureType::Taproot)
+            .unwrap();
+
+        let (signature_requests, operation_results) =
+            feedback_messages(&mut coordinators, &mut signers, &[nonce_request]);
+
+        assert!(operation_results.is_empty());
+        assert_eq!(signature_requests.len(), 1);
+
+        let valid_request = signature_requests[0].clone();
+        let Message::SignatureShareRequest(request) = &valid_request else {
+            panic!("expected SignatureShareRequest");
+        };
+        assert!(request
+            .nonce_responses
+            .iter()
+            .all(|response| !response.key_ids.is_empty()));
+
+        let mut request_with_different_key_ids = valid_request.clone();
+        let Message::SignatureShareRequest(request) = &mut request_with_different_key_ids else {
+            panic!("expected SignatureShareRequest");
+        };
+
+        for response in &mut request.nonce_responses {
+            response.key_ids = vec![1, num_signers - 1, num_signers, u32::MAX, u32::MAX];
+        }
+
+        // We want to check that the calling process with faulty/bogus key
+        // IDs always produces the same signature share, since the
+        // assumption being that the supplied key IDs are ignored.
+        let mut second_signer = signers[0].clone();
+        let valid_response = signers[0].process(&valid_request, &mut rng).unwrap();
+        let response_with_different_key_ids = second_signer
+            .process(&request_with_different_key_ids, &mut rng)
+            .unwrap();
+
+        let Message::SignatureShareResponse(valid_response) = &valid_response[0] else {
+            panic!("expected SignatureShareResponse");
+        };
+        let Message::SignatureShareResponse(response_with_different_key_ids) =
+            &response_with_different_key_ids[0]
+        else {
+            panic!("expected SignatureShareResponse");
+        };
+
+        assert_eq!(
+            valid_response.signature_shares[0].z_i,
+            response_with_different_key_ids.signature_shares[0].z_i,
+        );
+    }
+
     pub fn invalid_nonce<Coordinator: CoordinatorTrait>(num_signers: u32, keys_per_signer: u32) {
         let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
 
