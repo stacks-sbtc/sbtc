@@ -20,8 +20,13 @@ tracing = { workspace = true, features = ["attributes"] }
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
+bitcoincore-rpc.workspace = true
 mockito.workspace = true
+sbtc = { workspace = true, features = ["testing"] }
 test-case.workspace = true
+testing-emily-client.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 
 [lints]
 workspace = true

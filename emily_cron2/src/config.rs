@@ -1,6 +1,7 @@
 //! Runtime configuration from CLI flags and environment variables.
 
 use clap::Parser;
+use reqwest::header::HeaderMap;
 
 use crate::logging::LogOutputFormat;
 
@@ -64,4 +65,8 @@ pub struct Config {
     /// Delay in seconds after each completed cycle before the next begins.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 600, value_parser = clap::value_parser!(u64).range(1..))]
     pub poll_interval_seconds: u64,
+
+    /// Extra Emily request headers. Tests use this to isolate DynamoDB tables.
+    #[arg(skip)]
+    pub emily_extra_headers: HeaderMap,
 }

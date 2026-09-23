@@ -1827,7 +1827,9 @@ dependencies = [
 name = "emily-cron2"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "bitcoin",
+ "bitcoincore-rpc",
  "cfg-if 1.0.0",
  "clap",
  "mockito",
@@ -1837,6 +1839,7 @@ dependencies = [
  "serde",
  "serde_json",
  "test-case",
+ "testing-emily-client",
  "thiserror 2.0.11",
  "tokio",
  "tracing",

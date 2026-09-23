@@ -83,6 +83,7 @@ impl Processor {
         api_key.set_sensitive(true);
         let mut headers = HeaderMap::new();
         headers.insert("x-api-key", api_key);
+        headers.extend(config.emily_extra_headers.clone());
         let emily_client = Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .default_headers(headers)
