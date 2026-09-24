@@ -1,6 +1,6 @@
 # Emily cron2
 
-Rust deposit reconciliation service, independent of the Python `emily_cron`. It reads pending deposits from the private Emily endpoint and updates `/deposit_private` for expired unspent deposits, depositor reclaims, confirmed RBF replacements, and old pending transactions that are not currently in the mempool.
+Rust deposit reconciliation service, independent of the Python `emily_cron`. It reads pending  and accepted deposits from the private Emily endpoint and updates `/deposit_private` for expired unspent deposits, depositor reclaims, confirmed RBF replacements, and old pending transactions that are not currently in the mempool.
 
 ```sh
 # Preview a single cycle using the endpoint environment variables below.
