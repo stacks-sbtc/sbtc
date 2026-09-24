@@ -601,6 +601,17 @@ mod tests {
         })
     }
 
+    async fn empty_accepted_deposits(server: &mut Server) -> mockito::Mock {
+        server
+            .mock("GET", "/deposit")
+            .with_header("content-type", "application/json")
+            .match_query(Matcher::UrlEncoded("status".into(), "accepted".into()))
+            .match_header("x-api-key", "test-key")
+            .with_body(r#"{"deposits":[],"nextToken":null}"#)
+            .create_async()
+            .await
+    }
+
     async fn setup(server: &mut Server, status: &str, tip: u64) -> Vec<mockito::Mock> {
         vec![
             server
@@ -623,6 +634,7 @@ mod tests {
                 )
                 .create_async()
                 .await,
+            empty_accepted_deposits(server).await,
         ]
     }
 
@@ -879,6 +891,7 @@ mod tests {
             .with_body(json!({"deposits":[deposit("pending")]}).to_string())
             .create_async()
             .await;
+        empty_accepted_deposits(&mut server).await;
         let deposit_tx_path = mempool_tx_path(DEPOSIT_TXID);
         let outspend_path = electrs_outspend_path(DEPOSIT_TXID, 2);
         server
@@ -973,6 +986,7 @@ mod tests {
             .with_body(json!({"deposits": deposits}).to_string())
             .create_async()
             .await;
+        let accepted = empty_accepted_deposits(server).await;
         let deposit_tx_path = mempool_tx_path(DEPOSIT_TXID);
         let transaction = server
             .mock("GET", deposit_tx_path.as_str())
@@ -988,7 +1002,7 @@ mod tests {
             .expect(count as usize)
             .create_async()
             .await;
-        vec![tip, pending, transaction, outspends]
+        vec![tip, pending, accepted, transaction, outspends]
     }
 
     /// Match the complete set of updates in one request, including output ordering.
