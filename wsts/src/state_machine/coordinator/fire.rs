@@ -417,7 +417,13 @@ impl Coordinator {
                             // bad_shares is a set of signer_ids
                             for bad_signer_id in bad_shares {
                                 // verify public shares are bad
-                                let dkg_public_shares = &self.dkg_public_shares[bad_signer_id];
+                                let Some(dkg_public_shares) =
+                                    self.dkg_public_shares.get(bad_signer_id)
+                                else {
+                                    warn!("Signer {} reported BadPublicShares from {} but we have no public shares from {}, mark {} as malicious", signer_id, bad_signer_id, bad_signer_id, signer_id);
+                                    self.malicious_dkg_signer_ids.insert(*signer_id);
+                                    continue;
+                                };
                                 let mut bad_party_ids = Vec::new();
                                 for (party_id, comm) in &dkg_public_shares.comms {
                                     if !check_public_shares(comm, threshold) {
@@ -441,12 +447,29 @@ impl Coordinator {
                         DkgFailure::BadPrivateShares(bad_shares) => {
                             // bad_shares is a map of signer_id to BadPrivateShare
                             for (bad_signer_id, bad_private_share) in bad_shares {
-                                // verify the DH tuple proof first so we know the shared key is correct
-                                let signer_public_key = &self.config.signer_public_keys[signer_id];
-                                let bad_signer_public_key =
-                                    &self.config.signer_public_keys[bad_signer_id];
+                                // the accused signer must be a known signer that sent us both
+                                // public and private shares, otherwise the claim cannot be checked
+                                let (
+                                    Some(signer_public_key),
+                                    Some(bad_signer_public_key),
+                                    Some(dkg_public_shares),
+                                    Some(dkg_private_shares),
+                                    Some(signer_key_ids),
+                                ) = (
+                                    self.config.signer_public_keys.get(signer_id),
+                                    self.config.signer_public_keys.get(bad_signer_id),
+                                    self.dkg_public_shares.get(bad_signer_id),
+                                    self.dkg_private_shares.get(bad_signer_id),
+                                    self.config.signer_key_ids.get(signer_id),
+                                )
+                                else {
+                                    warn!("Signer {} reported BadPrivateShare from {} but we have no config or shares for {}, mark {} as malicious", signer_id, bad_signer_id, bad_signer_id, signer_id);
+                                    self.malicious_dkg_signer_ids.insert(*signer_id);
+                                    continue;
+                                };
                                 let mut is_bad = false;
 
+                                // verify the DH tuple proof first so we know the shared key is correct
                                 if bad_private_share.tuple_proof.verify(
                                     signer_public_key,
                                     bad_signer_public_key,
@@ -456,19 +479,22 @@ impl Coordinator {
                                     let shared_secret =
                                         make_shared_secret_from_key(&bad_private_share.shared_key);
 
-                                    let dkg_public_shares = &self.dkg_public_shares[bad_signer_id]
+                                    let dkg_public_shares = dkg_public_shares
                                         .comms
                                         .iter()
                                         .cloned()
                                         .collect::<HashMap<u32, PolyCommitment>>();
-                                    let dkg_private_shares =
-                                        &self.dkg_private_shares[bad_signer_id];
-                                    let signer_key_ids = &self.config.signer_key_ids[signer_id];
 
                                     for (src_party_id, key_shares) in &dkg_private_shares.shares {
-                                        let poly = &dkg_public_shares[src_party_id];
+                                        // a missing entry is nothing to verify, so it cannot
+                                        // substantiate a BadPrivateShares claim
+                                        let Some(poly) = dkg_public_shares.get(src_party_id) else {
+                                            continue;
+                                        };
                                         for key_id in signer_key_ids {
-                                            let bytes = &key_shares[key_id];
+                                            let Some(bytes) = key_shares.get(key_id) else {
+                                                continue;
+                                            };
                                             match decrypt(&shared_secret, bytes) {
                                                 Ok(plain) => match Scalar::try_from(&plain[..]) {
                                                     Ok(private_eval) => {
@@ -1076,11 +1102,11 @@ impl CoordinatorTrait for Coordinator {
 /// Test module for coordinator functionality
 pub mod test {
     use crate::{
-        common::PolyCommitment,
+        common::{PolyCommitment, TupleProof},
         curve::{point::Point, scalar::Scalar},
         net::{
-            DkgBegin, DkgFailure, DkgPrivateShares, DkgPublicShares, Message, NonceRequest,
-            SignatureType,
+            BadPrivateShare, DkgBegin, DkgEnd, DkgFailure, DkgPrivateShares, DkgPublicShares,
+            DkgStatus, Message, NonceRequest, SignatureType,
         },
         state_machine::{
             coordinator::{
@@ -1099,7 +1125,7 @@ pub mod test {
         util::create_rng,
         v2,
     };
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn new_coordinator_v2() {
@@ -2040,5 +2066,84 @@ pub mod test {
     #[test]
     fn empty_private_shares_v2() {
         empty_private_shares::<FireCoordinator>(5, 2);
+    }
+
+    /// Run a DKG round where signer 0 replaces its `DkgEnd` status with
+    /// `status`, and return the coordinators and operation results.
+    fn dkg_with_mutated_dkg_end(
+        num_signers: u32,
+        keys_per_signer: u32,
+        status: DkgStatus,
+    ) -> (Vec<FireCoordinator>, Vec<OperationResult>) {
+        let (mut coordinators, mut signers) =
+            setup::<FireCoordinator>(num_signers, keys_per_signer);
+
+        let message = coordinators.first_mut().unwrap().start_dkg_round().unwrap();
+        let (outbound_messages, operation_results) =
+            feedback_messages(&mut coordinators, &mut signers, &[message]);
+        assert!(operation_results.is_empty());
+        let (outbound_messages, operation_results) =
+            feedback_messages(&mut coordinators, &mut signers, &outbound_messages);
+        assert!(operation_results.is_empty());
+        assert!(matches!(outbound_messages[..], [Message::DkgEndBegin(_)]));
+
+        let (outbound_messages, operation_results) = feedback_mutated_messages(
+            &mut coordinators,
+            &mut signers,
+            &outbound_messages,
+            |signer, msgs| {
+                if signer.signer_id != 0 {
+                    return msgs;
+                }
+                msgs.into_iter()
+                    .map(|message| match message {
+                        Message::DkgEnd(dkg_end) => Message::DkgEnd(DkgEnd {
+                            status: status.clone(),
+                            ..dkg_end
+                        }),
+                        other => other,
+                    })
+                    .collect()
+            },
+        );
+        assert!(outbound_messages.is_empty());
+        (coordinators, operation_results)
+    }
+
+    /// A signer that reports `BadPublicShares` against a signer ID that the
+    /// coordinator has no public shares for must not panic the coordinator;
+    /// the reporter is marked malicious instead.
+    #[test]
+    fn dkg_end_bad_public_shares_unknown_signer_id() {
+        let status = DkgStatus::Failure(DkgFailure::BadPublicShares(HashSet::from([u32::MAX])));
+        let (coordinators, operation_results) = dkg_with_mutated_dkg_end(5, 2, status);
+
+        assert!(matches!(operation_results[..], [OperationResult::Dkg(_)]));
+        for coordinator in &coordinators {
+            assert_eq!(coordinator.malicious_dkg_signer_ids, HashSet::from([0]));
+        }
+    }
+
+    /// A signer that reports `BadPrivateShares` against a signer ID that is
+    /// not in the config must not panic the coordinator; the reporter is
+    /// marked malicious instead.
+    #[test]
+    fn dkg_end_bad_private_shares_unknown_signer_id() {
+        let bad_private_share = BadPrivateShare {
+            shared_key: Point::default(),
+            tuple_proof: TupleProof {
+                R: Point::default(),
+                rB: Point::default(),
+                z: Scalar::default(),
+            },
+        };
+        let bad_shares = HashMap::from([(u32::MAX, bad_private_share)]);
+        let status = DkgStatus::Failure(DkgFailure::BadPrivateShares(bad_shares));
+        let (coordinators, operation_results) = dkg_with_mutated_dkg_end(5, 2, status);
+
+        assert!(matches!(operation_results[..], [OperationResult::Dkg(_)]));
+        for coordinator in &coordinators {
+            assert_eq!(coordinator.malicious_dkg_signer_ids, HashSet::from([0]));
+        }
     }
 }
