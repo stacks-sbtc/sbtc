@@ -898,13 +898,21 @@ where
                     }
                 };
 
-                // Create a new `SignerStateMachine`.
-                let state_machine =
-                    SignerStateMachine::load(&db, aggregate_key, self.signer_private_key).await?;
+                // Reuse an active state machine so that a duplicate
+                // NonceRequest cannot discard state already collected for the
+                // signing round.
+                if !self.wsts_state_machines.contains(&state_machine_id) {
+                    let mut state_machine =
+                        SignerStateMachine::load(&db, aggregate_key, self.signer_private_key)
+                            .await?;
 
-                // Put the state machine into the cache.
-                self.wsts_state_machines
-                    .put(state_machine_id, state_machine);
+                    if matches!(msg.id, WstsMessageId::Sweep(_)) {
+                        state_machine.enable_nonce_response_cache();
+                    }
+
+                    self.wsts_state_machines
+                        .put(state_machine_id, state_machine);
+                }
 
                 // Process the message.
                 self.relay_message(
@@ -1020,11 +1028,38 @@ where
                 span.record(WSTS_SIGN_ID, request.sign_id);
                 span.record(WSTS_SIGN_ITER_ID, request.sign_iter_id);
 
-                // We only handle DKG verification-related messages here.
+                // Sweep NonceResponses are fed to the signer state machine so
+                // that it can use the locally received responses when creating
+                // a signature share. DKG-verification NonceResponses are
+                // handled below by the separate verification state machine.
                 let new_key = match msg.id {
                     WstsMessageId::DkgVerification(key) => key.into(),
                     WstsMessageId::Dkg(_) => return Err(Error::InvalidSigningOperation),
-                    WstsMessageId::Sweep(_) => return Ok(()),
+                    WstsMessageId::Sweep(_) => {
+                        let sighash = TapSighash::from_slice(&request.message)
+                            .map_err(Error::SigHashConversion)?
+                            .into();
+                        let state_machine_id = StateMachineId::BitcoinSign(sighash);
+
+                        if !self.wsts_state_machines.contains(&state_machine_id) {
+                            tracing::warn!(
+                                %state_machine_id,
+                                "received a sweep NonceResponse without an active signing round"
+                            );
+                            return Ok(());
+                        }
+
+                        return self
+                            .relay_message(
+                                &state_machine_id,
+                                msg.id,
+                                msg_public_key,
+                                Some(request.signer_id),
+                                &msg.inner,
+                                &chain_tip.block_hash,
+                            )
+                            .await;
+                    }
                 };
 
                 tracing::debug!("processing message");
