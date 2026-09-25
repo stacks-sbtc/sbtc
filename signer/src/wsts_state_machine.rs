@@ -577,6 +577,12 @@ impl SignerStateMachine {
         response.map_err(Error::Wsts)
     }
 
+    /// Require signature shares to use nonce responses received directly
+    /// from the signers.
+    pub fn enable_nonce_response_cache(&mut self) {
+        self.inner.enable_nonce_response_cache();
+    }
+
     /// Return the public key for the given signer ID.
     pub fn get_signer_public_key(&self, signer_id: u32) -> Option<PublicKey> {
         self.inner
