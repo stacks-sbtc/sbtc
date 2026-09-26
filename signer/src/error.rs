@@ -259,6 +259,12 @@ pub enum Error {
         signature_type: wsts::net::SignatureType,
     },
 
+    /// The coordinator requested a non-Taproot signature during DKG
+    /// verification. DKG verification always signs the known mock transaction
+    /// using the Taproot signature type.
+    #[error("signature type {0:?} is not valid for DKG verification; expected Taproot")]
+    InvalidDkgVerificationSignatureType(wsts::net::SignatureType),
+
     /// This should never happen
     #[error("observed a tenure identified by a StacksBlockId with with no blocks")]
     EmptyStacksTenure,
