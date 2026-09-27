@@ -269,7 +269,6 @@ impl Signer {
         self.dkg_private_shares.clear();
         self.dkg_private_begin_msg = None;
         self.dkg_end_begin_msg = None;
-        self.use_nonce_response_cache = true;
         self.nonce_request = None;
         self.nonce_responses.clear();
         self.state = State::Idle;
