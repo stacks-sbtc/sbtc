@@ -60,7 +60,11 @@ impl TestSetup {
     }
 
     pub fn next_signer(&mut self) -> Signer {
-        self.signers.pop_front().expect("no more signers")
+        let mut signer = self.signers.pop_front().expect("no more signers");
+        // These signers take part in DKG verification, where the nonce
+        // response cache is disabled.
+        signer.disable_nonce_response_cache();
+        signer
     }
 }
 

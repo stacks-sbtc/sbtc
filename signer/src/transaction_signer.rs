@@ -906,8 +906,12 @@ where
                         SignerStateMachine::load(&db, aggregate_key, self.signer_private_key)
                             .await?;
 
-                    if matches!(msg.id, WstsMessageId::Sweep(_)) {
-                        state_machine.enable_nonce_response_cache();
+                    // DKG verification nonce responses are only processed by
+                    // the FROST coordinator that tracks the round, so this
+                    // state machine never receives them and cannot use the
+                    // cache.
+                    if matches!(msg.id, WstsMessageId::DkgVerification(_)) {
+                        state_machine.disable_nonce_response_cache();
                     }
 
                     self.wsts_state_machines
