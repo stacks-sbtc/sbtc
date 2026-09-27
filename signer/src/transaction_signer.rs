@@ -1178,14 +1178,14 @@ where
         // DKG verification always signs the well-known mock transaction as a
         // Taproot key-path spend. Do not allow the coordinator to select a
         // different signing algorithm for either phase of the signing round.
-        if let Some(signature_type) = signature_type {
-            if signature_type != SignatureType::Taproot {
-                tracing::warn!(
-                    ?signature_type,
-                    "🔐 invalid signature type for DKG verification signing"
-                );
-                return Err(Error::InvalidDkgVerificationSignatureType(signature_type));
-            }
+        if let Some(signature_type) = signature_type
+            && signature_type != SignatureType::Taproot
+        {
+            tracing::warn!(
+                ?signature_type,
+                "🔐 invalid signature type for DKG verification signing"
+            );
+            return Err(Error::InvalidDkgVerificationSignatureType(signature_type));
         }
 
         // If we don't have a message (i.e. from `SignatureShareResponse`) then
