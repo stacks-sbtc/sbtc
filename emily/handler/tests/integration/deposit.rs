@@ -193,7 +193,7 @@ async fn create_and_get_deposit_happy_path() {
     let bitcoin_tx_output_index_string = bitcoin_tx_output_index.to_string();
     let gotten_deposit = apis::deposit_api::get_deposit(
         &configuration,
-        &bitcoin_txid,
+        &bitcoin_txid.to_uppercase(),
         &bitcoin_tx_output_index_string,
     )
     .await
@@ -410,12 +410,14 @@ async fn get_deposits_for_transaction() {
     // ----
     batch_create_deposits(&configuration, create_requests).await;
 
-    let gotten_deposits =
-        apis::deposit_api::get_deposits_for_transaction(&configuration, &bitcoin_txid, None, None)
-            .await
-            .expect(
-                "Received an error after making a valid get deposits for transaction api call.",
-            );
+    let gotten_deposits = apis::deposit_api::get_deposits_for_transaction(
+        &configuration,
+        &bitcoin_txid.to_uppercase(),
+        None,
+        None,
+    )
+    .await
+    .expect("Received an error after making a valid get deposits for transaction api call.");
 
     // Assert.
     // -------
