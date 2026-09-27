@@ -593,7 +593,12 @@ where
 
         // Create a signal stream with the defined filter
         let signal_stream = self.context.as_signal_stream(presign_ack_filter);
-        let signature_threshold = self.context.config().signer.bootstrap_signatures_required;
+        let signature_threshold = self
+            .context
+            .state()
+            .registry_signer_set_info()
+            .map(|info| info.signatures_required)
+            .ok_or(Error::NoKeyRotationEvent)?;
 
         // Send the presign request message
         tracing::debug!(request = %sbtc_requests, "sending pre-sign request");
@@ -2657,10 +2662,16 @@ pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
 #[cfg(test)]
 mod tests {
     use crate::bitcoin::MockBitcoinInteract;
+    use crate::bitcoin::utxo::RequestRef;
+    use crate::bitcoin::utxo::Requests;
+    use crate::bitcoin::utxo::SignerBtcState;
+    use crate::bitcoin::utxo::SignerUtxo;
+    use crate::bitcoin::utxo::WithdrawalRequest;
     use crate::emily_client::MockEmilyInteract;
     use crate::error::Error;
     use crate::keys::PrivateKey;
     use crate::keys::PublicKey;
+    use crate::message::BitcoinPreSignAck;
     use crate::network::in_memory2::WanNetwork;
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::DbWrite as _;
@@ -2673,6 +2684,7 @@ mod tests {
     use crate::testing::get_rng;
     use crate::testing::transaction_coordinator::TestEnvironment;
 
+    use bitvec::array::BitArray;
     use fake::Fake as _;
     use fake::Faker;
     use rand::SeedableRng as _;
@@ -2922,6 +2934,115 @@ mod tests {
             let chain_tip1: BitcoinBlockRef = fake::Faker.fake_with_rng(&mut rng);
             assert!(!ev.is_coordinator(&chain_tip1.block_hash));
         }
+    }
+
+    /// Check that the coordinator waits for the on-chain signature
+    /// threshold, not `bootstrap_signatures_required`.
+    #[tokio::test]
+    async fn presign_wait_uses_registry_threshold_not_bootstrap() {
+        let mut rng = testing::get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.bootstrap_signatures_required = 2;
+            })
+            .build();
+        let signer_set_info = crate::stacks::api::SignerSetInfo {
+            aggregate_key: Faker.fake_with_rng(&mut rng),
+            signer_set: std::iter::repeat_with(|| Faker.fake_with_rng(&mut rng))
+                .take(3)
+                .collect(),
+            signatures_required: 3,
+        };
+        ctx.state().update_registry_signer_set_info(signer_set_info);
+
+        let network = WanNetwork::default();
+        let net = network.connect(&ctx);
+        let mut ev = TxCoordinatorEventLoop {
+            network: net.spawn(),
+            context: ctx.clone(),
+            context_window: 10000,
+            private_key: ctx.config().signer.private_key,
+            signing_round_max_duration: Duration::from_secs(10),
+            bitcoin_presign_request_max_duration: Duration::from_secs(2),
+            dkg_max_duration: Duration::from_secs(10),
+            is_epoch3: true,
+        };
+
+        let chain_tip: model::BitcoinBlockHash = Faker.fake_with_rng(&mut rng);
+        let x_only = secp256k1::XOnlyPublicKey::from(ctx.config().signer.public_key());
+        let signer_btc_state = SignerBtcState {
+            utxo: SignerUtxo {
+                outpoint: bitcoin::OutPoint::null(),
+                amount: 1_000_000,
+                public_key: x_only,
+            },
+            fee_rate: 1.0,
+            public_key: x_only,
+            last_fees: None,
+            magic_bytes: *b"T3",
+        };
+        let withdrawal = WithdrawalRequest {
+            request_id: 1,
+            txid: Faker.fake_with_rng(&mut rng),
+            block_hash: Faker.fake_with_rng(&mut rng),
+            amount: 1_000,
+            max_fee: 10_000,
+            script_pubkey: Faker.fake_with_rng(&mut rng),
+            signer_bitmap: BitArray::ZERO,
+        };
+        let mut wait = tokio::spawn(async move {
+            let unsigned = utxo::UnsignedTransaction::new(
+                Requests::new(vec![RequestRef::Withdrawal(&withdrawal)]),
+                &signer_btc_state,
+            )
+            .unwrap();
+            ev.construct_and_send_bitcoin_presign_request(
+                &chain_tip,
+                &signer_btc_state,
+                &[unsigned],
+            )
+            .await
+        });
+
+        // The pre-sign request is sent after the coordinator subscribes.
+        ctx.wait_for_signal(Duration::from_secs(1), |signal| {
+            matches!(
+                signal,
+                SignerSignal::Event(SignerEvent::TxCoordinator(
+                    TxCoordinatorEvent::MessageGenerated(_)
+                ))
+            )
+        })
+        .await
+        .expect("timed out waiting for the pre-sign request");
+
+        for _ in 0..2 {
+            let key = PrivateKey::new(&mut rng);
+            let ack = Payload::from(BitcoinPreSignAck)
+                .to_message(chain_tip)
+                .sign_ecdsa(&key);
+            ctx.signal(TxSignerEvent::MessageGenerated(Box::new(ack)).into())
+                .unwrap();
+        }
+
+        let still_waiting = tokio::time::timeout(Duration::from_millis(200), &mut wait)
+            .await
+            .is_err();
+        assert!(
+            still_waiting,
+            "coordinator returned after two acks; registry threshold is 3"
+        );
+
+        let key = PrivateKey::new(&mut rng);
+        let ack = Payload::from(BitcoinPreSignAck)
+            .to_message(chain_tip)
+            .sign_ecdsa(&key);
+        ctx.signal(TxSignerEvent::MessageGenerated(Box::new(ack)).into())
+            .unwrap();
+
+        wait.await.unwrap().expect("wait for third ack failed");
     }
 
     #[tokio::test]
