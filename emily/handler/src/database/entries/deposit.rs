@@ -831,8 +831,10 @@ mod tests {
 
     #[test]
     fn transaction_hex_storage_preserves_exact_input_and_omits_large_values() {
-        let mut entry = DepositEntry::default();
-        entry.transaction_hex = Some("aBcD".to_string());
+        let mut entry = DepositEntry {
+            transaction_hex: Some("aBcD".to_string()),
+            ..Default::default()
+        };
         entry.omit_transaction_hex_if_oversized().unwrap();
         assert_eq!(entry.transaction_hex.as_deref(), Some("aBcD"));
 
