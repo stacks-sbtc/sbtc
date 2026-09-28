@@ -56,7 +56,6 @@ use bitcoin::ScriptBuf;
 use futures::stream::StreamExt as _;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
-use sbtc::deposits::DepositScriptVersion;
 use std::collections::HashSet;
 
 /// Block observer
@@ -115,13 +114,11 @@ impl DepositRequestValidator for CreateDepositRequest {
         // info struct.
         tx_info.validate()?;
 
-        let info = self.validate_tx(&tx_info.tx, is_mainnet)?;
-        // The signer does not support v2 deposits yet.
-        if info.version() != DepositScriptVersion::V1 {
-            return Err(sbtc::error::Error::InvalidDepositScript.into());
-        }
-
-        Ok(Some(Deposit { info, tx_info, block_hash }))
+        Ok(Some(Deposit {
+            info: self.validate_tx(&tx_info.tx, is_mainnet)?,
+            tx_info,
+            block_hash,
+        }))
     }
 }
 

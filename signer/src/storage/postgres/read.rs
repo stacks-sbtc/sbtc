@@ -8,8 +8,8 @@ use crate::{
     bitcoin::{
         utxo::{SignerUtxo, SignerUtxoKeySet},
         validation::{
-            DepositConfirmationStatus, DepositRequestReport, WithdrawalRequestReport,
-            WithdrawalRequestStatus,
+            DepositConfirmationStatus, DepositRequestReport, DepositRequestSigningData,
+            WithdrawalRequestReport, WithdrawalRequestStatus,
         },
     },
     error::Error,
@@ -55,6 +55,8 @@ struct DepositStatusSummary {
     reclaim_script_hash: model::TaprootScriptHash,
     /// The key set used in the deposit script.
     key_set_id: model::KeySetId,
+    /// The recipient committed to by this deposit.
+    recipient: model::StacksPrincipal,
 }
 
 /// A convenience struct for retrieving a withdrawal request report
@@ -447,6 +449,7 @@ impl PgRead {
               , dr.spend_script AS deposit_script
               , dr.reclaim_script_hash
               , dr.key_set_id
+              , dr.recipient
               , bc.block_height
               , bc.block_hash
             FROM sbtc_signer.deposit_requests AS dr
@@ -1128,11 +1131,27 @@ impl PgRead {
             None => DepositConfirmationStatus::Unconfirmed,
         };
 
-        // The signer does not support v2 deposits yet.
-        let model::KeySetId::V1(signers_public_key) = summary.key_set_id else {
-            return Ok(None);
+        let signing_data = match summary.key_set_id {
+            model::KeySetId::V1(key) => {
+                let dkg_shares = Self::get_encrypted_dkg_shares(executor, key).await?;
+                DepositRequestSigningData::V1 {
+                    signers_public_key: key.into(),
+                    dkg_shares_status: dkg_shares.map(|shares| shares.dkg_shares_status),
+                }
+            }
+            model::KeySetId::V2(_) => {
+                let script: bitcoin::ScriptBuf = summary.deposit_script.clone().into();
+                let inputs = sbtc::deposits::DepositScriptInputs::parse_v2(
+                    &script,
+                    summary.recipient.clone().into(),
+                    u64::from_be_bytes(summary.max_fee),
+                )?;
+                DepositRequestSigningData::V2 {
+                    key_set: inputs.signer_key_set,
+                    recipient: summary.recipient.clone(),
+                }
+            }
         };
-        let dkg_shares = Self::get_encrypted_dkg_shares(executor, signers_public_key).await?;
 
         Ok(Some(DepositRequestReport {
             status,
@@ -1145,8 +1164,7 @@ impl PgRead {
             outpoint: bitcoin::OutPoint::new((*txid).into(), output_index),
             deposit_script: summary.deposit_script.into(),
             reclaim_script_hash: summary.reclaim_script_hash,
-            signers_public_key: signers_public_key.into(),
-            dkg_shares_status: dkg_shares.map(|shares| shares.dkg_shares_status),
+            signing_data,
         }))
     }
 
