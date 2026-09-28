@@ -899,13 +899,17 @@ where
                     }
                 };
 
-                // Create a new `SignerStateMachine`.
-                let state_machine =
-                    SignerStateMachine::load(&db, aggregate_key, self.signer_private_key).await?;
+                // Reuse an active state machine so that a duplicate
+                // NonceRequest cannot discard state already collected for the
+                // signing round.
+                if !self.wsts_state_machines.contains(&state_machine_id) {
+                    let state_machine =
+                        SignerStateMachine::load(&db, aggregate_key, self.signer_private_key)
+                            .await?;
 
-                // Put the state machine into the cache.
-                self.wsts_state_machines
-                    .put(state_machine_id, state_machine);
+                    self.wsts_state_machines
+                        .put(state_machine_id, state_machine);
+                }
 
                 // Process the message.
                 self.relay_message(
@@ -984,6 +988,14 @@ where
                         let state_machine_id = StateMachineId::DkgVerification(new_key, *chain_tip);
                         self.assert_dkg_verification_state_machine_state(&state_machine_id)?;
 
+                        // DKG verification supports receiving nonce responses
+                        // before the nonce request. The verification state
+                        // machine buffers and authenticates those messages, so
+                        // use its matching responses to populate the WSTS
+                        // signer's cache before processing the coordinator's
+                        // signature-share request.
+                        self.process_dkg_verification_nonce_responses(&state_machine_id, request)?;
+
                         // We keep DKG verification-related state machines around
                         // so that `verify_sender()` works. This is a bit of a hack.
                         should_pop_state_machine = false;
@@ -1022,11 +1034,38 @@ where
                 span.record(WSTS_SIGN_ID, request.sign_id);
                 span.record(WSTS_SIGN_ITER_ID, request.sign_iter_id);
 
-                // We only handle DKG verification-related messages here.
+                // Sweep NonceResponses are fed directly to the signer state
+                // machine. DKG-verification NonceResponses are buffered below
+                // by the separate verification state machine and copied into
+                // the signer state machine before it creates a signature share.
                 let new_key = match msg.id {
                     WstsMessageId::DkgVerification(key) => key.into(),
                     WstsMessageId::Dkg(_) => return Err(Error::InvalidSigningOperation),
-                    WstsMessageId::Sweep(_) => return Ok(()),
+                    WstsMessageId::Sweep(_) => {
+                        let sighash = TapSighash::from_slice(&request.message)
+                            .map_err(Error::SigHashConversion)?
+                            .into();
+                        let state_machine_id = StateMachineId::BitcoinSign(sighash);
+
+                        if !self.wsts_state_machines.contains(&state_machine_id) {
+                            tracing::warn!(
+                                %state_machine_id,
+                                "received a sweep NonceResponse without an active signing round"
+                            );
+                            return Ok(());
+                        }
+
+                        return self
+                            .relay_message(
+                                &state_machine_id,
+                                msg.id,
+                                msg_public_key,
+                                Some(request.signer_id),
+                                &msg.inner,
+                                &chain_tip.block_hash,
+                            )
+                            .await;
+                    }
                 };
 
                 tracing::debug!("processing message");
@@ -1110,6 +1149,31 @@ where
                 )
                 .await?;
             }
+        }
+
+        Ok(())
+    }
+
+    /// Populate the WSTS signer cache with authenticated nonce responses that
+    /// the DKG verification state machine observed for this signing round.
+    fn process_dkg_verification_nonce_responses(
+        &mut self,
+        state_machine_id: &StateMachineId,
+        request: &wsts::net::SignatureShareRequest,
+    ) -> Result<(), Error> {
+        let nonce_responses = self
+            .dkg_verification_state_machines
+            .get(state_machine_id)
+            .ok_or_else(|| Error::MissingStateMachine(Box::new(*state_machine_id)))?
+            .nonce_responses_for_signature_share_request(request);
+
+        let state_machine = self
+            .wsts_state_machines
+            .get_mut(state_machine_id)
+            .ok_or_else(|| Error::MissingStateMachine(Box::new(*state_machine_id)))?;
+
+        for response in nonce_responses {
+            state_machine.process(&WstsNetMessage::NonceResponse(response))?;
         }
 
         Ok(())

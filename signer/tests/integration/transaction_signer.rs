@@ -932,12 +932,19 @@ mod serial {
 
         let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
-        let signers = TestSignerSet::new(&mut rng);
+        let mut signers = TestSignerSet::new(&mut rng);
+        // This test drives one transaction signer, so store a one-party WSTS
+        // fixture whose key ownership matches the production one-key-per-signer
+        // mapping. TestSignerSet normally models its one private key as owning
+        // every synthetic signer key, which is intentionally rejected by the
+        // nonce-response ownership check.
+        signers.keys = vec![signers.aggregate_key()];
         // Create a test setup object so that we can easily create proper DKG
         // shares in the database. Note that calling TestSweepSetup2::new_setup
         // creates two bitcoin blocks.
-        let setup =
+        let mut setup =
             TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
+        setup.signatures_required = 1;
 
         setup.store_dkg_shares(&db).await;
 
@@ -1042,8 +1049,8 @@ mod serial {
         testing::storage::drop_db(db).await;
     }
 
-    /// Let's check that we always generate unique nonces for each sign
-    /// request.
+    /// Check that duplicate nonce requests are idempotent and that new signing
+    /// attempts generate unique nonces.
     #[test_log::test(tokio::test)]
     async fn nonce_response_unique_nonces() {
         let db = testing::storage::new_test_database().await;
@@ -1057,12 +1064,19 @@ mod serial {
 
         let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
-        let signers = TestSignerSet::new(&mut rng);
+        let mut signers = TestSignerSet::new(&mut rng);
+        // This test drives one transaction signer, so store a one-party WSTS
+        // fixture whose key ownership matches the production one-key-per-signer
+        // mapping. TestSignerSet normally models its one private key as owning
+        // every synthetic signer key, which is intentionally rejected by the
+        // nonce-response ownership check.
+        signers.keys = vec![signers.aggregate_key()];
         // Create a test setup object so that we can simply create proper DKG
         // shares in the database. Note that calling TestSweepSetup2::new_setup
         // creates two bitcoin blocks.
-        let setup =
+        let mut setup =
             TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
+        setup.signatures_required = 1;
 
         setup.store_dkg_shares(&db).await;
 
@@ -1116,7 +1130,7 @@ mod serial {
         db.write_bitcoin_txs_sighashes(&[row]).await.unwrap();
 
         // Now for the nonce request message
-        let nonce_request_msg = WstsMessage {
+        let mut nonce_request_msg = WstsMessage {
             id: WstsMessageId::Sweep(*txid),
             inner: wsts::net::Message::NonceRequest(NonceRequest {
                 dkg_id: 1,
@@ -1160,25 +1174,42 @@ mod serial {
             .await
             .unwrap();
 
-        // Okay, let's try this again using the same message. This checks the
-        // case where we may be using a state machine stored in the
-        // TxSignerEventLoop. Although we currently do not reuse an existing
-        // state machine when we receive a nonce request, this is a check for
-        // any future code.
+        // Send the exact same request again. This is a retransmission, so the
+        // signer should reuse its response.
         let handle = network.connect(&ctx).spawn();
         tx_signer
             .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
             .await
             .unwrap();
 
-        // Okay this one could be using the same signer state machine as the
-        // previous call; although, as mentioned above, it shouldn't.
         let response2 = tokio::time::timeout(Duration::from_secs(2), func(handle))
             .await
             .unwrap();
 
-        // Let's clear all state machines so that we know that a new one is
-        // being created.
+        assert_eq!(response2, response1);
+
+        // Incrementing the iteration ID starts a new signing attempt. The
+        // existing state machine should reset the round and generate a fresh
+        // nonce response.
+        let WstsNetMessage::NonceRequest(request) = &mut nonce_request_msg.inner else {
+            panic!("expected a NonceRequest")
+        };
+        request.sign_iter_id += 1;
+
+        let handle = network.connect(&ctx).spawn();
+        tx_signer
+            .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
+            .await
+            .unwrap();
+
+        // This response comes from a new iteration in the existing state
+        // machine.
+        let response3 = tokio::time::timeout(Duration::from_secs(2), func(handle))
+            .await
+            .unwrap();
+
+        // Clear the cache and process the current request with a fresh state
+        // machine. Its nonce response should also be unique.
         tx_signer.wsts_state_machines.clear();
 
         let handle = network.connect(&ctx).spawn();
@@ -1187,25 +1218,24 @@ mod serial {
             .await
             .unwrap();
 
-        // This one is for nonces generated by a fresh state machine.
-        let response3 = tokio::time::timeout(Duration::from_secs(2), func(handle))
+        let response4 = tokio::time::timeout(Duration::from_secs(2), func(handle))
             .await
             .unwrap();
 
         // The signer has only one key ID for their DKG shares, so they should
         // only generate one nonce in their nonce response.
         let nonces1 = response1.nonces.single();
-        let nonces2 = response2.nonces.single();
         let nonces3 = response3.nonces.single();
-        // All of these nonces should be unique, so let's check. We compress
-        // the public nonces so that we can easily hash them in a set.
+        let nonces4 = response4.nonces.single();
+        // Nonces from distinct attempts should be unique. We compress the
+        // public nonces so that we can easily hash them in a set.
         let nonces_list: [[u8; 33]; 6] = [
             nonces1.D.compress().data,
             nonces1.E.compress().data,
-            nonces2.D.compress().data,
-            nonces2.E.compress().data,
             nonces3.D.compress().data,
             nonces3.E.compress().data,
+            nonces4.D.compress().data,
+            nonces4.E.compress().data,
         ];
         let nonces_set = nonces_list.iter().copied().collect::<BTreeSet<[u8; 33]>>();
 

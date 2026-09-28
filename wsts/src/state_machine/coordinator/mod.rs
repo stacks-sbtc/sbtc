@@ -776,6 +776,11 @@ pub mod test {
         let mut rng = OsRng;
 
         let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
+        // This test builds signature share requests without routing nonce
+        // responses to the signers, so it cannot use the cache.
+        for signer in &mut signers {
+            signer.disable_nonce_response_cache();
+        }
 
         let all_thresholds = coordinators
             .iter()
@@ -987,6 +992,12 @@ pub mod test {
     {
         let mut rng = OsRng;
         let (mut coordinators, mut signers) = run_dkg::<C>(num_signers, keys_per_signer);
+        // This test tampers with the nonce responses in the signature share
+        // request to exercise the checks used when the cache is disabled.
+        // With the cache, the tampered request is rejected earlier.
+        for signer in &mut signers {
+            signer.disable_nonce_response_cache();
+        }
         let msg = b"configured key IDs";
 
         let nonce_request = coordinators
@@ -1045,6 +1056,12 @@ pub mod test {
 
     pub fn invalid_nonce<Coordinator: CoordinatorTrait>(num_signers: u32, keys_per_signer: u32) {
         let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
+        // This test tampers with the nonce responses in the signature share
+        // request to exercise the checks used when the cache is disabled.
+        // With the cache, the tampered request is rejected earlier.
+        for signer in &mut signers {
+            signer.disable_nonce_response_cache();
+        }
 
         let msg = "It was many and many a year ago, in a kingdom by the sea"
             .as_bytes()

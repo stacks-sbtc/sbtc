@@ -1706,6 +1706,12 @@ pub mod test {
         let num_signers = 12;
         let keys_per_signer = 1;
         let (mut coordinators, mut signers) = all_signers_dkg(num_signers, keys_per_signer);
+        // The signers that answered the first nonce request are not in the
+        // signing set of the second one, and with the cache they would
+        // reject its signature share request instead of ignoring it.
+        for signer in &mut signers {
+            signer.disable_nonce_response_cache();
+        }
 
         // Start a signing round
         let orig_msg = "It was many and many a year ago, in a kingdom by the sea"
