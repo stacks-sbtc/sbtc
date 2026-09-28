@@ -10,12 +10,34 @@ pub mod error;
 pub mod events;
 pub mod idpack;
 pub mod leb128;
+pub mod signer_keys;
+
+pub use signer_keys::KeySetId;
+pub use signer_keys::SignerKeySet;
+pub use signer_keys::derive_signing_public_key;
+pub use signer_keys::derive_signing_secret_key;
 
 #[cfg(any(test, feature = "webhooks"))]
 pub mod webhooks;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+
+/// Maximum number of signing keys in a v2 key set.
+///
+/// The Ledger Bitcoin app has two relevant, distinct limits:
+///
+/// - `multi_a` and `sortedmulti_a` expressions support at most 16 public keys.
+///   The parser applies the app's
+///   [`MAX_PUBKEYS_PER_MULTISIG`](https://github.com/LedgerHQ/app-bitcoin/blob/58ab28b388c659afd47fa361b93c6117b883c941/src/common/wallet.h#L17-L19)
+///   limit to these expressions
+///   [here](https://github.com/LedgerHQ/app-bitcoin/blob/58ab28b388c659afd47fa361b93c6117b883c941/src/common/wallet.c#L1782-L1796).
+/// - A wallet policy may contain at most 15 public keys, as defined by
+///   [`MAX_N_KEYS_IN_WALLET_POLICY`](https://github.com/LedgerHQ/app-bitcoin/blob/58ab28b388c659afd47fa361b93c6117b883c941/src/common/wallet.h#L46-L48).
+///
+/// This protocol-level cap follows the 16-key `multi_a` limit.
+/// Also, see <https://github.com/stacks-sbtc/sbtc/issues/1694>.
+pub const MAX_SIGNERS: usize = 16;
 
 /// The x-coordinate public key with no known discrete logarithm.
 ///
