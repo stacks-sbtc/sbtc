@@ -1,0 +1,32 @@
+[package]
+name = "emily-cron2"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bitcoin.workspace = true
+cfg-if.workspace = true
+clap = { workspace = true, features = ["usage"] }
+sbtc.workspace = true
+private-emily-client.workspace = true
+reqwest = { workspace = true, features = ["query"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing = { workspace = true, features = ["attributes"] }
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+bitcoincore-rpc.workspace = true
+mockito.workspace = true
+sbtc = { workspace = true, features = ["testing"] }
+test-case.workspace = true
+testing-emily-client.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+
+[lints]
+workspace = true
