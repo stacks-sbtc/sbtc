@@ -14,6 +14,7 @@ RUN npm install -g pnpm@10
 WORKDIR /code/sbtc
 COPY . /code/sbtc/
 
+ARG GIT_COMMIT
 # Build signer and blocklist client.
 # -------------------------------------
 RUN cargo build --locked --bin signer --bin blocklist-client

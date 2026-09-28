@@ -27,12 +27,12 @@ use sbtc::testing::{
     regtest::{BITCOIN_CORE_FALLBACK_FEE, Recipient},
 };
 use secp256k1::Keypair;
+use signer::stacks::api::StacksChainId;
 use signer::{
     bitcoin::{
         BitcoinBlockHashStreamProvider as _, poller::BitcoinChainTipPoller, rpc::BitcoinCoreClient,
     },
     block_observer::BlockObserver,
-    config::NetworkKind,
     context::Context as _,
     emily_client::EmilyClient,
     error::Error,
@@ -79,7 +79,7 @@ async fn start_signers(
 
     let public_keys: Vec<PublicKey> = keypairs.iter().map(|kp| kp.public_key().into()).collect();
     let wallet =
-        SignerWallet::new(&public_keys, signatures_required, NetworkKind::Testnet, 0).unwrap();
+        SignerWallet::new(&public_keys, signatures_required, StacksChainId::TESTNET).unwrap();
 
     let tx = fund_stx(
         stacks_client,

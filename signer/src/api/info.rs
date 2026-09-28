@@ -4,6 +4,7 @@ use axum::{Json, extract::State, response::IntoResponse};
 use clarity::types::chainstate::StacksBlockId;
 use serde::Serialize;
 
+use crate::context::NodeNetwork;
 use crate::{
     bitcoin::BitcoinInteract,
     config::Settings,
@@ -58,9 +59,19 @@ pub struct ChainTipInfo<THash, THeight> {
     pub block_height: THeight,
 }
 
+/// Converts a [`bitcoin::Network`] to a string representation of the
+/// network, with the "Bitcoin" network name being changed to "mainnet".
+fn bitcoin_network(network: bitcoin::Network) -> String {
+    match network {
+        bitcoin::Network::Bitcoin => "mainnet".to_string(),
+        _ => network.to_string(),
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ConfigInfo {
     pub network: String,
+    pub stacks_chain_id: u32,
     pub deployer: String,
     pub bootstrap_signatures_required: u16,
     pub bitcoin_processing_delay: u64,
@@ -133,7 +144,10 @@ pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
 
     let mut response = InfoResponse::default();
 
-    response.populate_config_info(config);
+    match ctx.node_network().await {
+        Ok(network) => response.populate_config_info(config, network),
+        Err(error) => tracing::warn!(%error, "could not discover node network identity"),
+    }
     response.populate_local_chain_info(ctx).await;
     response.populate_bitcoin_node_info(&bitcoin_client).await;
     response.populate_stacks_node_info(&stacks_client).await;
@@ -145,9 +159,10 @@ pub async fn build_info<C: Context>(ctx: &C) -> InfoResponse {
 }
 
 impl InfoResponse {
-    fn populate_config_info(&mut self, config: &Settings) {
+    fn populate_config_info(&mut self, config: &Settings, network: NodeNetwork) {
         self.config = Some(ConfigInfo {
-            network: config.signer.network.to_string(),
+            network: bitcoin_network(network.bitcoin_network),
+            stacks_chain_id: network.stacks_chain_id.as_u32(),
             deployer: config.signer.deployer.to_string(),
             bootstrap_signatures_required: config.signer.bootstrap_signatures_required,
             bitcoin_processing_delay: config.signer.bitcoin_processing_delay.as_secs(),
@@ -582,7 +597,6 @@ mod tests {
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|settings| {
-                settings.signer.network = crate::config::NetworkKind::Regtest;
                 settings.signer.deployer = StacksAddress::burn_address(false);
                 settings.signer.bootstrap_signatures_required = 3;
                 settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
@@ -629,13 +643,20 @@ mod tests {
         let state = State(ApiState { ctx: context.clone() });
         let result = info_handler(state).await;
 
+        let network = context.node_network().await.unwrap();
+        assert_eq!(
+            serde_json::to_value(&result).unwrap()["config"]["stacks_chain_id"],
+            network.stacks_chain_id.as_u32()
+        );
+
         let Some(config) = result.config else {
             panic!("config info not populated");
         };
 
         let settings = context.config().clone().signer;
+        let bitcoin_network = context.node_network().await.unwrap().bitcoin_network;
 
-        assert_eq!(config.network, settings.network.to_string());
+        assert_eq!(config.network, bitcoin_network.to_string());
         assert_eq!(
             config.bootstrap_signatures_required,
             settings.bootstrap_signatures_required

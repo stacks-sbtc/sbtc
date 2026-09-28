@@ -106,6 +106,7 @@ use signer::keys::PrivateKey;
 use signer::network::in_memory2::SignerNetwork;
 use signer::network::in_memory2::WanNetwork;
 use signer::request_decider::RequestDeciderEventLoop;
+use signer::stacks::api::StacksChainId;
 use signer::stacks::contracts::AcceptWithdrawalV1;
 use signer::stacks::contracts::AsContractCall;
 use signer::stacks::contracts::RejectWithdrawalV1;
@@ -6154,13 +6155,8 @@ where
         keypairs.iter().map(|kp| kp.public_key().into()).collect();
     signer_keys.sort();
 
-    let wallet = SignerWallet::new(
-        &signer_keys,
-        signatures_required,
-        signer::config::NetworkKind::Regtest,
-        0,
-    )
-    .unwrap();
+    let wallet =
+        SignerWallet::new(&signer_keys, signatures_required, StacksChainId::TESTNET).unwrap();
 
     (aggregated_signer, wallet, keypairs)
 }

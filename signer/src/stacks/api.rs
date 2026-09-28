@@ -550,6 +550,40 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
     }
 }
 
+/// A Stacks chain identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(transparent)]
+pub struct StacksChainId(u32);
+
+impl StacksChainId {
+    /// The canonical Stacks mainnet chain ID.
+    pub const MAINNET: Self = Self(stacks_common::consts::CHAIN_ID_MAINNET);
+    /// The canonical Stacks testnet chain ID.
+    pub const TESTNET: Self = Self(stacks_common::consts::CHAIN_ID_TESTNET);
+
+    /// Create a chain ID for tests, including custom development chains.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(chain_id: u32) -> Self {
+        Self(chain_id)
+    }
+
+    /// Return the raw chain ID for RPC responses and transaction encoding.
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
+
+    /// Whether this is the canonical Stacks mainnet chain.
+    pub const fn is_mainnet(self) -> bool {
+        self.0 == Self::MAINNET.0
+    }
+}
+
+impl From<StacksChainId> for u32 {
+    fn from(chain_id: StacksChainId) -> Self {
+        chain_id.as_u32()
+    }
+}
+
 /// The response from a GET /v2/info request to stacks-core
 ///
 /// This type contains only a subset of the full response from stacks-core,
@@ -560,6 +594,8 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
 /// corresponding fields returned from the `/v3/tenures/info` response.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetNodeInfoResponse {
+    /// The chain ID of the connected Stacks node.
+    pub network_id: StacksChainId,
     /// The height of the tip of the canonical bitcoin blockchain.
     pub burn_block_height: BitcoinBlockHeight,
     /// The version of the stacks node that is connected to this signer.
@@ -1790,7 +1826,6 @@ impl TryFrom<&Settings> for ApiFallbackClient<StacksClient> {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::NetworkKind;
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
     use crate::storage::memory::Store;
@@ -1815,14 +1850,12 @@ mod tests {
     }
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
-        let network_kind = NetworkKind::Regtest;
-
         let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
             .map(|kp| kp.public_key().into())
             .take(num_keys as usize)
             .collect::<Vec<_>>();
 
-        SignerWallet::new(&public_keys, signatures_required, network_kind, 0).unwrap()
+        SignerWallet::new(&public_keys, signatures_required, StacksChainId::TESTNET).unwrap()
     }
 
     #[ignore = "This is an integration test that hasn't been setup for CI yet"]
@@ -2626,6 +2659,24 @@ mod tests {
         mock.assert();
     }
 
+    #[test_case(StacksChainId::MAINNET; "mainnet")]
+    #[test_case(StacksChainId::TESTNET; "testnet")]
+    #[test_case(StacksChainId::new(0x8000_1234); "custom_chain")]
+    fn node_info_chain_id_serializes_as_a_number(chain_id: StacksChainId) {
+        let mut json: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/stacksapi-get-node-info-test-data.json"
+        ))
+        .unwrap();
+        json["network_id"] = serde_json::json!(chain_id.as_u32());
+
+        let info: GetNodeInfoResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(info.network_id, chain_id);
+        assert_eq!(
+            serde_json::to_value(info).unwrap()["network_id"],
+            serde_json::json!(chain_id.as_u32())
+        );
+    }
+
     #[tokio::test]
     async fn get_node_info_works() {
         let raw_json_response =
@@ -2648,6 +2699,7 @@ mod tests {
         let expected: GetNodeInfoResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
+        assert_eq!(resp.network_id, StacksChainId::TESTNET);
         mock.assert();
     }
 

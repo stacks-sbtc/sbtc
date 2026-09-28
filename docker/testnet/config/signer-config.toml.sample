@@ -26,7 +26,6 @@ private_key = "0000000000000000000000000000000000000000000000000000000000000001"
 # TODO: Change this to your Postgres URI
 db_endpoint = "postgresql://postgres:postgres@postgres:5432/signer"
 
-network = "testnet"
 
 deployer = "SNGWPN3XDAQE673MXYXF81016M50NHF5X5PWWM70"
 

@@ -95,16 +95,6 @@ endpoints = ["http://stacks-node:20443"]
 # Environment: SIGNER_SIGNER__PRIVATE_KEY
 private_key = ""
 
-# Specifies which network to use when constructing and sending transactions
-# on stacks and bitcoin. This corresponds to the `chain` flag in the
-# bitcoin.conf file of the connected bitcoin-core node, and the
-# `burnchain.mode` flag int he config.toml of the connected stacks-core
-# node.
-#
-# Required: true
-# Possible values: mainnet, testnet, regtest
-# Environment: SIGNER_SIGNER__NETWORK
-network = "regtest"
 
 # Seconds to wait before processing a new Bitcoin block.
 # Required: true

@@ -6,6 +6,7 @@ mod signer_state;
 mod termination;
 
 use std::collections::BTreeSet;
+use std::future::Future;
 use std::sync::Arc;
 
 use tokio::sync::broadcast::error::RecvError;
@@ -23,6 +24,7 @@ use crate::storage::DbWrite;
 use crate::storage::Transactable;
 
 pub use messaging::*;
+pub use signer_context::NodeNetwork;
 pub use signer_context::SignerContext;
 pub use signer_state::*;
 pub use termination::*;
@@ -33,6 +35,8 @@ pub trait Context: Clone + Sync + Send {
     fn config(&self) -> &Settings;
     /// Get the current state for the signer.
     fn state(&self) -> &Arc<SignerState>;
+    /// Return the Bitcoin and Stacks network identities.
+    fn node_network(&self) -> impl Future<Output = Result<NodeNetwork, Error>> + Send;
     /// Subscribe to the application signalling channel, returning a receiver
     /// which can be used to listen for events.
     fn get_signal_receiver(&self) -> tokio::sync::broadcast::Receiver<SignerSignal>;
@@ -80,12 +84,10 @@ pub trait Context: Clone + Sync + Send {
                 tokio::select! {
                     _ = watch_receiver.wait_for_shutdown() => {
                         let signal = SignerSignal::Command(SignerCommand::Shutdown);
-                        // An error means that the channel has been closed.
-                        // This is most likely due to the receiver being
-                        // closed so we can bail.
-                        if sender.send(signal).await.is_err() {
-                            break;
-                        }
+                        // Once we see a shutdown signal, we can forward it
+                        // along and then stop.
+                        let _ = sender.send(signal).await;
+                        break;
                     }
                     item = signal_stream.recv() => {
                         match item {
