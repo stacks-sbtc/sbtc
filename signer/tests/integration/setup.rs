@@ -420,7 +420,7 @@ impl TestSweepSetup {
         let event = KeyRotationEvent {
             txid: fake::Faker.fake(),
             block_hash: self.stacks_genesis_block.block_hash,
-            aggregate_key: self.aggregated_signer.keypair.public_key().into(),
+            aggregate_key: PublicKey::from(self.aggregated_signer.keypair.public_key()).into(),
             signer_set,
             signatures_required: self.signatures_required,
             address: PrincipalData::from(address).into(),
@@ -1249,7 +1249,7 @@ impl TestSweepSetup2 {
         let event = KeyRotationEvent {
             txid: fake::Faker.fake(),
             block_hash: self.stacks_blocks.first().unwrap().block_hash,
-            aggregate_key: self.signers.signer.keypair.public_key().into(),
+            aggregate_key: PublicKey::from(self.signers.signer.keypair.public_key()).into(),
             signer_set: self.signers.keys.clone(),
             signatures_required: self.signatures_required,
             address: PrincipalData::from(address).into(),

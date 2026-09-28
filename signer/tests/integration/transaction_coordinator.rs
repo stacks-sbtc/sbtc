@@ -443,7 +443,7 @@ async fn process_complete_deposit() {
         testing_signer_set.signer_keys().into_iter().collect();
     let state = context.state();
     let signer_set_info = SignerSetInfo {
-        aggregate_key,
+        aggregate_key: aggregate_key.into(),
         signer_set: signer_set_public_keys.clone(),
         signatures_required: signing_threshold as u16,
     };
@@ -4561,7 +4561,7 @@ async fn test_conservative_initial_sbtc_limits() {
                 .expect_get_current_signer_set_info()
                 .returning(move |_| {
                     Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
-                        aggregate_key,
+                        aggregate_key: aggregate_key.into(),
                         signer_set: signer_set.clone(),
                         signatures_required,
                     }))))
@@ -4918,7 +4918,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
         let event = KeyRotationEvent {
             txid: fake::Faker.fake_with_rng(&mut rng),
             block_hash: stacks_chain_tip.block_hash,
-            aggregate_key: shares.aggregate_key,
+            aggregate_key: shares.aggregate_key.into(),
             signer_set: shares.signer_set_public_keys.clone(),
             signatures_required: shares.signature_share_threshold,
             address: PrincipalData::from(ctx.config().signer.deployer.clone()).into(),
@@ -5421,7 +5421,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
                 .expect_get_current_signer_set_info()
                 .returning(move |_| {
                     Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
-                        aggregate_key,
+                        aggregate_key: aggregate_key.into(),
                         signer_set: signer_set.clone(),
                         signatures_required: signing_threshold as u16,
                     }))))
@@ -5584,7 +5584,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
             .expect_get_current_signer_set_info()
             .returning(move |_| {
                 Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
-                    aggregate_key,
+                    aggregate_key: aggregate_key.into(),
                     signer_set: signer_set.clone(),
                     signatures_required: 1,
                 }))))
@@ -6073,7 +6073,7 @@ async fn should_handle_dkg_coordination_failure() {
     // We need to set the registry signer set info to something since we
     // use it on DKG failure
     let signer_set_info = SignerSetInfo {
-        aggregate_key: context.config().signer.public_key(),
+        aggregate_key: context.config().signer.public_key().into(),
         signer_set: std::iter::once(context.config().signer.public_key()).collect(),
         signatures_required: 1,
     };
@@ -6732,7 +6732,7 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
         testing_signer_set.signer_keys().into_iter().collect();
     let state = context.state();
     let signer_set_info = SignerSetInfo {
-        aggregate_key,
+        aggregate_key: aggregate_key.into(),
         signer_set: signer_set_public_keys.clone(),
         signatures_required: 1,
     };

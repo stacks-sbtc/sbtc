@@ -1361,7 +1361,10 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     let signer_set = dkg_shares.signer_set_public_keys();
     let signer_set_info = state.registry_signer_set_info().unwrap();
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
-    assert_eq!(signer_set_info.aggregate_key, dkg_shares.aggregate_key);
+    assert_eq!(
+        signer_set_info.aggregate_key,
+        dkg_shares.aggregate_key.into()
+    );
     assert_eq!(
         signer_set_info.signatures_required,
         dkg_shares.signature_share_threshold

@@ -217,7 +217,7 @@ pub struct RotateKeys {
     /// PoX cycle.
     #[prost(message, repeated, tag = "1")]
     pub new_keys: ::prost::alloc::vec::Vec<super::super::super::crypto::PublicKey>,
-    /// The aggregate key created by combining the above public keys.
+    /// The v1 aggregate key created by combining the above public keys.
     #[prost(message, optional, tag = "2")]
     pub aggregate_key: ::core::option::Option<super::super::super::crypto::PublicKey>,
     /// The address that deployed the contract.
@@ -226,6 +226,10 @@ pub struct RotateKeys {
     /// The number of signatures required for the multi-sig wallet.
     #[prost(uint32, tag = "4")]
     pub signatures_required: u32,
+    /// The Bitcoin block hash uniquely identifying a v2 rotation. Exactly one
+    /// of this field and aggregate_key is populated.
+    #[prost(message, optional, tag = "5")]
+    pub bitcoin_block_hash: ::core::option::Option<super::super::super::crypto::Uint256>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

@@ -426,7 +426,7 @@ where
                     .expect_get_current_signer_set_info()
                     .returning(move |_| {
                         Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
-                            aggregate_key,
+                            aggregate_key: aggregate_key.into(),
                             ..fake::Faker.fake_with_rng(&mut rng)
                         }))))
                     });
@@ -583,7 +583,7 @@ where
                     .expect_get_current_signer_set_info()
                     .returning(move |_| {
                         Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
-                            aggregate_key,
+                            aggregate_key: aggregate_key.into(),
                             ..fake::Faker.fake_with_rng(&mut rng)
                         }))))
                     });
@@ -803,17 +803,12 @@ where
             is_epoch3: true,
         };
         let (sign_request, multi_tx) = coordinator
-            .construct_withdrawal_accept_stacks_sign_request(
-                withdrawal_req.clone(),
-                &bitcoin_aggregate_key,
-                &WALLET.0,
-            )
+            .construct_withdrawal_accept_stacks_sign_request(withdrawal_req.clone(), &WALLET.0)
             .await
             .expect("Failed to construct withdrawal accept stacks sign request");
 
         let outpoint = withdrawal_req.withdrawal_outpoint();
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
         if let StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(call)) =
@@ -868,7 +863,6 @@ where
         let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
-        let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
 
         // Create test data for the withdrawal request
         let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
@@ -906,16 +900,11 @@ where
         };
 
         let (sign_request, multi_tx) = coordinator
-            .construct_withdrawal_reject_stacks_sign_request(
-                &withdrawal_req,
-                &bitcoin_aggregate_key,
-                &WALLET.0,
-            )
+            .construct_withdrawal_reject_stacks_sign_request(&withdrawal_req, &WALLET.0)
             .await
             .expect("Failed to construct withdrawal reject stacks sign request");
 
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
 

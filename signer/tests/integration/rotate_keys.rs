@@ -2,9 +2,11 @@ use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
 
 use sbtc::testing::regtest;
+use signer::context::Context as _;
 use signer::error::Error;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
+use signer::stacks::api::SignerSetInfo;
 use signer::stacks::contracts::AsContractCall as _;
 use signer::stacks::contracts::ReqContext;
 use signer::stacks::contracts::RotateKeysErrorMsg;
@@ -133,7 +135,7 @@ impl TestRotateKeySetup {
             address,
             block_hash: self.block_hash,
             txid: self.txid,
-            aggregate_key,
+            aggregate_key: aggregate_key.into(),
             signer_set: self.signer_keys.clone(),
             signatures_required: self.signatures_required,
         };
@@ -157,12 +159,156 @@ fn make_rotate_key(setup: &TestRotateKeySetup) -> (RotateKeysV1, ReqContext) {
         stacks_chain_tip: setup.block_hash,
         context_window: 10,
         origin: fake::Faker.fake_with_rng(&mut OsRng),
-        aggregate_key: setup.aggregate_key(),
         signatures_required: setup.signatures_required,
         deployer: StacksAddress::burn_address(false),
     };
 
     (rotate_key, req_ctx)
+}
+
+/// Assert that rotate-keys validation failed for the expected policy reason.
+fn assert_rotate_keys_error(error: Error, expected: RotateKeysErrorMsg) {
+    match error {
+        Error::RotateKeysValidation(error) => assert_eq!(error.error, expected),
+        error => panic!("unexpected error during validation: {error}"),
+    }
+}
+
+#[tokio::test]
+async fn rotate_key_validation_switches_to_v2_checks_at_activation() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let test_model_params = testing::storage::model::Params {
+        num_bitcoin_blocks: 20,
+        num_stacks_blocks_per_bitcoin_block: 3,
+        num_deposit_requests_per_block: 0,
+        num_withdraw_requests_per_block: 0,
+        num_signers_per_request: 0,
+        consecutive_blocks: false,
+    };
+    TestData::generate(&mut rng, &[], &test_model_params)
+        .write_to(&db)
+        .await;
+
+    let setup = TestRotateKeySetup::new(&db, 2, 3, &mut rng).await;
+    let activation_height = setup.chain_tip.block_height;
+    let configured_signers = setup.signer_keys.iter().copied().collect();
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.v2_signing_block_height = Some(activation_height);
+            settings.signer.bootstrap_signing_set = configured_signers;
+            settings.signer.bootstrap_signatures_required = setup.signatures_required;
+            settings.signer.deployer = StacksAddress::burn_address(false);
+        })
+        .build();
+
+    let (_, mut req_ctx) = make_rotate_key(&setup);
+    let rotate_keys = RotateKeysV1::load(&ctx, &req_ctx.chain_tip).await.unwrap();
+    assert_eq!(
+        rotate_keys.aggregate_key,
+        req_ctx.chain_tip.block_hash.into()
+    );
+
+    // Immediately below activation validation still follows the v1 path and
+    // therefore requires DKG shares.
+    req_ctx.chain_tip.block_height = activation_height.saturating_sub(1_u64);
+    assert!(matches!(
+        rotate_keys.validate(&ctx, &req_ctx).await,
+        Err(Error::NoDkgShares)
+    ));
+
+    // At the activation height, the configured signer set is authoritative
+    // and no DKG row is needed.
+    req_ctx.chain_tip.block_height = activation_height;
+    rotate_keys.validate(&ctx, &req_ctx).await.unwrap();
+
+    let mut wrong_signer_set = rotate_keys.clone();
+    let removed_key = *wrong_signer_set.new_keys.first().unwrap();
+    wrong_signer_set.new_keys.remove(&removed_key);
+    assert_rotate_keys_error(
+        wrong_signer_set.validate(&ctx, &req_ctx).await.unwrap_err(),
+        RotateKeysErrorMsg::SignerSetMismatch,
+    );
+
+    let mut wrong_registry_key = rotate_keys.clone();
+    wrong_registry_key.aggregate_key = setup.aggregate_key().into();
+    assert_rotate_keys_error(
+        wrong_registry_key
+            .validate(&ctx, &req_ctx)
+            .await
+            .unwrap_err(),
+        RotateKeysErrorMsg::AggregateKeyMismatch,
+    );
+
+    let mut wrong_threshold = rotate_keys.clone();
+    wrong_threshold.signatures_required += 1;
+    assert_rotate_keys_error(
+        wrong_threshold.validate(&ctx, &req_ctx).await.unwrap_err(),
+        RotateKeysErrorMsg::SignaturesRequiredMismatch,
+    );
+
+    testing::storage::drop_db(db).await;
+}
+
+#[tokio::test]
+async fn rotate_key_validation_v2_rejects_registry_up_to_date() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let test_model_params = testing::storage::model::Params {
+        num_bitcoin_blocks: 20,
+        num_stacks_blocks_per_bitcoin_block: 3,
+        num_deposit_requests_per_block: 0,
+        num_withdraw_requests_per_block: 0,
+        num_signers_per_request: 0,
+        consecutive_blocks: false,
+    };
+    TestData::generate(&mut rng, &[], &test_model_params)
+        .write_to(&db)
+        .await;
+
+    let setup = TestRotateKeySetup::new(&db, 2, 3, &mut rng).await;
+    let activation_height = setup.chain_tip.block_height;
+    let configured_signers = setup.signer_keys.iter().copied().collect();
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.v2_signing_block_height = Some(activation_height);
+            settings.signer.bootstrap_signing_set = configured_signers;
+            settings.signer.bootstrap_signatures_required = setup.signatures_required;
+            settings.signer.deployer = StacksAddress::burn_address(false);
+        })
+        .build();
+
+    let (_, req_ctx) = make_rotate_key(&setup);
+    let rotate_keys = RotateKeysV1::load(&ctx, &req_ctx.chain_tip).await.unwrap();
+
+    // A different threshold means the registry is not yet up to date, even
+    // when it already contains the configured signer set.
+    ctx.state().update_registry_signer_set_info(SignerSetInfo {
+        aggregate_key: setup.aggregate_key().into(),
+        signer_set: rotate_keys.new_keys.clone(),
+        signatures_required: rotate_keys.signatures_required + 1,
+    });
+    rotate_keys.validate(&ctx, &req_ctx).await.unwrap();
+
+    // The registry-key bytes are deliberately from the old v1 rotation. The
+    // no-op check is based on signer set and threshold because each v2
+    // rotation uses a fresh block-hash identifier.
+    ctx.state().update_registry_signer_set_info(SignerSetInfo {
+        aggregate_key: setup.aggregate_key().into(),
+        signer_set: rotate_keys.new_keys.clone(),
+        signatures_required: rotate_keys.signatures_required,
+    });
+
+    assert_rotate_keys_error(
+        rotate_keys.validate(&ctx, &req_ctx).await.unwrap_err(),
+        RotateKeysErrorMsg::RegistryUpToDate,
+    );
+
+    testing::storage::drop_db(db).await;
 }
 
 #[tokio::test]

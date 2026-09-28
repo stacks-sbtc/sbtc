@@ -45,6 +45,7 @@ use crate::storage::DbWrite as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::DkgSharesStatus;
+use crate::storage::model::RegistryKey;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksTxId;
 use crate::transaction_coordinator::should_run_dkg;
@@ -187,7 +188,7 @@ pub enum StacksSignRequestId {
     /// for one of them at any time, we don't differentiate.
     CompleteWithdrawal(u64),
     /// A rotate keys transaction for an aggregate key
-    RotateKeys(PublicKey),
+    RotateKeys(RegistryKey),
     /// A new contract deployment
     SmartContract(SmartContract),
 }
@@ -453,7 +454,7 @@ where
             .context
             .state()
             .registry_signer_set_info()
-            .map(|info| info.aggregate_key)
+            .and_then(|info| info.aggregate_key.v1_public_key())
             .ok_or(Error::NoDkgShares)?;
 
         let dkg_shares = db.get_encrypted_dkg_shares(aggregate_key).await?;
@@ -586,8 +587,17 @@ where
         // If the sbtc-registry has not been deployed yet, then we allow
         // any DKG shares for smart contract deployments, but require
         // verified DKG shares for other transactions.
+        let config = &self.context.config().signer;
         let signer_set_info = match state.registry_signer_set_info() {
             Some(info) => info,
+            // After v2 activation there is no DKG, so the configured
+            // bootstrap signer set is the signing set until the first
+            // rotation, as it is in the tx-coordinator.
+            None if config.is_v2_signing_active(chain_tip.block_height) => SignerSetInfo {
+                aggregate_key: chain_tip.block_hash.into(),
+                signer_set: config.bootstrap_signing_set.clone(),
+                signatures_required: config.bootstrap_signatures_required,
+            },
             None => match db.get_latest_verified_dkg_shares().await? {
                 Some(info) => info.into(),
                 None if matches!(request.contract_tx, StacksTx::SmartContract(_))
@@ -613,7 +623,6 @@ where
             stacks_chain_tip: stacks_chain_tip.block_hash,
             context_window: self.context_window,
             origin: *origin_public_key,
-            aggregate_key: signer_set_info.aggregate_key,
             signatures_required: signer_set_info.signatures_required,
             deployer: self.context.config().signer.deployer.clone(),
         };
@@ -1767,6 +1776,79 @@ mod tests {
 
     use super::*;
 
+    /// A network that starts after v2 activation has no DKG shares, so
+    /// before the first rotation signers validate against the configured
+    /// bootstrap signer set.
+    #[tokio::test]
+    async fn v2_stacks_sign_request_uses_bootstrap_set_without_registry() {
+        let activation_height = model::BitcoinBlockHeight::from(100_u64);
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(activation_height);
+            })
+            .build();
+        context
+            .with_stacks_client(|client| {
+                client.expect_get_contract_source().returning(|_, _| {
+                    Box::pin(async {
+                        Ok(
+                            blockstack_lib::net::api::getcontractsrc::ContractSrcResponse {
+                                source: String::new(),
+                                publish_height: 1,
+                                marf_proof: None,
+                            },
+                        )
+                    })
+                });
+            })
+            .await;
+        let stacks_block: model::StacksBlock = Faker.fake();
+        context.state().set_stacks_chain_tip(stacks_block.into());
+
+        let chain_tip = model::BitcoinBlockRef {
+            block_hash: Faker.fake(),
+            block_height: activation_height,
+        };
+        let request = StacksTransactionSignRequest {
+            aggregate_key: None,
+            contract_tx: StacksTx::SmartContract(SmartContract::SbtcRegistry),
+            nonce: 0,
+            tx_fee: 1,
+            txid: Faker.fake(),
+        };
+        let origin = context.config().signer.public_key();
+
+        let network = InMemoryNetwork::new();
+        let new_signer = |signer_private_key| TxSignerEventLoop {
+            context: context.clone(),
+            network: network.connect(),
+            signer_private_key,
+            context_window: 1,
+            wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            last_presign_block: None,
+            dkg_begin_pause: None,
+            dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        };
+
+        // A signer in the bootstrap set gets past the signer set check,
+        // and here fails the contract check that comes after it.
+        let mut signer = new_signer(context.config().signer.private_key);
+        let result = signer
+            .assert_valid_stacks_tx_sign_request(&request, &chain_tip, &origin)
+            .await;
+        assert!(matches!(result, Err(Error::ContractAlreadyDeployed(_))));
+
+        // A signer outside the bootstrap set is rejected.
+        let mut signer = new_signer(PrivateKey::new(&mut rand::rngs::OsRng));
+        let result = signer
+            .assert_valid_stacks_tx_sign_request(&request, &chain_tip, &origin)
+            .await;
+        assert!(matches!(result, Err(Error::ValidationSignerSet(_))));
+    }
+
     #[allow(clippy::type_complexity)]
     fn test_environment() -> testing::transaction_signer::TestEnvironment<
         TestContext<
@@ -2261,7 +2343,7 @@ mod tests {
 
         let signer_set_info = SignerSetInfo {
             signer_set: registry_signer_set.clone(),
-            aggregate_key: *registry_signer_set.first().unwrap(),
+            aggregate_key: (*registry_signer_set.first().unwrap()).into(),
             signatures_required: 2,
         };
         context

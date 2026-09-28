@@ -335,7 +335,7 @@ pub trait DbRead {
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
-        aggregate_key: &PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 

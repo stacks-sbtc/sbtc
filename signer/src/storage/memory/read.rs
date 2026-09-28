@@ -385,7 +385,7 @@ impl DbRead for SharedStore {
         &self,
         _stacks_chain_tip: &model::StacksBlockHash,
         _signer_set: &BTreeSet<PublicKey>,
-        _aggregate_key: &PublicKey,
+        _aggregate_key: &model::RegistryKey,
         _signatures_required: u16,
     ) -> Result<bool, Error> {
         unimplemented!()
@@ -479,7 +479,7 @@ impl DbRead for SharedStore {
             .rotate_keys_transactions
             .values()
             .flatten()
-            .find(|tx| &tx.aggregate_key == aggregate_key);
+            .find(|tx| tx.aggregate_key == model::RegistryKeyBytes::from(*aggregate_key));
 
         // Let's merge the signer set with the actual votes.
         if let Some(rotate_keys_tx) = ans {
@@ -518,7 +518,7 @@ impl DbRead for SharedStore {
             .rotate_keys_transactions
             .values()
             .flatten()
-            .find(|tx| &tx.aggregate_key == aggregate_key);
+            .find(|tx| tx.aggregate_key == model::RegistryKeyBytes::from(*aggregate_key));
 
         // Let's merge the signer set with the actual votes.
         if let Some(rotate_keys_tx) = ans {
@@ -1044,7 +1044,7 @@ impl DbRead for InMemoryTransaction {
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
-        aggregate_key: &PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> Result<bool, Error> {
         self.store

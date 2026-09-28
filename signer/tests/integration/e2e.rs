@@ -280,7 +280,9 @@ async fn deposit() {
         .get_current_signers_aggregate_key(&deployer)
         .await
         .unwrap()
-        .expect("no aggregate key in contract");
+        .expect("no aggregate key in contract")
+        .v1_public_key()
+        .expect("test requires a v1 signer key");
 
     // Signers require a donation
     faucet.send_to_script(10_000, aggregate_key.signers_script_pubkey());

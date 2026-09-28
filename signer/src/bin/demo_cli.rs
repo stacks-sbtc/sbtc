@@ -282,6 +282,7 @@ impl Context {
         self.stacks_client
             .get_current_signers_aggregate_key(&self.deployer)
             .await
+            .map(|key| key.and_then(|key| key.v1_public_key()))
             .map_err(Error::from)
     }
 }

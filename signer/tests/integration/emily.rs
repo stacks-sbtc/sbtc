@@ -361,7 +361,7 @@ async fn deposit_flow() {
 
             client
                 .expect_get_current_signers_aggregate_key()
-                .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key)))));
+                .returning(move |_| Box::pin(std::future::ready(Ok(Some(aggregate_key.into())))));
         })
         .await;
 

@@ -349,6 +349,122 @@ impl std::fmt::Display for KeySetId {
     }
 }
 
+/// The opaque 33-byte value stored in a registry key-rotation event.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub struct RegistryKeyBytes([u8; 33]);
+
+impl RegistryKeyBytes {
+    /// Return the raw registry representation.
+    pub fn to_bytes(self) -> [u8; 33] {
+        self.0
+    }
+}
+
+impl From<[u8; 33]> for RegistryKeyBytes {
+    fn from(value: [u8; 33]) -> Self {
+        Self(value)
+    }
+}
+
+impl From<PublicKey> for RegistryKeyBytes {
+    fn from(value: PublicKey) -> Self {
+        Self(value.serialize())
+    }
+}
+
+impl From<RegistryKey> for RegistryKeyBytes {
+    fn from(value: RegistryKey) -> Self {
+        Self(value.to_bytes())
+    }
+}
+
+impl From<sbtc::events::RegistryKeyBytes> for RegistryKeyBytes {
+    fn from(value: sbtc::events::RegistryKeyBytes) -> Self {
+        Self(value.to_bytes())
+    }
+}
+
+impl TryFrom<RegistryKeyBytes> for RegistryKey {
+    type Error = secp256k1::Error;
+
+    fn try_from(value: RegistryKeyBytes) -> Result<Self, Self::Error> {
+        Self::from_slice(&value.0)
+    }
+}
+
+impl std::fmt::Display for RegistryKeyBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        hex::encode(self.0).fmt(f)
+    }
+}
+
+/// The versioned signer identifier stored in the registry's aggregate-key field.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "testing", derive(fake::Dummy))]
+pub enum RegistryKey {
+    /// A v1 WSTS aggregate public key.
+    V1(PublicKey),
+    /// The Bitcoin block hash uniquely identifying a v2 rotation.
+    V2(BitcoinBlockHash),
+}
+
+impl RegistryKey {
+    /// Parse a registry key from its 33-byte wire encoding.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, secp256k1::Error> {
+        if bytes.len() == 33 && bytes[0] == 0xff {
+            let mut block_hash = [0; 32];
+            block_hash.copy_from_slice(&bytes[1..]);
+            Ok(Self::V2(block_hash.into()))
+        } else {
+            secp256k1::PublicKey::from_slice(bytes)
+                .map(PublicKey::from)
+                .map(Self::V1)
+        }
+    }
+
+    /// Return the 33-byte registry encoding.
+    pub fn to_bytes(self) -> [u8; 33] {
+        match self {
+            Self::V1(public_key) => public_key.serialize(),
+            Self::V2(block_hash) => {
+                let mut bytes = [0xff; 33];
+                bytes[1..].copy_from_slice(&block_hash.into_bytes());
+                bytes
+            }
+        }
+    }
+
+    /// Return the WSTS aggregate key when this is a v1 registry key.
+    pub fn v1_public_key(self) -> Option<PublicKey> {
+        match self {
+            Self::V1(public_key) => Some(public_key),
+            Self::V2(_) => None,
+        }
+    }
+}
+
+impl From<PublicKey> for RegistryKey {
+    fn from(value: PublicKey) -> Self {
+        Self::V1(value)
+    }
+}
+
+impl From<BitcoinBlockHash> for RegistryKey {
+    fn from(value: BitcoinBlockHash) -> Self {
+        Self::V2(value)
+    }
+}
+
+impl std::fmt::Display for RegistryKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::V1(public_key) => public_key.fmt(f),
+            Self::V2(block_hash) => write!(f, "v2:{block_hash}"),
+        }
+    }
+}
+
 /// The signing scheme associated with a key set.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type)]
 #[sqlx(type_name = "script_version", rename_all = "lowercase")]
@@ -703,7 +819,7 @@ impl EncryptedDkgShares {
 impl From<EncryptedDkgShares> for SignerSetInfo {
     fn from(value: EncryptedDkgShares) -> Self {
         SignerSetInfo {
-            aggregate_key: value.aggregate_key,
+            aggregate_key: value.aggregate_key.into(),
             signer_set: value.signer_set_public_keys(),
             signatures_required: value.signature_share_threshold,
         }
@@ -722,24 +838,13 @@ pub struct KeyRotationEvent {
     /// The principal that can make contract calls into the protected
     /// public functions in the sbtc smart contracts.
     pub address: StacksPrincipal,
-    /// The aggregate key of the DKG run associated with this event.
-    pub aggregate_key: PublicKey,
-    /// The public keys of the signers who participated in DKG round
-    /// associated with this event.
+    /// The opaque aggregate-key bytes installed by this event.
+    pub aggregate_key: RegistryKeyBytes,
+    /// The signer public keys installed by this event.
     pub signer_set: Vec<PublicKey>,
     /// The number of signatures required for the multi-sig wallet.
     #[sqlx(try_from = "i32")]
     pub signatures_required: u16,
-}
-
-impl From<KeyRotationEvent> for SignerSetInfo {
-    fn from(value: KeyRotationEvent) -> Self {
-        SignerSetInfo {
-            aggregate_key: value.aggregate_key,
-            signer_set: value.signer_set.into_iter().collect(),
-            signatures_required: value.signatures_required,
-        }
-    }
 }
 
 /// A struct containing how a signer voted for a deposit or withdrawal
@@ -1646,7 +1751,7 @@ impl From<sbtc::events::WithdrawalCreateEvent> for WithdrawalRequest {
 }
 
 impl From<sbtc::events::KeyRotationEvent> for KeyRotationEvent {
-    fn from(sbtc_event: sbtc::events::KeyRotationEvent) -> KeyRotationEvent {
+    fn from(sbtc_event: sbtc::events::KeyRotationEvent) -> Self {
         KeyRotationEvent {
             txid: sbtc_event.txid.into(),
             block_hash: sbtc_event.block_id.into(),
@@ -1824,6 +1929,11 @@ impl Sub for BitcoinBlockHeight {
 }
 
 impl BitcoinBlockHeight {
+    /// Create a new Bitcoin block height.
+    pub const fn new(height: u64) -> Self {
+        Self(height)
+    }
+
     /// Behaves same as u64.saturating_add
     pub fn saturating_add(self, rhs: impl Into<BitcoinBlockHeight>) -> Self {
         let rhs: u64 = rhs.into().0;

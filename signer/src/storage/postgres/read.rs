@@ -1904,7 +1904,7 @@ impl PgRead {
         executor: &'e mut E,
         stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
-        aggregate_key: &PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> Result<bool, Error>
     where
@@ -2885,7 +2885,7 @@ impl DbRead for PgStore {
         &self,
         stacks_chain_tip: &StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
-        aggregate_key: &PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> Result<bool, Error> {
         PgRead::key_rotation_exists(
@@ -3331,7 +3331,7 @@ impl DbRead for PgTransaction<'_> {
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &std::collections::BTreeSet<crate::keys::PublicKey>,
-        aggregate_key: &crate::keys::PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> Result<bool, Error> {
         PgRead::key_rotation_exists(

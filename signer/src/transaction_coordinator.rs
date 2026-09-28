@@ -70,6 +70,7 @@ use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockRef;
+use crate::storage::model::RegistryKey;
 use crate::storage::model::StacksTxId;
 use crate::wsts_state_machine::FireCoordinator;
 use crate::wsts_state_machine::FrostCoordinator;
@@ -366,41 +367,14 @@ where
             return Ok(());
         }
 
-        let maybe_registry_signer_set_info = self.context.state().registry_signer_set_info();
-
         tracing::debug!("we are the coordinator");
         metrics::counter!(Metrics::CoordinatorTenuresTotal).increment(1);
 
         tracing::debug!("determining if we need to coordinate DKG");
-        let should_coordinate_dkg = should_run_dkg(&self.context, &bitcoin_chain_tip).await?;
-        let aggregate_key = if should_coordinate_dkg {
-            match self.coordinate_dkg(&bitcoin_chain_tip).await {
-                Ok(key) => key,
-                Err(error) => {
-                    tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
-                    maybe_registry_signer_set_info
-                        .as_ref()
-                        .map(|info| info.aggregate_key)
-                        .ok_or(Error::MissingAggregateKey(*bitcoin_chain_tip.block_hash))?
-                }
-            }
-        } else {
-            // If we do not have signer set info in the registry, then we
-            // are in the bootstrap phase. Our latest DKG shares may be
-            // 'Unverified', but if we are here then they were not 'Failed'
-            // when we made to call to `should_run_dkg`, since we
-            // will coordinate DKG if our last DKG shares are 'Failed'. But
-            // we could be loading 'Failed' shares here.
-            match maybe_registry_signer_set_info.as_ref() {
-                Some(info) => info.aggregate_key,
-                None => self
-                    .context
-                    .get_storage()
-                    .get_latest_encrypted_dkg_shares()
-                    .await?
-                    .map(|shares| shares.aggregate_key)
-                    .ok_or(Error::NoDkgShares)?,
-            }
+        if should_run_dkg(&self.context, &bitcoin_chain_tip).await?
+            && let Err(error) = self.coordinate_dkg(&bitcoin_chain_tip).await
+        {
+            tracing::error!(%error, "failed to coordinate DKG; using existing aggregate key");
         };
 
         let chain_tip_hash = &bitcoin_chain_tip.block_hash;
@@ -409,17 +383,13 @@ where
         let wallet = self.get_signer_wallet().await?;
 
         if !self.context.state().sbtc_contracts_deployed() {
-            self.deploy_smart_contracts(chain_tip_hash, &wallet, &aggregate_key)
-                .await?;
+            self.deploy_smart_contracts(chain_tip_hash, &wallet).await?;
 
             return Ok(());
         }
 
-        let rotate_key_txid = self.check_and_submit_rotate_key_transaction(
-            &bitcoin_chain_tip,
-            &wallet,
-            &aggregate_key,
-        );
+        let rotate_key_txid =
+            self.check_and_submit_rotate_key_transaction(&bitcoin_chain_tip, &wallet);
 
         // If a rotate-keys contract call has been submitted, we stop our
         // tenure to make sure that all signers are up to date with the
@@ -433,17 +403,18 @@ where
             return Ok(());
         }
 
-        // If we have just run DKG again but did not successfully submit
-        // the key rotation transaction for it, then the aggregate key
-        // above is not the right one, and we should use the aggregate key
-        // in the registry if it's available.
-        let Some(signer_set_info) = maybe_registry_signer_set_info.as_ref() else {
+        // Bitcoin transactions are signed by the signer set in the
+        // registry, which must hold a v1 aggregate key.
+        let Some(signer_set_info) = self.context.state().registry_signer_set_info() else {
             return Err(Error::NoKeyRotationEvent);
         };
-
+        let aggregate_key = signer_set_info
+            .aggregate_key
+            .v1_public_key()
+            .ok_or(Error::NoKeyRotationEvent)?;
         let bitcoin_processing_fut = self.construct_and_sign_bitcoin_sbtc_transactions(
             &bitcoin_chain_tip,
-            &signer_set_info.aggregate_key,
+            &aggregate_key,
             &signer_set_info.signer_set,
         );
 
@@ -451,26 +422,61 @@ where
             tracing::error!(%error, "failed to construct and sign bitcoin transactions");
         }
 
-        self.construct_and_sign_stacks_response_transactions(
-            &bitcoin_chain_tip,
-            &wallet,
-            &signer_set_info.aggregate_key,
-        )
-        .await?;
+        self.construct_and_sign_stacks_response_transactions(&bitcoin_chain_tip, &wallet)
+            .await?;
         tracing::debug!("coordinator tenure completed successfully");
 
         Ok(())
     }
 
-    /// Submit the rotate key tx for the latest DKG shares, if the aggregate key
-    /// differs from the one in the smart contract registry
+    /// Submit a rotation when the active v1 key, or after v2 activation the
+    /// configured signer set, differs from the smart-contract registry.
     #[tracing::instrument(skip_all)]
     async fn check_and_submit_rotate_key_transaction(
         &mut self,
         bitcoin_chain_tip: &model::BitcoinBlockRef,
         wallet: &SignerWallet,
-        aggregate_key: &PublicKey,
     ) -> Result<Option<StacksTxId>, Error> {
+        let current_signer_set_info = self.context.state().registry_signer_set_info();
+        let current_aggregate_key = current_signer_set_info
+            .as_ref()
+            .map(|info| info.aggregate_key);
+
+        let is_v2_signing_active = self
+            .context
+            .config()
+            .signer
+            .is_v2_signing_active(bitcoin_chain_tip.block_height);
+
+        if is_v2_signing_active {
+            // when v2 signing is active, RotateKeysV1::load is infallible.
+            let rotate_keys = RotateKeysV1::load(&self.context, bitcoin_chain_tip).await?;
+            if rotate_keys.matches_registry(current_signer_set_info.as_ref()) {
+                return Ok(None);
+            }
+            tracing::info!(
+                "configured signer set differs from the registry; a key rotation is necessary"
+            );
+
+            // A rotation can fail while signers' configs disagree, for
+            // example during a staggered rollout of a signer set change.
+            // Bitcoin processing uses the registry signer set, so we carry
+            // on with the tenure rather than stop every tenure until the
+            // configs agree.
+            let result_fut = self.construct_and_sign_rotate_key_transaction(
+                &bitcoin_chain_tip.block_hash,
+                rotate_keys,
+                wallet,
+            );
+            return match result_fut.await {
+                Ok(txid) => Ok(Some(txid)),
+                Err(error) => {
+                    tracing::error!(%error, "failed to sign or submit rotate-key transaction");
+                    Ok(None)
+                }
+            };
+        }
+
         let last_dkg = self
             .context
             .get_storage()
@@ -482,13 +488,7 @@ where
             return Ok(None);
         };
 
-        let current_aggregate_key = self
-            .context
-            .state()
-            .registry_signer_set_info()
-            .map(|info| info.aggregate_key);
-
-        let (needs_verification, needs_rotate_key) = assert_rotate_key_action(
+        let (needs_verification, needs_rotate_key) = assert_v1_rotate_key_action(
             &self.context,
             &last_dkg,
             current_aggregate_key,
@@ -528,18 +528,12 @@ where
                 "our aggregate key differs from the one in the registry contract; a key rotation may be necessary"
             );
 
-            // current_aggregate_key define which wallet can sign stacks tx interacting
-            // with the registry smart contract; fallbacks to `aggregate_key` if it's
-            // the first rotate key tx.
-            let signing_key = &current_aggregate_key.unwrap_or(*aggregate_key);
-
             // Construct, sign and submit the rotate key transaction.
             tracing::info!("preparing to submit a rotate-key transaction");
             let txid = self
                 .construct_and_sign_rotate_key_transaction(
                     &bitcoin_chain_tip.block_hash,
-                    signing_key,
-                    &last_dkg.aggregate_key,
+                    RotateKeysV1::load(&self.context, bitcoin_chain_tip).await?,
                     wallet,
                 )
                 .await
@@ -813,22 +807,14 @@ where
         &mut self,
         chain_tip: &model::BitcoinBlockRef,
         wallet: &SignerWallet,
-        bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
-        let fut = self.construct_and_sign_stacks_deposit_response_transactions(
-            chain_tip,
-            wallet,
-            bitcoin_aggregate_key,
-        );
+        let fut = self.construct_and_sign_stacks_deposit_response_transactions(chain_tip, wallet);
         if let Err(error) = fut.await {
             tracing::error!(%error, "could not process deposit response transactions on stacks");
         }
 
-        let fut = self.construct_and_sign_stacks_withdrawal_response_transactions(
-            chain_tip,
-            wallet,
-            bitcoin_aggregate_key,
-        );
+        let fut =
+            self.construct_and_sign_stacks_withdrawal_response_transactions(chain_tip, wallet);
         if let Err(error) = fut.await {
             tracing::error!(%error, "could not process withdrawal response transactions on stacks");
         }
@@ -841,7 +827,6 @@ where
         &mut self,
         chain_tip: &model::BitcoinBlockRef,
         wallet: &SignerWallet,
-        bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let stacks = self.context.get_stacks_client();
@@ -896,8 +881,7 @@ where
                 Ok(false) => (),
             };
 
-            let sign_request_fut =
-                self.construct_deposit_stacks_sign_request(req, bitcoin_aggregate_key, wallet);
+            let sign_request_fut = self.construct_deposit_stacks_sign_request(req, wallet);
 
             let (sign_request, multi_tx) = match sign_request_fut.await {
                 Ok(res) => res,
@@ -944,7 +928,6 @@ where
         &mut self,
         chain_tip: &model::BitcoinBlockRef,
         wallet: &SignerWallet,
-        bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let stacks_chain_tip = self
@@ -996,12 +979,7 @@ where
             }
 
             let withdrawal_id = swept_request.qualified_id();
-            let fut = self.construct_and_sign_withdrawal_accept(
-                chain_tip,
-                wallet,
-                bitcoin_aggregate_key,
-                swept_request,
-            );
+            let fut = self.construct_and_sign_withdrawal_accept(chain_tip, wallet, swept_request);
 
             if let Err(error) = fut.await {
                 tracing::warn!(
@@ -1019,12 +997,7 @@ where
             }
 
             let withdrawal_id = withdrawal.qualified_id();
-            let fut = self.construct_and_sign_withdrawal_reject(
-                chain_tip,
-                wallet,
-                bitcoin_aggregate_key,
-                withdrawal,
-            );
+            let fut = self.construct_and_sign_withdrawal_reject(chain_tip, wallet, withdrawal);
             if let Err(error) = fut.await {
                 tracing::warn!(
                     %error,
@@ -1042,7 +1015,6 @@ where
         &mut self,
         chain_tip: &model::BitcoinBlockRef,
         wallet: &SignerWallet,
-        bitcoin_aggregate_key: &PublicKey,
         request: model::SweptWithdrawalRequest,
     ) -> Result<(), Error> {
         let stacks = self.context.get_stacks_client();
@@ -1058,11 +1030,8 @@ where
         }
 
         tracing::debug!("processing withdrawal request");
-        let sign_request_fut = self.construct_withdrawal_accept_stacks_sign_request(
-            request,
-            bitcoin_aggregate_key,
-            wallet,
-        );
+        let sign_request_fut =
+            self.construct_withdrawal_accept_stacks_sign_request(request, wallet);
 
         let (sign_request, multi_tx) = sign_request_fut.await?;
         tracing::debug!("constructed withdrawal accept sign request");
@@ -1107,7 +1076,6 @@ where
         &mut self,
         chain_tip: &model::BitcoinBlockRef,
         wallet: &SignerWallet,
-        bitcoin_aggregate_key: &PublicKey,
         request: model::WithdrawalRequest,
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
@@ -1146,11 +1114,8 @@ where
             return Ok(());
         }
 
-        let sign_request_fut = self.construct_withdrawal_reject_stacks_sign_request(
-            &request,
-            bitcoin_aggregate_key,
-            wallet,
-        );
+        let sign_request_fut =
+            self.construct_withdrawal_reject_stacks_sign_request(&request, wallet);
 
         let (sign_request, multi_tx) = sign_request_fut.await?;
 
@@ -1266,13 +1231,11 @@ where
     async fn construct_and_sign_rotate_key_transaction(
         &mut self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
-        aggregate_key: &PublicKey,
-        rotate_key_aggregate_key: &PublicKey,
+        rotate_keys_v1: RotateKeysV1,
         wallet: &SignerWallet,
     ) -> Result<StacksTxId, Error> {
         // TODO: we should validate the contract call before asking others
         // to sign it.
-        let rotate_keys_v1 = RotateKeysV1::load(&self.context, rotate_key_aggregate_key).await?;
         let contract_call = ContractCall::RotateKeysV1(Box::new(rotate_keys_v1));
 
         // Rotate key transactions should be done as soon as possible, so
@@ -1289,7 +1252,7 @@ where
 
         // We can now proceed with the actual rotate key transaction.
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: Some(*aggregate_key),
+            aggregate_key: None,
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
@@ -1353,7 +1316,6 @@ where
     async fn construct_deposit_stacks_sign_request(
         &self,
         req: model::SweptDepositRequest,
-        bitcoin_aggregate_key: &PublicKey,
         wallet: &SignerWallet,
     ) -> Result<(StacksTransactionSignRequest, MultisigTx), Error> {
         // Retrieve the Bitcoin sweep transaction from the Bitcoin node. We
@@ -1396,7 +1358,7 @@ where
         let tx = multi_tx.tx();
 
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: Some(*bitcoin_aggregate_key),
+            aggregate_key: None,
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
@@ -1414,7 +1376,6 @@ where
     pub async fn construct_withdrawal_accept_stacks_sign_request(
         &self,
         req: model::SweptWithdrawalRequest,
-        bitcoin_aggregate_key: &PublicKey,
         wallet: &SignerWallet,
     ) -> Result<(StacksTransactionSignRequest, MultisigTx), Error> {
         tracing::debug!("constructing withdrawal accept sign request");
@@ -1456,7 +1417,7 @@ where
         let tx = multi_tx.tx();
 
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: Some(*bitcoin_aggregate_key),
+            aggregate_key: None,
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
@@ -1471,7 +1432,6 @@ where
     pub async fn construct_withdrawal_reject_stacks_sign_request(
         &self,
         req: &model::WithdrawalRequest,
-        bitcoin_aggregate_key: &PublicKey,
         wallet: &SignerWallet,
     ) -> Result<(StacksTransactionSignRequest, MultisigTx), Error> {
         let reject_withdrawal_v1 = RejectWithdrawalV1 {
@@ -1490,7 +1450,7 @@ where
         let tx = multi_tx.tx();
 
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: Some(*bitcoin_aggregate_key),
+            aggregate_key: None,
             contract_tx: contract_call.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
@@ -2336,7 +2296,6 @@ where
         &mut self,
         contract_deploy: SmartContract,
         chain_tip: &model::BitcoinBlockHash,
-        bitcoin_aggregate_key: &PublicKey,
         wallet: &SignerWallet,
     ) -> Result<(), Error> {
         let stacks = self.context.get_stacks_client();
@@ -2351,11 +2310,8 @@ where
         // The contract is not deployed yet, so we can proceed
         tracing::info!("contract not deployed yet, proceeding with deployment");
 
-        let sign_request_fut = self.construct_deploy_contracts_stacks_sign_request(
-            contract_deploy,
-            bitcoin_aggregate_key,
-            wallet,
-        );
+        let sign_request_fut =
+            self.construct_deploy_contracts_stacks_sign_request(contract_deploy, wallet);
 
         let (sign_request, multi_tx) = sign_request_fut.await?;
 
@@ -2390,7 +2346,6 @@ where
     async fn construct_deploy_contracts_stacks_sign_request(
         &self,
         contract_deploy: SmartContract,
-        bitcoin_aggregate_key: &PublicKey,
         wallet: &SignerWallet,
     ) -> Result<(StacksTransactionSignRequest, MultisigTx), Error> {
         let tx_fee = self
@@ -2401,7 +2356,7 @@ where
         let tx = multi_tx.tx();
 
         let sign_request = StacksTransactionSignRequest {
-            aggregate_key: Some(*bitcoin_aggregate_key),
+            aggregate_key: None,
             contract_tx: contract_deploy.into(),
             nonce: tx.get_origin_nonce(),
             tx_fee: tx.get_tx_fee(),
@@ -2418,10 +2373,9 @@ where
         &mut self,
         chain_tip: &model::BitcoinBlockHash,
         wallet: &SignerWallet,
-        bitcoin_aggregate_key: &PublicKey,
     ) -> Result<(), Error> {
         for contract in SMART_CONTRACTS {
-            self.deploy_smart_contract(contract, chain_tip, bitcoin_aggregate_key, wallet)
+            self.deploy_smart_contract(contract, chain_tip, wallet)
                 .await?;
         }
 
@@ -2553,6 +2507,14 @@ pub async fn should_run_dkg(
 ) -> Result<bool, Error> {
     let storage = context.get_storage();
     let config = context.config();
+    let is_v2_signing_active = config
+        .signer
+        .is_v2_signing_active(bitcoin_chain_tip.block_height);
+
+    if is_v2_signing_active {
+        tracing::info!("v2 signing is active; skipping DKG");
+        return Ok(false);
+    }
 
     let latest_dkg_shares = storage.get_latest_non_failed_dkg_shares().await?;
     let Some(latest_dkg_shares) = latest_dkg_shares else {
@@ -2608,18 +2570,19 @@ pub async fn should_run_dkg(
     Ok(false)
 }
 
-/// Assert, given the last dkg and smart contract current aggregate key, if we
-/// need to verify the shares and/or issue a rotate key call.
-pub fn assert_rotate_key_action<C>(
+/// Before v2 activation, determine whether the latest DKG shares need
+/// verification and whether their aggregate key needs a registry rotation.
+pub fn assert_v1_rotate_key_action<C>(
     context: &C,
     last_dkg: &model::EncryptedDkgShares,
-    current_aggregate_key: Option<PublicKey>,
+    current_aggregate_key: Option<RegistryKey>,
     bitcoin_chain_tip: &model::BitcoinBlockRef,
 ) -> Result<(bool, bool), Error>
 where
     C: Context,
 {
-    let base_needs_rotate_key = Some(last_dkg.aggregate_key) != current_aggregate_key;
+    let expected_registry_key = last_dkg.aggregate_key.into();
+    let base_needs_rotate_key = Some(expected_registry_key) != current_aggregate_key;
 
     // Check if past verification window, if we are, skip verification
     let dkg_verification_window = context.config().signer.dkg_verification_window;
@@ -2686,7 +2649,7 @@ mod tests {
     use rand::SeedableRng as _;
     use test_case::test_case;
 
-    use super::assert_rotate_key_action;
+    use super::assert_v1_rotate_key_action;
     use super::should_run_dkg;
     use super::*;
 
@@ -2817,10 +2780,23 @@ mod tests {
         ev.process_new_blocks(chain_tip2).await.unwrap();
 
         // Now the chain tip in the state matches the chain tip passed in,
-        // so we should process the blocks. However, we do not have any
-        // signer set info in the state, so we'll bail with an error.
+        // so we should process the blocks. DKG fails, since we have no
+        // peers, but we carry on with the tenure. However, we do not have
+        // any signer set info in the state, so we'll bail with an error.
+        ctx.state().set_sbtc_contracts_deployed();
+        ctx.with_stacks_client(|client| {
+            client.expect_get_account().returning(|_| {
+                Box::pin(std::future::ready(Ok(crate::stacks::api::AccountInfo {
+                    balance: 0,
+                    locked: 0,
+                    unlock_height: 0u64.into(),
+                    nonce: 0,
+                })))
+            });
+        })
+        .await;
         let error = ev.process_new_blocks(chain_tip1).await.unwrap_err();
-        assert_matches::assert_matches!(error, Error::MissingAggregateKey(_));
+        assert_matches::assert_matches!(error, Error::NoKeyRotationEvent);
     }
 
     /// Check that we skip processing bitcoin blocks if the chain tip in
@@ -2885,6 +2861,8 @@ mod tests {
                 settings.signer.bootstrap_signatures_required = 1;
                 settings.signer.bootstrap_signing_set =
                     std::iter::once(settings.signer.public_key()).collect();
+                settings.signer.v2_signing_block_height =
+                    Some(model::BitcoinBlockHeight::from(u64::MAX));
             })
             .build();
 
@@ -3056,6 +3034,24 @@ mod tests {
         assert_eq!(result, expect_dkg);
     }
 
+    #[tokio::test]
+    async fn should_not_run_dkg_after_v2_activation() {
+        let activation_height = BitcoinBlockHeight::from(100_u64);
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(activation_height);
+            })
+            .build();
+        let bitcoin_chain_tip = model::BitcoinBlockRef {
+            block_height: activation_height,
+            block_hash: Faker.fake(),
+        };
+
+        assert!(!should_run_dkg(&context, &bitcoin_chain_tip).await.unwrap());
+    }
+
     fn public_key_from_seed(seed: u64) -> PublicKey {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         PublicKey::from_private_key(&PrivateKey::new(&mut rng))
@@ -3069,7 +3065,7 @@ mod tests {
         needs_rotate_key: bool,
     }
 
-    // Test cases for assert_rotate_key_action with dkg_verification_window = 10
+    // Test cases for v1 rotate-key actions with dkg_verification_window = 10
     // Chain tip height = 100, so verification window is heights 90-100
     // Tests with needs_verification = true use DKG start height 90 (within window)
     // Tests with needs_verification = false use DKG start height 89 (past window)
@@ -3174,7 +3170,8 @@ mod tests {
 
         let current_aggregate_key = scenario
             .current_aggregate_key_seed
-            .map(public_key_from_seed);
+            .map(public_key_from_seed)
+            .map(Into::into);
 
         // Write a bitcoin block at the appropriate height to simulate the current chain tip
         let chain_tip_height = 100u64;
@@ -3185,7 +3182,7 @@ mod tests {
             block_height: chain_tip_height.into(),
         };
 
-        let (needs_verification, needs_rotate_key) = assert_rotate_key_action(
+        let (needs_verification, needs_rotate_key) = assert_v1_rotate_key_action(
             &context,
             &last_dkg,
             current_aggregate_key,
@@ -3223,10 +3220,10 @@ mod tests {
             block_height: 100u64.into(),
         };
 
-        let result = assert_rotate_key_action(
+        let result = assert_v1_rotate_key_action(
             &context,
             &last_dkg,
-            current_aggregate_key,
+            current_aggregate_key.map(Into::into),
             &bitcoin_chain_tip_ref,
         );
         match result {
@@ -3263,7 +3260,7 @@ mod tests {
             block_height: 100u64.into(),
         };
 
-        let result = assert_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref);
+        let result = assert_v1_rotate_key_action(&context, &last_dkg, None, &bitcoin_chain_tip_ref);
 
         // Now we expect success: neither verification nor key
         // rotation are needed since we are past the verification

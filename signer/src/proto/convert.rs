@@ -69,6 +69,7 @@ use crate::stacks::contracts::StacksTx;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::QualifiedRequestId;
+use crate::storage::model::RegistryKey;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
@@ -464,11 +465,18 @@ impl TryFrom<proto::RejectWithdrawal> for RejectWithdrawalV1 {
 
 impl From<RotateKeysV1> for proto::RotateKeys {
     fn from(value: RotateKeysV1) -> Self {
+        let (aggregate_key, bitcoin_block_hash) = match value.aggregate_key {
+            RegistryKey::V1(public_key) => (Some(public_key.into()), None),
+            RegistryKey::V2(block_hash) => {
+                (None, Some(proto::Uint256::from(block_hash.into_bytes())))
+            }
+        };
         proto::RotateKeys {
             new_keys: value.new_keys.into_iter().map(|v| v.into()).collect(),
-            aggregate_key: Some(value.aggregate_key.into()),
+            aggregate_key,
             deployer: Some(value.deployer.into()),
             signatures_required: value.signatures_required.into(),
+            bitcoin_block_hash,
         }
     }
 }
@@ -482,7 +490,11 @@ impl TryFrom<proto::RotateKeys> for RotateKeysV1 {
                 .into_iter()
                 .map(|v| v.try_into())
                 .collect::<Result<BTreeSet<_>, Error>>()?,
-            aggregate_key: value.aggregate_key.required()?.try_into()?,
+            aggregate_key: match (value.aggregate_key, value.bitcoin_block_hash) {
+                (Some(public_key), None) => RegistryKey::V1(public_key.try_into()?),
+                (None, Some(block_hash)) => RegistryKey::V2(<[u8; 32]>::from(block_hash).into()),
+                _ => return Err(Error::TypeConversion),
+            },
             deployer: value.deployer.required()?.try_into()?,
             signatures_required: value
                 .signatures_required

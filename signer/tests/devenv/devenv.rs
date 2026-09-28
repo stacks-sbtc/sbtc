@@ -369,7 +369,9 @@ async fn orphaned_deposit() {
         .get_current_signers_aggregate_key(&deployer)
         .await
         .unwrap()
-        .expect("no signers aggregate key");
+        .expect("no signers aggregate key")
+        .v1_public_key()
+        .expect("test requires a v1 signer key");
     let signers_address = Address::from_script(
         &aggregate_key.signers_script_pubkey(),
         bitcoin::Network::Regtest,

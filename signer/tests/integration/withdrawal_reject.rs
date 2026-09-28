@@ -59,10 +59,6 @@ async fn make_withdrawal_reject(
         context_window: 20,
         // The value here doesn't matter.
         origin: fake::Faker.fake_with_rng(&mut OsRng),
-        // When checking whether the transaction is from the signer, we
-        // check that the first "prevout" has a `scriptPubKey` that the
-        // signers control.
-        aggregate_key: data.signers.aggregate_key(),
         // This value affects whether a withdrawal request is considered
         // "rejected". During validation, a signer won't sign a transaction
         // if it is not considered rejected but the collection of signers.

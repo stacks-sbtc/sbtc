@@ -23,6 +23,8 @@ use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::KeySetId;
+use crate::storage::model::RegistryKey;
+use crate::storage::model::RegistryKeyBytes;
 use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
@@ -66,6 +68,43 @@ impl<'r> sqlx::Encode<'r, sqlx::Postgres> for KeySetId {
 impl sqlx::postgres::PgHasArrayType for KeySetId {
     fn array_type_info() -> PgTypeInfo {
         <Vec<u8> as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for RegistryKey {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let bytes = <[u8; 33] as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(RegistryKey::from_slice(&bytes)?)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for RegistryKey {
+    fn type_info() -> PgTypeInfo {
+        <[u8; 33] as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Encode<'r, sqlx::Postgres> for RegistryKey {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        <[u8; 33] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&self.to_bytes(), buf)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for RegistryKeyBytes {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        <[u8; 33] as sqlx::Decode<sqlx::Postgres>>::decode(value).map(Into::into)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for RegistryKeyBytes {
+    fn type_info() -> PgTypeInfo {
+        <[u8; 33] as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Encode<'r, sqlx::Postgres> for RegistryKeyBytes {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        <[u8; 33] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&self.to_bytes(), buf)
     }
 }
 
