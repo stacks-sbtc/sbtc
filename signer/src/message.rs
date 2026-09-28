@@ -37,6 +37,10 @@ pub enum Payload {
     BitcoinPreSignRequest(BitcoinPreSignRequest),
     /// An acknowledgment of a BitconPreSignRequest
     BitcoinPreSignAck(BitcoinPreSignAck),
+    /// A request for one independent BIP340 signature.
+    BitcoinSignatureRequest(BitcoinSignatureRequest),
+    /// A signer's independent BIP340 signature.
+    BitcoinSignatureResponse(BitcoinSignatureResponse),
 }
 
 impl std::fmt::Display for Payload {
@@ -68,6 +72,8 @@ impl std::fmt::Display for Payload {
             }
             Self::BitcoinPreSignRequest(_) => write!(f, "BitcoinPreSignRequest(..)"),
             Self::BitcoinPreSignAck(_) => write!(f, "BitcoinPreSignAck(..)"),
+            Self::BitcoinSignatureRequest(_) => write!(f, "BitcoinSignatureRequest(..)"),
+            Self::BitcoinSignatureResponse(_) => write!(f, "BitcoinSignatureResponse(..)"),
         }
     }
 }
@@ -121,6 +127,18 @@ impl From<BitcoinPreSignRequest> for Payload {
 impl From<BitcoinPreSignAck> for Payload {
     fn from(value: BitcoinPreSignAck) -> Self {
         Self::BitcoinPreSignAck(value)
+    }
+}
+
+impl From<BitcoinSignatureRequest> for Payload {
+    fn from(value: BitcoinSignatureRequest) -> Self {
+        Self::BitcoinSignatureRequest(value)
+    }
+}
+
+impl From<BitcoinSignatureResponse> for Payload {
+    fn from(value: BitcoinSignatureResponse) -> Self {
+        Self::BitcoinSignatureResponse(value)
     }
 }
 
@@ -254,6 +272,22 @@ impl std::fmt::Display for BitcoinPreSignRequest {
 /// An acknowledgment of a [`BitcoinPreSignRequest`].
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BitcoinPreSignAck;
+
+/// A request for an independent BIP340 signature over a Bitcoin sighash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BitcoinSignatureRequest {
+    /// The sighash to sign.
+    pub sighash: model::SigHash,
+}
+
+/// An independent BIP340 signature produced by one signer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BitcoinSignatureResponse {
+    /// The sighash that was signed.
+    pub sighash: model::SigHash,
+    /// The signature over `sighash`.
+    pub signature: secp256k1::schnorr::Signature,
+}
 
 /// The identifier for a WSTS message.
 #[derive(Debug, Clone, Copy, PartialEq)]

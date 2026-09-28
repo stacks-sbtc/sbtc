@@ -423,6 +423,10 @@ pub enum Error {
     #[error("could not convert the given compact bytes into an ECDSA signature: {0}")]
     InvalidEcdsaSignatureBytes(#[source] secp256k1::Error),
 
+    /// The given BIP340 signature bytes were invalid.
+    #[error("could not convert the given bytes into a Schnorr signature: {0}")]
+    InvalidSchnorrSignatureBytes(#[source] secp256k1::Error),
+
     /// This happens when we attempt to convert a `[u8; 65]` into a
     /// recoverable ECDSA signature.
     #[error("could not recover the public key from the signature: {0}")]

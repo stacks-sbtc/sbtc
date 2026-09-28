@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use bitcoin::OutPoint;
+use bitcoin::hashes::Hash as _;
 use clarity::codec::StacksMessageCodec as _;
 use clarity::vm::types::PrincipalData;
 use p256k1::point::Point;
@@ -47,6 +48,8 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::message::BitcoinPreSignAck;
 use crate::message::BitcoinPreSignRequest;
+use crate::message::BitcoinSignatureRequest;
+use crate::message::BitcoinSignatureResponse;
 use crate::message::Payload;
 use crate::message::SignerDepositDecision;
 use crate::message::SignerMessage;
@@ -1269,6 +1272,74 @@ impl From<proto::BitcoinPreSignAck> for BitcoinPreSignAck {
     }
 }
 
+impl From<secp256k1::schnorr::Signature> for proto::SchnorrSignature {
+    fn from(value: secp256k1::schnorr::Signature) -> Self {
+        let bytes = value.as_ref();
+        let mut lower = [0; 32];
+        let mut upper = [0; 32];
+        lower.copy_from_slice(&bytes[..32]);
+        upper.copy_from_slice(&bytes[32..]);
+        Self {
+            lower_bits: Some(proto::Uint256::from(lower)),
+            upper_bits: Some(proto::Uint256::from(upper)),
+        }
+    }
+}
+
+impl TryFrom<proto::SchnorrSignature> for secp256k1::schnorr::Signature {
+    type Error = Error;
+
+    fn try_from(value: proto::SchnorrSignature) -> Result<Self, Self::Error> {
+        let lower: [u8; 32] = value.lower_bits.required()?.into();
+        let upper: [u8; 32] = value.upper_bits.required()?.into();
+        let mut bytes = [0; 64];
+        bytes[..32].copy_from_slice(&lower);
+        bytes[32..].copy_from_slice(&upper);
+        secp256k1::schnorr::Signature::from_slice(&bytes)
+            .map_err(Error::InvalidSchnorrSignatureBytes)
+    }
+}
+
+impl From<BitcoinSignatureRequest> for proto::BitcoinSignatureRequest {
+    fn from(value: BitcoinSignatureRequest) -> Self {
+        Self {
+            sighash: Some(proto::Uint256::from(value.sighash.to_byte_array())),
+        }
+    }
+}
+
+impl TryFrom<proto::BitcoinSignatureRequest> for BitcoinSignatureRequest {
+    type Error = Error;
+
+    fn try_from(value: proto::BitcoinSignatureRequest) -> Result<Self, Self::Error> {
+        let bytes: [u8; 32] = value.sighash.required()?.into();
+        Ok(Self {
+            sighash: bitcoin::TapSighash::from_byte_array(bytes).into(),
+        })
+    }
+}
+
+impl From<BitcoinSignatureResponse> for proto::BitcoinSignatureResponse {
+    fn from(value: BitcoinSignatureResponse) -> Self {
+        Self {
+            sighash: Some(proto::Uint256::from(value.sighash.to_byte_array())),
+            signature: Some(value.signature.into()),
+        }
+    }
+}
+
+impl TryFrom<proto::BitcoinSignatureResponse> for BitcoinSignatureResponse {
+    type Error = Error;
+
+    fn try_from(value: proto::BitcoinSignatureResponse) -> Result<Self, Self::Error> {
+        let bytes: [u8; 32] = value.sighash.required()?.into();
+        Ok(Self {
+            sighash: bitcoin::TapSighash::from_byte_array(bytes).into(),
+            signature: value.signature.required()?.try_into()?,
+        })
+    }
+}
+
 impl From<SignerMessage> for proto::SignerMessage {
     fn from(value: SignerMessage) -> Self {
         proto::SignerMessage {
@@ -1312,6 +1383,12 @@ impl From<Payload> for proto::Payload {
             Payload::BitcoinPreSignAck(inner) => {
                 proto::signer_message::Payload::BitcoinPreSignAck(inner.into())
             }
+            Payload::BitcoinSignatureRequest(inner) => {
+                proto::signer_message::Payload::BitcoinSignatureRequest(inner.into())
+            }
+            Payload::BitcoinSignatureResponse(inner) => {
+                proto::signer_message::Payload::BitcoinSignatureResponse(inner.into())
+            }
         }
     }
 }
@@ -1340,6 +1417,12 @@ impl TryFrom<proto::Payload> for Payload {
             }
             proto::signer_message::Payload::BitcoinPreSignAck(inner) => {
                 Payload::BitcoinPreSignAck(inner.into())
+            }
+            proto::signer_message::Payload::BitcoinSignatureRequest(inner) => {
+                Payload::BitcoinSignatureRequest(inner.try_into()?)
+            }
+            proto::signer_message::Payload::BitcoinSignatureResponse(inner) => {
+                Payload::BitcoinSignatureResponse(inner.try_into()?)
             }
         };
         Ok(payload)
@@ -1637,6 +1720,8 @@ impl codec::ProtoSerializable for SignerMessage {
             Payload::WstsMessage(_) => "SBTC_WSTS_MESSAGE",
             Payload::BitcoinPreSignRequest(_) => "SBTC_BITCOIN_PRE_SIGN_REQUEST",
             Payload::BitcoinPreSignAck(_) => "SBTC_BITCOIN_PRE_SIGN_ACK",
+            Payload::BitcoinSignatureRequest(_) => "SBTC_BITCOIN_SIGNATURE_REQUEST",
+            Payload::BitcoinSignatureResponse(_) => "SBTC_BITCOIN_SIGNATURE_RESPONSE",
         }
     }
 }
@@ -1719,6 +1804,8 @@ mod tests {
     #[test_case(PhantomData::<(Fees, proto::Fees)>; "Fees")]
     #[test_case(PhantomData::<(BitcoinPreSignRequest, proto::BitcoinPreSignRequest)>; "BitcoinPreSignRequest")]
     #[test_case(PhantomData::<(BitcoinPreSignAck, proto::BitcoinPreSignAck)>; "BitcoinPreSignAck")]
+    #[test_case(PhantomData::<(BitcoinSignatureRequest, proto::BitcoinSignatureRequest)>; "BitcoinSignatureRequest")]
+    #[test_case(PhantomData::<(BitcoinSignatureResponse, proto::BitcoinSignatureResponse)>; "BitcoinSignatureResponse")]
     fn convert_protobuf_type<T, U, E>(_: PhantomData<(T, U)>)
     where
         // `.unwrap()` requires that `E` implement `std::fmt::Debug` and

@@ -67,6 +67,8 @@ use crate::keys::PublicKeyXOnly;
 use crate::keys::SignerScriptPubKey as _;
 use crate::message::BitcoinPreSignAck;
 use crate::message::BitcoinPreSignRequest;
+use crate::message::BitcoinSignatureRequest;
+use crate::message::BitcoinSignatureResponse;
 use crate::message::SignerMessage;
 use crate::stacks::contracts::AcceptWithdrawalV1;
 use crate::stacks::contracts::CompleteDepositV1;
@@ -410,6 +412,28 @@ impl fake::Dummy<fake::Faker> for PublicKeyXOnly {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
         let pk: PublicKey = fake::Faker.fake_with_rng(rng);
         Self::from(secp256k1::XOnlyPublicKey::from(pk))
+    }
+}
+
+impl fake::Dummy<fake::Faker> for BitcoinSignatureRequest {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
+        let bytes: [u8; 32] = rng.r#gen();
+        Self {
+            sighash: TapSighash::from_byte_array(bytes).into(),
+        }
+    }
+}
+
+impl fake::Dummy<fake::Faker> for BitcoinSignatureResponse {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
+        let request: BitcoinSignatureRequest = fake::Faker.fake_with_rng(rng);
+        let secret_key = secp256k1::SecretKey::new(rng);
+        let keypair = secp256k1::Keypair::from_secret_key(secp256k1::SECP256K1, &secret_key);
+        let message = secp256k1::Message::from_digest(request.sighash.to_byte_array());
+        Self {
+            sighash: request.sighash,
+            signature: secp256k1::SECP256K1.sign_schnorr_no_aux_rand(&message, &keypair),
+        }
     }
 }
 
