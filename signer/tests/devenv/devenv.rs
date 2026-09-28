@@ -415,6 +415,8 @@ async fn orphaned_deposit() {
         deposit_script: deposit_request.deposit_script.to_hex_string(),
         reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
     };
 
     deposit_api::create_deposit(emily_client.config(), emily_request.clone())

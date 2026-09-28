@@ -379,6 +379,8 @@ async fn exec_deposit(ctx: &Context, args: DepositArgs) -> Result<(), Error> {
             deposit_script: deposit_script.deposit_script().to_hex_string(),
             reclaim_script: reclaim_script.reclaim_script().to_hex_string(),
             transaction_hex: serialize_hex(&unsigned_tx),
+            recipient: None,
+            max_fee: None,
         },
     )
     .await

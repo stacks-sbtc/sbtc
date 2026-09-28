@@ -32,6 +32,9 @@ pub struct DepositInfo {
     /// The most recent Stacks block height the API was aware of when the deposit was last updated. If the most recent update is tied to an artifact on the Stacks blockchain then this height is the Stacks block height that contains that artifact.
     #[serde(rename = "lastUpdateHeight")]
     pub last_update_height: u64,
+    /// Maximum fee the signers may spend while sweeping this deposit. Defaults to zero so that clients can read responses from an Emily that predates this field.
+    #[serde(rename = "maxFee", skip_serializing_if = "Option::is_none")]
+    pub max_fee: Option<u64>,
     /// Stacks address to received the deposited sBTC.
     #[serde(rename = "recipient")]
     pub recipient: String,
@@ -40,6 +43,8 @@ pub struct DepositInfo {
     pub reclaim_script: String,
     #[serde(rename = "status")]
     pub status: models::DepositStatus,
+    #[serde(rename = "version", skip_serializing_if = "Option::is_none")]
+    pub version: Option<models::DepositVersion>,
 }
 
 impl DepositInfo {
@@ -62,9 +67,11 @@ impl DepositInfo {
             deposit_script,
             last_update_block_hash,
             last_update_height,
+            max_fee: None,
             recipient,
             reclaim_script,
             status,
+            version: None,
         }
     }
 }

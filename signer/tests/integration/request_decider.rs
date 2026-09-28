@@ -402,6 +402,8 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
         deposit_script: setup.deposits[0].0.deposit_script.to_hex_string(),
         reclaim_script: setup.deposits[0].0.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&setup.deposits[0].2.tx),
+        recipient: None,
+        max_fee: None,
     };
     let _ = deposit_api::create_deposit(emily_client.config(), body)
         .await

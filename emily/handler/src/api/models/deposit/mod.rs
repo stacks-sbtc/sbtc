@@ -5,6 +5,28 @@ use utoipa::{ToResponse, ToSchema};
 
 use crate::api::models::common::{DepositStatus, Fulfillment};
 
+/// The deposit script format version.
+#[derive(
+    Clone, Copy, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum DepositVersion {
+    /// Legacy aggregate-key deposits.
+    #[default]
+    V1,
+    /// Independent-signature `multi_a` deposits.
+    V2,
+}
+
+impl From<sbtc::deposits::DepositScriptVersion> for DepositVersion {
+    fn from(value: sbtc::deposits::DepositScriptVersion) -> Self {
+        match value {
+            sbtc::deposits::DepositScriptVersion::V1 => Self::V1,
+            sbtc::deposits::DepositScriptVersion::V2 => Self::V2,
+        }
+    }
+}
+
 /// Requests.
 pub mod requests;
 /// Responses.
@@ -12,21 +34,14 @@ pub mod responses;
 
 /// Deposit.
 #[derive(
-    Clone,
-    Default,
-    Debug,
-    Eq,
-    PartialEq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    ToSchema,
-    ToResponse,
+    Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse,
 )]
 #[serde(rename_all = "camelCase")]
 pub struct Deposit {
+    /// Deposit script format version. Defaults to v1 so that clients can
+    /// read responses from an Emily that predates this field.
+    #[serde(default)]
+    pub version: DepositVersion,
     /// Bitcoin transaction id.
     pub bitcoin_txid: String,
     /// Output index on the bitcoin transaction associated with this specific deposit.
@@ -87,27 +102,25 @@ pub struct DepositParameters {
 
 /// Reduced version of the Deposit data.
 #[derive(
-    Clone,
-    Default,
-    Debug,
-    Eq,
-    PartialEq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    ToSchema,
-    ToResponse,
+    Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, ToSchema, ToResponse,
 )]
 #[serde(rename_all = "camelCase")]
 pub struct DepositInfo {
+    /// Deposit script format version. Defaults to v1 so that clients can
+    /// read responses from an Emily that predates this field.
+    #[serde(default)]
+    pub version: DepositVersion,
     /// Bitcoin transaction id.
     pub bitcoin_txid: String,
     /// Output index on the bitcoin transaction associated with this specific deposit.
     pub bitcoin_tx_output_index: u32,
     /// Stacks address to received the deposited sBTC.
     pub recipient: String,
+    /// Maximum fee the signers may spend while sweeping this deposit.
+    /// Defaults to zero so that clients can read responses from an Emily
+    /// that predates this field.
+    #[serde(default)]
+    pub max_fee: u64,
     /// Amount of BTC being deposited in satoshis.
     pub amount: u64,
     /// The most recent Stacks block height the API was aware of when the deposit was last
@@ -130,9 +143,11 @@ pub struct DepositInfo {
 impl From<Deposit> for DepositInfo {
     fn from(deposit: Deposit) -> Self {
         DepositInfo {
+            version: deposit.version,
             bitcoin_txid: deposit.bitcoin_txid,
             bitcoin_tx_output_index: deposit.bitcoin_tx_output_index,
             recipient: deposit.recipient,
+            max_fee: deposit.parameters.max_fee,
             amount: deposit.amount,
             last_update_height: deposit.last_update_height,
             last_update_block_hash: deposit.last_update_block_hash,

@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use warp::http::StatusCode;
 
+use clarity::vm::types::PrincipalData;
 use sbtc::deposits::{CreateDepositRequest, DepositInfo};
+use stacks_common::codec::StacksMessageCodec as _;
 
 use crate::api::models::chainstate::Chainstate;
 use crate::api::models::common::{DepositStatus, Fulfillment};
@@ -59,6 +61,11 @@ pub struct CreateDepositRequestBody {
     pub deposit_script: String,
     /// The raw transaction hex.
     pub transaction_hex: String,
+    /// The consensus-encoded Stacks principal, represented as hex. Required
+    /// for v2 deposits.
+    pub recipient: Option<String>,
+    /// Maximum fee in satoshis. Required for v2 deposits.
+    pub max_fee: Option<u64>,
 }
 
 fn parse_with_custom_error<T, F, E>(input: &str, parser: F, error_msg: &str) -> Result<T, Error>
@@ -66,6 +73,12 @@ where
     F: Fn(&str) -> Result<T, E>,
 {
     parser(input).map_err(|_| Error::HttpRequest(StatusCode::BAD_REQUEST, error_msg.to_string()))
+}
+
+/// Parse a hex-encoded, consensus-serialized Stacks principal.
+fn parse_recipient(input: &str) -> Result<PrincipalData, ()> {
+    let bytes = hex::decode(input).map_err(|_| ())?;
+    PrincipalData::consensus_deserialize(&mut bytes.as_slice()).map_err(|_| ())
 }
 
 impl CreateDepositRequestBody {
@@ -91,9 +104,14 @@ impl CreateDepositRequestBody {
                 ScriptBuf::from_hex,
                 "invalid deposit script",
             )?,
-            // Only v1 deposits are accepted, and they don't need these.
-            recipient: None,
-            max_fee: None,
+            recipient: self
+                .recipient
+                .as_deref()
+                .map(|recipient| {
+                    parse_with_custom_error(recipient, parse_recipient, "invalid recipient")
+                })
+                .transpose()?,
+            max_fee: self.max_fee,
         };
 
         let tx: Transaction = parse_with_custom_error(
@@ -281,6 +299,8 @@ impl UpdateDepositsRequestBody {
 
 #[cfg(test)]
 mod tests {
+    use clarity::types::chainstate::StacksAddress;
+
     use super::*;
     use test_case::test_case;
 
@@ -315,9 +335,27 @@ mod tests {
         serde_json::from_str(json).expect("failed to parse request")
     }
 
+    #[test]
+    fn recipient_uses_the_same_hex_consensus_encoding_as_responses() {
+        let recipient = PrincipalData::from(StacksAddress::burn_address(false));
+        let encoded = hex::encode(recipient.serialize_to_vec());
+
+        assert_eq!(parse_recipient(&encoded), Ok(recipient));
+    }
+
+    #[test]
+    fn recipient_rejects_c32check_encoding() {
+        let recipient = StacksAddress::burn_address(false).to_string();
+
+        assert_eq!(parse_recipient(&recipient), Err(()));
+    }
+
     #[tokio::test]
-    async fn test_deposit_validate_happy_path() {
+    async fn v1_deposit_does_not_require_v2_fields() {
         let deposit_request = parse_request(CREATE_DEPOSIT_VALID);
+
+        assert_eq!(deposit_request.recipient, None);
+        assert_eq!(deposit_request.max_fee, None);
         assert!(deposit_request.validate(true).is_ok());
     }
 

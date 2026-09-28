@@ -212,6 +212,8 @@ async fn deposit_flow() {
         deposit_script: deposit_request.deposit_script.to_hex_string(),
         reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
     };
 
     // Create a fresh block for the block observer to process
@@ -549,6 +551,8 @@ async fn get_deposit_request_works() {
         deposit_script: deposit.deposit_script().to_hex_string(),
         reclaim_script: reclaim.reclaim_script().to_hex_string(),
         transaction_hex: serialize_hex(&setup.tx),
+        recipient: None,
+        max_fee: None,
     };
 
     deposit_api::create_deposit(emily_client.config(), emily_request.clone())
@@ -604,6 +608,8 @@ async fn test_get_deposits_with_status_request_paging(
                 .reclaim_script()
                 .to_hex_string(),
             transaction_hex: serialize_hex(&setup.tx),
+            recipient: None,
+            max_fee: None,
         };
         deposit_api::create_deposit(emily_client.config(), create_deposit_request_body)
     });
@@ -653,6 +659,8 @@ async fn test_get_deposits_returns_pending_and_accepted() {
                 .reclaim_script()
                 .to_hex_string(),
             transaction_hex: serialize_hex(&setup.tx),
+            recipient: None,
+            max_fee: None,
         };
         deposit_api::create_deposit(emily_client.config(), create_deposit_request_body)
     });
