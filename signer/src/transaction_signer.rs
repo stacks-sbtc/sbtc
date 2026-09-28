@@ -883,6 +883,7 @@ where
                             &db,
                             &new_key,
                             Some(&request.message),
+                            Some(request.signature_type),
                             self.context.config().signer.dkg_verification_window,
                             &chain_tip_report.chain_tip,
                         )
@@ -971,6 +972,7 @@ where
                             &db,
                             &new_key,
                             Some(&request.message),
+                            Some(request.signature_type),
                             self.context.config().signer.dkg_verification_window,
                             &chain_tip_report.chain_tip,
                         )
@@ -1034,6 +1036,7 @@ where
                     &self.context.get_storage(),
                     &new_key,
                     Some(&request.message),
+                    None,
                     self.context.config().signer.dkg_verification_window,
                     &chain_tip_report.chain_tip,
                 )
@@ -1081,6 +1084,7 @@ where
                     &self.context.get_storage(),
                     &new_key,
                     None,
+                    None,
                     self.context.config().signer.dkg_verification_window,
                     &chain_tip_report.chain_tip,
                 )
@@ -1120,10 +1124,12 @@ where
     /// - Ensure that the message is within the allowed verification window.
     /// - If a message is provided, ensure that it matches the expected Bitcoin
     ///   sighash of our well-known mock transaction.
+    /// - If a signature type is provided, ensure that it is Taproot.
     pub async fn validate_dkg_verification_message<DB>(
         storage: &DB,
         new_key: &PublicKeyXOnly,
         message: Option<&[u8]>,
+        signature_type: Option<SignatureType>,
         dkg_verification_window: u16,
         bitcoin_chain_tip: &model::BitcoinBlockRef,
     ) -> Result<(), Error>
@@ -1167,6 +1173,19 @@ where
             return Err(Error::DkgVerificationWindowElapsed(
                 latest_shares.aggregate_key,
             ));
+        }
+
+        // DKG verification always signs the well-known mock transaction as a
+        // Taproot key-path spend. Do not allow the coordinator to select a
+        // different signing algorithm for either phase of the signing round.
+        if let Some(signature_type) = signature_type
+            && signature_type != SignatureType::Taproot
+        {
+            tracing::warn!(
+                ?signature_type,
+                "🔐 invalid signature type for DKG verification signing"
+            );
+            return Err(Error::InvalidDkgVerificationSignatureType(signature_type));
         }
 
         // If we don't have a message (i.e. from `SignatureShareResponse`) then

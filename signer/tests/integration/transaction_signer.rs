@@ -1352,6 +1352,7 @@ mod validate_dkg_verification_message {
         pub dkg_verification_window: u16,
         pub bitcoin_chain_tip: BitcoinBlockRef,
         pub message: Option<Vec<u8>>,
+        pub signature_type: Option<wsts::net::SignatureType>,
     }
 
     impl Default for TestParams {
@@ -1365,6 +1366,7 @@ mod validate_dkg_verification_message {
                     block_height: 0u64.into(),
                 },
                 message: None,
+                signature_type: None,
             }
         }
     }
@@ -1383,6 +1385,7 @@ mod validate_dkg_verification_message {
                 db,
                 &self.new_aggregate_key,
                 self.message.as_deref(),
+                self.signature_type,
                 self.dkg_verification_window,
                 &self.bitcoin_chain_tip,
             )
@@ -1574,6 +1577,72 @@ mod validate_dkg_verification_message {
     }
 
     #[tokio::test]
+    async fn non_taproot_signature_type_fails() {
+        let db = testing::storage::new_test_database().await;
+        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+
+        let shares = EncryptedDkgShares {
+            aggregate_key,
+            dkg_shares_status: DkgSharesStatus::Unverified,
+            started_at_bitcoin_block_height: 0u64.into(),
+            ..Faker.fake()
+        };
+        db.write_encrypted_dkg_shares(&shares).await.unwrap();
+
+        let sighash = UnsignedMockTransaction::new(aggregate_key.into())
+            .compute_sighash()
+            .unwrap();
+        for signature_type in [
+            wsts::net::SignatureType::Schnorr,
+            wsts::net::SignatureType::Frost,
+        ] {
+            let params = TestParams {
+                new_aggregate_key: aggregate_key.into(),
+                message: Some(sighash.as_byte_array().to_vec()),
+                signature_type: Some(signature_type),
+                ..Default::default()
+            };
+
+            let result = params.execute(&db).await.unwrap_err();
+            assert!(matches!(
+                result,
+                Error::InvalidDkgVerificationSignatureType(rejected)
+                    if rejected == signature_type
+            ));
+        }
+
+        testing::storage::drop_db(db).await;
+    }
+
+    #[tokio::test]
+    async fn taproot_signature_type_succeeds() {
+        let db = testing::storage::new_test_database().await;
+        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+
+        let shares = EncryptedDkgShares {
+            aggregate_key,
+            dkg_shares_status: DkgSharesStatus::Unverified,
+            started_at_bitcoin_block_height: 0u64.into(),
+            ..Faker.fake()
+        };
+        db.write_encrypted_dkg_shares(&shares).await.unwrap();
+
+        let sighash = UnsignedMockTransaction::new(aggregate_key.into())
+            .compute_sighash()
+            .unwrap();
+        let params = TestParams {
+            new_aggregate_key: aggregate_key.into(),
+            message: Some(sighash.as_byte_array().to_vec()),
+            signature_type: Some(wsts::net::SignatureType::Taproot),
+            ..Default::default()
+        };
+
+        params.execute(&db).await.unwrap();
+
+        testing::storage::drop_db(db).await;
+    }
+
+    #[tokio::test]
     async fn unexpected_sighash_fails() {
         let db = testing::storage::new_test_database().await;
         let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
@@ -1598,6 +1667,7 @@ mod validate_dkg_verification_message {
                 block_height: 10u64.into(),
             },
             message: Some(Faker.fake()),
+            signature_type: None,
         };
 
         let result = params.execute(&db).await.unwrap_err();
