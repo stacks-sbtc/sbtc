@@ -216,6 +216,9 @@ impl EmilyClient {
                 .map_err(Error::DecodeHexScript)?,
             deposit_script: ScriptBuf::from_hex(&deposit.deposit_script)
                 .map_err(Error::DecodeHexScript)?,
+            // The signer only accepts v1 deposits, which don't need these.
+            recipient: None,
+            max_fee: None,
         })
     }
 }
@@ -250,6 +253,9 @@ impl EmilyInteract for EmilyClient {
                 .map_err(Error::DecodeHexScript)?,
             deposit_script: ScriptBuf::from_hex(&deposit.deposit_script)
                 .map_err(Error::DecodeHexScript)?,
+            // The signer only accepts v1 deposits, which don't need these.
+            recipient: None,
+            max_fee: None,
         }))
     }
 

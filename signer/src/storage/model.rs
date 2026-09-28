@@ -15,6 +15,7 @@ use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
 use libp2p::{Multiaddr, PeerId};
+use sbtc::deposits::DepositSigningInfo;
 use serde::{Deserialize, Serialize};
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::StacksBlockId;
@@ -264,6 +265,10 @@ impl From<Deposit> for DepositRequest {
 
         let reclaim_script_hash = TaprootScriptHash::from(&deposit.info.reclaim_script);
 
+        let DepositSigningInfo::V1 { public_key } = deposit.info.signing_info else {
+            unreachable!("DepositRequestValidator::validate rejects v2 deposits");
+        };
+
         Self {
             txid: deposit.info.outpoint.txid.into(),
             output_index: deposit.info.outpoint.vout,
@@ -273,7 +278,7 @@ impl From<Deposit> for DepositRequest {
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,
             lock_time: deposit.info.lock_time.to_consensus_u32(),
-            signers_public_key: deposit.info.signers_public_key.into(),
+            signers_public_key: public_key.into(),
             sender_script_pub_keys: sender_script_pub_keys.into_iter().collect(),
         }
     }

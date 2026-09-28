@@ -142,6 +142,8 @@ where
         outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
         deposit_script,
         reclaim_script,
+        recipient: None,
+        max_fee: None,
     };
 
     let dep = create_req.validate_tx(&deposit_tx, false).unwrap();
@@ -153,7 +155,10 @@ where
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script_hash: TaprootScriptHash::from(&dep.reclaim_script),
-        signers_public_key: dep.signers_public_key,
+        signers_public_key: match &dep.signing_info {
+            sbtc::deposits::DepositSigningInfo::V1 { public_key } => *public_key,
+            sbtc::deposits::DepositSigningInfo::V2 { .. } => unreachable!("v1 test deposit"),
+        },
     };
 
     (deposit_tx, req, dep)

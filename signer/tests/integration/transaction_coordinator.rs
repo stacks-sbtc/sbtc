@@ -6247,6 +6247,8 @@ where
             outpoint: bitcoin::OutPoint::new(deposit_tx.compute_txid(), index as u32),
             deposit_script: deposit_script.clone(),
             reclaim_script: reclaim_script.clone(),
+            recipient: None,
+            max_fee: None,
         };
 
         infos.push(DepositInfo {
@@ -6255,7 +6257,7 @@ where
             deposit_script: req.deposit_script,
             amount: *amount,
             reclaim_script: req.reclaim_script,
-            signers_public_key,
+            signing_info: sbtc::deposits::DepositSigningInfo::V1 { public_key: signers_public_key },
             recipient: deposit_inputs.recipient.clone(),
             lock_time: bitcoin::relative::LockTime::Blocks(Height::from_height(50)),
         });

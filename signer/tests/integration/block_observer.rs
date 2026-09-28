@@ -1774,6 +1774,8 @@ async fn block_observer_ignores_coinbase() {
         outpoint: deposit_request.outpoint,
         reclaim_script: deposit_info.reclaim_script,
         deposit_script: deposit_request.deposit_script.clone(),
+        recipient: None,
+        max_fee: None,
     };
     let bitcoin_client = ctx.get_bitcoin_client();
     let validate_result =
@@ -1836,7 +1838,7 @@ fn make_coinbase_deposit_request(
         amount: req.amount,
         deposit_script,
         reclaim_script,
-        signers_public_key,
+        signing_info: sbtc::deposits::DepositSigningInfo::V1 { public_key: signers_public_key },
         recipient: deposit_inputs.recipient,
         lock_time: bitcoin::relative::LockTime::Blocks((reclaim_inputs.lock_time() as u16).into()),
     };
@@ -1937,6 +1939,8 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
             outpoint: request.outpoint,
             reclaim_script: info.reclaim_script.clone(),
             deposit_script: info.deposit_script.clone(),
+            recipient: None,
+            max_fee: None,
         })
         .collect::<Vec<_>>();
 
@@ -2012,6 +2016,8 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
         outpoint: deposit_request.outpoint,
         reclaim_script: deposit_info.reclaim_script.clone(),
         deposit_script: deposit_info.deposit_script.clone(),
+        recipient: None,
+        max_fee: None,
     };
     let bitcoin_client = ctx.get_bitcoin_client();
     signer::block_observer::DepositRequestValidator::validate(&request, &bitcoin_client, false)

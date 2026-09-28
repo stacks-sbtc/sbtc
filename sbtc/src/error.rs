@@ -7,6 +7,15 @@ use bitcoin::Txid;
 /// Errors
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// A v2 deposit request did not include its recipient.
+    #[error("v2 deposit request is missing the recipient")]
+    MissingV2DepositRecipient,
+    /// A v2 deposit request did not include its maximum fee.
+    #[error("v2 deposit request is missing the maximum fee")]
+    MissingV2DepositMaxFee,
+    /// The supplied data does not match the commitment in a v2 script.
+    #[error("v2 deposit data does not match the script commitment")]
+    InvalidDepositCommitment,
     /// The v2 signing threshold is invalid for the number of signers.
     #[error("invalid v2 deposit threshold {signatures_required} for {signer_count} signers")]
     InvalidDepositThreshold {

@@ -826,6 +826,8 @@ impl TestSweepSetup2 {
                 outpoint: info.outpoint,
                 reclaim_script: info.reclaim_script.clone(),
                 deposit_script: info.deposit_script.clone(),
+                recipient: None,
+                max_fee: None,
             })
             .collect()
     }

@@ -91,6 +91,9 @@ impl CreateDepositRequestBody {
                 ScriptBuf::from_hex,
                 "invalid deposit script",
             )?,
+            // Only v1 deposits are accepted, and they don't need these.
+            recipient: None,
+            max_fee: None,
         };
 
         let tx: Transaction = parse_with_custom_error(
