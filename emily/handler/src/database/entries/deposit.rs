@@ -1,6 +1,7 @@
 //! Entries into the deposit table.
 
 use serde::{Deserialize, Serialize};
+use serde_dynamo::{AttributeValue, Item};
 
 use super::{
     DepositStatusEntry, EntryTrait, KeyTrait, PrimaryIndex, PrimaryIndexTrait, SecondaryIndex,
@@ -16,6 +17,57 @@ use crate::{
 };
 
 // Deposit entry ---------------------------------------------------------------
+
+/// Maximum estimated deposit item size when retaining transaction hex. DynamoDB's hard
+/// item limit is 400 KB, where 1 KB = 1024 bytes, and attribute names count:
+/// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Constraints.html
+/// Every write checks the resulting item against this budget and drops the hex once it
+/// would exceed it. The remaining 10 KiB absorbs error in the size estimate (see
+/// `item_size`) and the version increment applied after the check.
+///
+/// The hex can legitimately exceed this budget: standard transactions may weigh up to
+/// 400,000 WU (`MAX_STANDARD_TX_WEIGHT` in Bitcoin Core's `src/policy/policy.h`), which
+/// is 100-400 KB serialized per BIP 141, so 200-800 KB as hex. Typical deposits are well
+/// under 1 KB of hex and are always retained.
+pub const DEPOSIT_ITEM_SIZE_BUDGET: usize = 390 * 1024;
+
+/// Number size upper bound: one byte per character plus one, never less than
+/// DynamoDB's one byte per two significant digits plus one.
+fn number_size(value: &str) -> usize {
+    value.len() + 1
+}
+
+fn attribute_size(value: &AttributeValue) -> usize {
+    match value {
+        AttributeValue::S(value) => value.len(),
+        AttributeValue::N(value) => number_size(value),
+        AttributeValue::B(value) => value.len(),
+        AttributeValue::Bool(_) | AttributeValue::Null(_) => 1,
+        AttributeValue::M(values) => {
+            3 + values.len()
+                + values
+                    .iter()
+                    .map(|(name, value)| name.len() + attribute_size(value))
+                    .sum::<usize>()
+        }
+        AttributeValue::L(values) => {
+            3 + values.len() + values.iter().map(attribute_size).sum::<usize>()
+        }
+        AttributeValue::Ss(values) => values.iter().map(String::len).sum(),
+        AttributeValue::Ns(values) => values.iter().map(|value| number_size(value)).sum(),
+        AttributeValue::Bs(values) => values.iter().map(Vec::len).sum(),
+    }
+}
+
+/// Upper bound on DynamoDB's item size, following the documented sizing rules:
+/// https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/CapacityUnitCalculations.html
+/// Attribute names and strings use UTF-8 bytes, while lists and maps have three bytes
+/// of overhead plus one byte per element. Numbers use the `number_size` upper bound.
+fn item_size(item: &Item) -> usize {
+    item.iter()
+        .map(|(name, value)| name.len() + attribute_size(value))
+        .sum()
+}
 
 /// Deposit table entry key. This is the primary index key.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -56,6 +108,9 @@ pub struct DepositEntry {
     pub reclaim_script: String,
     /// The raw deposit script.
     pub deposit_script: String,
+    /// Original transaction hex submitted with the validated deposit request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_hex: Option<String>,
     /// The most recent Stacks block height the API was aware of when the deposit was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this height is the Stacks block height that contains that artifact.
@@ -236,6 +291,22 @@ impl DepositEntry {
         self.last_update_block_hash = latest_event.stacks_block_hash;
 
         // Return.
+        Ok(())
+    }
+
+    /// Omit the optional transaction hex if the serialized item exceeds the deposit budget.
+    pub fn omit_transaction_hex_if_oversized(&mut self) -> Result<(), Error> {
+        if self.transaction_hex.is_some()
+            && item_size(&serde_dynamo::to_item(&*self)?) > DEPOSIT_ITEM_SIZE_BUDGET
+        {
+            tracing::warn!(
+                bitcoin_txid = %self.key.bitcoin_txid,
+                bitcoin_tx_output_index = self.key.bitcoin_tx_output_index,
+                budget_bytes = DEPOSIT_ITEM_SIZE_BUDGET,
+                "omitting transaction hex from deposit entry because the item exceeds the size budget"
+            );
+            self.transaction_hex = None;
+        }
         Ok(())
     }
 }
@@ -723,6 +794,76 @@ mod tests {
     use test_case::test_case;
 
     #[test]
+    fn item_size_follows_dynamodb_sizing_rules() {
+        use std::collections::HashMap;
+        let item = |name: &str, value: AttributeValue| -> Item {
+            HashMap::from([(name.to_string(), value)]).into()
+        };
+        // Strings and binary: name bytes + value bytes (UTF-8).
+        assert_eq!(
+            item_size(&item("ab", AttributeValue::S("héllo".into()))),
+            2 + 6
+        );
+        assert_eq!(
+            item_size(&item("ab", AttributeValue::B(vec![0; 10]))),
+            2 + 10
+        );
+        // Bool and null: 1 byte.
+        assert_eq!(item_size(&item("ab", AttributeValue::Bool(true))), 2 + 1);
+        assert_eq!(item_size(&item("ab", AttributeValue::Null(true))), 2 + 1);
+        // Numbers: never below DynamoDB's (digits / 2) + 1 bytes.
+        let number = "123456789012345678901234567890".to_string();
+        let dynamo_number_size = number.len().div_ceil(2) + 1;
+        assert!(item_size(&item("ab", AttributeValue::N(number))) >= 2 + dynamo_number_size);
+        // Lists: 3 bytes overhead + 1 byte per element + element sizes.
+        let list = AttributeValue::L(vec![
+            AttributeValue::S("abc".into()),
+            AttributeValue::Bool(false),
+        ]);
+        assert_eq!(item_size(&item("ab", list)), 2 + 3 + 2 + 3 + 1);
+        // Maps: 3 bytes overhead + 1 byte per element + key and value sizes.
+        let map = AttributeValue::M(HashMap::from([(
+            "key".to_string(),
+            AttributeValue::S("value".into()),
+        )]));
+        assert_eq!(item_size(&item("ab", map)), 2 + 3 + 1 + 3 + 5);
+    }
+
+    #[test]
+    fn transaction_hex_storage_preserves_exact_input_and_omits_large_values() {
+        let mut entry = DepositEntry::default();
+        entry.transaction_hex = Some("aBcD".to_string());
+        entry.omit_transaction_hex_if_oversized().unwrap();
+        assert_eq!(entry.transaction_hex.as_deref(), Some("aBcD"));
+
+        entry.transaction_hex = Some("a".repeat(DEPOSIT_ITEM_SIZE_BUDGET));
+        entry.omit_transaction_hex_if_oversized().unwrap();
+        assert_eq!(entry.transaction_hex, None);
+    }
+
+    #[test]
+    fn transaction_hex_storage_accounts_for_history_and_old_entries() {
+        let mut entry = DepositEntry {
+            transaction_hex: Some("Ab".repeat(170_000)),
+            ..Default::default()
+        };
+        entry.omit_transaction_hex_if_oversized().unwrap();
+        assert!(entry.transaction_hex.is_some());
+
+        entry.history.push(DepositEvent {
+            message: "x".repeat(60_000),
+            ..Default::default()
+        });
+        entry.omit_transaction_hex_if_oversized().unwrap();
+        assert!(entry.transaction_hex.is_none());
+
+        let item: Item = serde_dynamo::to_item(&entry).unwrap();
+        assert!(!item.contains_key("TransactionHex"));
+        let old_entry: DepositEntry = serde_dynamo::from_item(item).unwrap();
+        assert!(old_entry.transaction_hex.is_none());
+    }
+
+    #[test]
     fn deposit_update_should_be_unnecessary_when_event_is_present() {
         let pending = DepositEvent {
             status: DepositStatusEntry::Pending,
@@ -747,6 +888,7 @@ mod tests {
             status: DepositStatus::Pending,
             reclaim_script: "".to_string(),
             deposit_script: "".to_string(),
+            transaction_hex: None,
             last_update_height: 0,
             last_update_block_hash: "".to_string(),
             fulfillment: None,
@@ -788,6 +930,7 @@ mod tests {
             status: DepositStatus::Pending,
             reclaim_script: "".to_string(),
             deposit_script: "".to_string(),
+            transaction_hex: None,
             last_update_height: 0,
             last_update_block_hash: "".to_string(),
             fulfillment: None,
@@ -847,6 +990,7 @@ mod tests {
             status: (&confirmed.status).into(),
             reclaim_script: "test-reclaim".to_string(),
             deposit_script: "test-deposit".to_string(),
+            transaction_hex: None,
             last_update_height: 6,
             last_update_block_hash: "hash6".to_string(),
             fulfillment: Some(fulfillment.clone()),

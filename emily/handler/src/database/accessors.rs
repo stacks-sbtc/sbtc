@@ -71,7 +71,11 @@ pub fn name_to_salt(name: &str) -> Result<SaltString, Error> {
 // Deposit ---------------------------------------------------------------------
 
 /// Add deposit entry.
-pub async fn add_deposit_entry(context: &EmilyContext, entry: &DepositEntry) -> Result<(), Error> {
+pub async fn add_deposit_entry(
+    context: &EmilyContext,
+    entry: &mut DepositEntry,
+) -> Result<(), Error> {
+    entry.omit_transaction_hex_if_oversized()?;
     put_entry::<DepositTablePrimaryIndex>(context, entry).await
 }
 
@@ -80,6 +84,7 @@ pub async fn set_deposit_entry(
     context: &EmilyContext,
     entry: &mut DepositEntry,
 ) -> Result<(), Error> {
+    entry.omit_transaction_hex_if_oversized()?;
     put_entry_with_version::<DepositTablePrimaryIndex>(context, entry).await
 }
 
@@ -232,7 +237,7 @@ pub async fn pull_and_update_deposit_with_retry(
         let update_package: DepositUpdatePackage =
             DepositUpdatePackage::try_from(&deposit_entry, update.clone())?;
         // Attempt to update the deposit.
-        match update_deposit(context, &update_package).await {
+        match update_deposit(context, &update_package, &deposit_entry).await {
             Err(Error::VersionConflict(error)) => {
                 warn!(%error, "received an error when updating a deposit request");
                 err = *error;
@@ -252,15 +257,29 @@ pub async fn pull_and_update_deposit_with_retry(
 pub async fn update_deposit(
     context: &EmilyContext,
     update: &DepositUpdatePackage,
+    original_entry: &DepositEntry,
 ) -> Result<DepositEntry, Error> {
+    let mut candidate = original_entry.clone();
+    candidate.version += 1;
+    candidate.history.push(update.event.clone());
+    candidate.status = (&update.event.status).into();
+    candidate.last_update_height = update.event.stacks_block_height;
+    candidate.last_update_block_hash = update.event.stacks_block_hash.clone();
+    candidate.omit_transaction_hex_if_oversized()?;
+    let remove_transaction_hex =
+        original_entry.transaction_hex.is_some() && candidate.transaction_hex.is_none();
     // Setup the update procedure.
-    let update_expression: &str = " SET
+    let mut update_expression = " SET
         History = list_append(History, :new_event),
         Version = Version + :one,
         OpStatus = :new_op_status,
         LastUpdateHeight = :new_height,
         LastUpdateBlockHash = :new_hash
-    ";
+    "
+    .to_string();
+    if remove_transaction_hex {
+        update_expression.push_str(" REMOVE TransactionHex");
+    }
     // Ensure the version field is what we expect it to be.
     let condition_expression = "attribute_exists(Version) AND Version = :expected_version";
     // Make the key item.
