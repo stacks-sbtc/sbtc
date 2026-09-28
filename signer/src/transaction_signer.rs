@@ -902,17 +902,9 @@ where
                 // NonceRequest cannot discard state already collected for the
                 // signing round.
                 if !self.wsts_state_machines.contains(&state_machine_id) {
-                    let mut state_machine =
+                    let state_machine =
                         SignerStateMachine::load(&db, aggregate_key, self.signer_private_key)
                             .await?;
-
-                    // DKG verification nonce responses are only processed by
-                    // the FROST coordinator that tracks the round, so this
-                    // state machine never receives them and cannot use the
-                    // cache.
-                    if matches!(msg.id, WstsMessageId::DkgVerification(_)) {
-                        state_machine.disable_nonce_response_cache();
-                    }
 
                     self.wsts_state_machines
                         .put(state_machine_id, state_machine);
@@ -994,6 +986,14 @@ where
                         let state_machine_id = StateMachineId::DkgVerification(new_key, *chain_tip);
                         self.assert_dkg_verification_state_machine_state(&state_machine_id)?;
 
+                        // DKG verification supports receiving nonce responses
+                        // before the nonce request. The verification state
+                        // machine buffers and authenticates those messages, so
+                        // use its matching responses to populate the WSTS
+                        // signer's cache before processing the coordinator's
+                        // signature-share request.
+                        self.process_dkg_verification_nonce_responses(&state_machine_id, request)?;
+
                         // We keep DKG verification-related state machines around
                         // so that `verify_sender()` works. This is a bit of a hack.
                         should_pop_state_machine = false;
@@ -1032,10 +1032,10 @@ where
                 span.record(WSTS_SIGN_ID, request.sign_id);
                 span.record(WSTS_SIGN_ITER_ID, request.sign_iter_id);
 
-                // Sweep NonceResponses are fed to the signer state machine so
-                // that it can use the locally received responses when creating
-                // a signature share. DKG-verification NonceResponses are
-                // handled below by the separate verification state machine.
+                // Sweep NonceResponses are fed directly to the signer state
+                // machine. DKG-verification NonceResponses are buffered below
+                // by the separate verification state machine and copied into
+                // the signer state machine before it creates a signature share.
                 let new_key = match msg.id {
                     WstsMessageId::DkgVerification(key) => key.into(),
                     WstsMessageId::Dkg(_) => return Err(Error::InvalidSigningOperation),
@@ -1145,6 +1145,31 @@ where
                 )
                 .await?;
             }
+        }
+
+        Ok(())
+    }
+
+    /// Populate the WSTS signer cache with authenticated nonce responses that
+    /// the DKG verification state machine observed for this signing round.
+    fn process_dkg_verification_nonce_responses(
+        &mut self,
+        state_machine_id: &StateMachineId,
+        request: &wsts::net::SignatureShareRequest,
+    ) -> Result<(), Error> {
+        let nonce_responses = self
+            .dkg_verification_state_machines
+            .get(state_machine_id)
+            .ok_or_else(|| Error::MissingStateMachine(Box::new(*state_machine_id)))?
+            .nonce_responses_for_signature_share_request(request);
+
+        let state_machine = self
+            .wsts_state_machines
+            .get_mut(state_machine_id)
+            .ok_or_else(|| Error::MissingStateMachine(Box::new(*state_machine_id)))?;
+
+        for response in nonce_responses {
+            state_machine.process(&WstsNetMessage::NonceResponse(response))?;
         }
 
         Ok(())
