@@ -463,7 +463,7 @@ impl DbRead for SharedStore {
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         // Let's fetch the votes for the outpoint
         let signers = self.get_deposit_signers(txid, output_index).await?;
@@ -472,35 +472,20 @@ impl DbRead for SharedStore {
             .map(|vote| (vote.signer_pub_key, vote.can_accept))
             .collect();
 
-        // Now we might not have votes from every signer, so lets get the
-        // full signer set.
-        let store = self.lock().await;
-        let ans = store
-            .rotate_keys_transactions
-            .values()
-            .flatten()
-            .find(|tx| tx.aggregate_key == model::RegistryKeyBytes::from(*aggregate_key));
-
-        // Let's merge the signer set with the actual votes.
-        if let Some(rotate_keys_tx) = ans {
-            let votes: Vec<model::SignerVote> = rotate_keys_tx
-                .signer_set
-                .iter()
-                .map(|public_key| model::SignerVote {
-                    signer_public_key: *public_key,
-                    is_accepted: signer_votes.remove(public_key),
-                })
-                .collect();
-            Ok(model::SignerVotes::from(votes))
-        } else {
-            Ok(model::SignerVotes::from(Vec::new()))
-        }
+        let votes: Vec<_> = signer_set
+            .iter()
+            .map(|public_key| model::SignerVote {
+                signer_public_key: *public_key,
+                is_accepted: signer_votes.remove(public_key),
+            })
+            .collect();
+        Ok(model::SignerVotes::from(votes))
     }
 
     async fn get_withdrawal_request_signer_votes(
         &self,
         id: &model::QualifiedRequestId,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         // Let's fetch the votes for the outpoint
         let signers = self
@@ -511,29 +496,14 @@ impl DbRead for SharedStore {
             .map(|vote| (vote.signer_pub_key, vote.is_accepted))
             .collect();
 
-        // Now we might not have votes from every signer, so lets get the
-        // full signer set.
-        let store = self.lock().await;
-        let ans = store
-            .rotate_keys_transactions
-            .values()
-            .flatten()
-            .find(|tx| tx.aggregate_key == model::RegistryKeyBytes::from(*aggregate_key));
-
-        // Let's merge the signer set with the actual votes.
-        if let Some(rotate_keys_tx) = ans {
-            let votes: Vec<model::SignerVote> = rotate_keys_tx
-                .signer_set
-                .iter()
-                .map(|public_key| model::SignerVote {
-                    signer_public_key: *public_key,
-                    is_accepted: signer_votes.get(public_key).copied(),
-                })
-                .collect();
-            Ok(model::SignerVotes::from(votes))
-        } else {
-            Ok(model::SignerVotes::from(Vec::new()))
-        }
+        let votes: Vec<_> = signer_set
+            .iter()
+            .map(|public_key| model::SignerVote {
+                signer_public_key: *public_key,
+                is_accepted: signer_votes.get(public_key).copied(),
+            })
+            .collect();
+        Ok(model::SignerVotes::from(votes))
     }
 
     async fn is_known_bitcoin_block_hash(
@@ -1072,20 +1042,20 @@ impl DbRead for InMemoryTransaction {
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         self.store
-            .get_deposit_request_signer_votes(txid, output_index, aggregate_key)
+            .get_deposit_request_signer_votes(txid, output_index, signer_set)
             .await
     }
 
     async fn get_withdrawal_request_signer_votes(
         &self,
         id: &model::QualifiedRequestId,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         self.store
-            .get_withdrawal_request_signer_votes(id, aggregate_key)
+            .get_withdrawal_request_signer_votes(id, signer_set)
             .await
     }
 

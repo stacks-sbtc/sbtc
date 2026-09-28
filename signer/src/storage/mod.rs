@@ -362,21 +362,21 @@ pub trait DbRead {
         chain_tip: &model::BitcoinBlockHash,
     ) -> impl Future<Output = Result<Option<SignerUtxo>, Error>> + Send;
 
-    /// For the given outpoint and aggregate key, get the list all signer
-    /// votes in the signer set.
+    /// For the given outpoint, get the votes for every member of the supplied
+    /// signer set.
     fn get_deposit_request_signer_votes(
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> impl Future<Output = Result<model::SignerVotes, Error>> + Send;
 
-    /// For the given withdrawal request identifier, and aggregate key, get
-    /// the list for how the signers voted against the request.
+    /// For the given withdrawal request identifier, get the votes for every
+    /// member of the supplied signer set.
     fn get_withdrawal_request_signer_votes(
         &self,
         id: &model::QualifiedRequestId,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> impl Future<Output = Result<model::SignerVotes, Error>> + Send;
 
     /// Check for whether  the given block hash is in the database.

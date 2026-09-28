@@ -59,9 +59,11 @@ use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BASE_WITHDRAWAL_TX_VSIZE;
 use signer::bitcoin::utxo::BitcoinInputsOutputs as _;
+use signer::bitcoin::utxo::BitcoinSignerSet;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SOLO_DEPOSIT_TX_VSIZE;
+use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
@@ -1183,6 +1185,11 @@ async fn run_dkg_if_signer_set_changes(scenario: RunDkgSignerSetScenario, expect
     let ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_mocked_clients()
+        .modify_settings(|settings| {
+            // DKG only runs before v2 activation, and the chain tip below
+            // has a random height.
+            settings.signer.v2_signing_block_height = Some(u64::MAX.into());
+        })
         .build();
 
     let chaintip: model::BitcoinBlockRef = Faker.fake_with_rng(&mut rng);
@@ -3996,6 +4003,11 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
         ..Faker.fake_with_rng(&mut rng)
     };
     db.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
+    let signer_set = BitcoinSignerSet::V1 {
+        aggregate_key: *aggregate_key,
+        signer_public_keys: dkg_shares.signer_set_public_keys(),
+        signatures_required: dkg_shares.signature_share_threshold,
+    };
 
     // We create a single Bitcoin block which will be the chain tip and hold
     // our signer UTXO.
@@ -4042,16 +4054,20 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     db.write_tx_output(&utxo_output).await.unwrap();
 
     // Get the chain tip and assert that it is the block we just wrote.
-    let chain_tip = db
+    let chain_tip_hash = db
         .get_bitcoin_canonical_chain_tip()
         .await
         .unwrap()
         .expect("no chain tip");
-    assert_eq!(chain_tip, bitcoin_block.block_hash);
+    assert_eq!(chain_tip_hash, bitcoin_block.block_hash);
+    let chain_tip = model::BitcoinBlockRef {
+        block_hash: chain_tip_hash,
+        block_height: bitcoin_block.block_height,
+    };
 
     // Get the signer UTXO and assert that it is the one we just wrote.
     let utxo = db
-        .get_signer_utxo(&chain_tip)
+        .get_signer_utxo(&chain_tip.block_hash)
         .await
         .unwrap()
         .expect("no signer utxo");
@@ -4059,14 +4075,20 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
 
     // Grab the BTC state.
     let btc_state = coord
-        .get_btc_state(&chain_tip, aggregate_key)
+        .get_btc_state(&chain_tip, &signer_set.output_key_set())
         .await
         .unwrap();
 
     // Assert that the BTC state is correct.
     assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid);
-    assert_eq!(btc_state.utxo.public_key, aggregate_key.into());
-    assert_eq!(btc_state.public_key, aggregate_key.into());
+    assert_eq!(
+        btc_state.utxo.key_set,
+        SignerUtxoKeySet::V1(aggregate_key.into())
+    );
+    assert_eq!(
+        btc_state.output_key_set,
+        SignerUtxoKeySet::V1(aggregate_key.into())
+    );
     assert_eq!(btc_state.fee_rate, 1.3);
     assert_eq!(btc_state.last_fees, None);
     assert_eq!(btc_state.magic_bytes, [b'T', b'3']);
@@ -4074,7 +4096,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     // Let's grab the state again, this time we expect fees from
     // "bitcoin-core" that are too high.
     let btc_state = coord
-        .get_btc_state(&chain_tip, aggregate_key)
+        .get_btc_state(&chain_tip, &signer_set.output_key_set())
         .await
         .unwrap();
 
@@ -4083,7 +4105,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     // Let's grab the state one last time, where this time we expect fees
     // from "bitcoin-core" that are too low.
     let btc_state = coord
-        .get_btc_state(&chain_tip, aggregate_key)
+        .get_btc_state(&chain_tip, &signer_set.output_key_set())
         .await
         .unwrap();
 
@@ -4142,6 +4164,11 @@ mod serial {
             ..Faker.fake_with_rng(&mut rng)
         };
         db.write_encrypted_dkg_shares(&dkg_shares).await.unwrap();
+        let signer_set = BitcoinSignerSet::V1 {
+            aggregate_key: *aggregate_key,
+            signer_public_keys: dkg_shares.signer_set_public_keys(),
+            signatures_required: dkg_shares.signature_share_threshold,
+        };
 
         let (rpc, faucet) = regtest::initialize_blockchain();
         let addr = Recipient::new(AddressType::P2wpkh);
@@ -4185,11 +4212,14 @@ mod serial {
         .await
         .unwrap();
 
-        let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+        let chain_tip = model::BitcoinBlockRef {
+            block_hash: db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap(),
+            block_height: 1_u64.into(),
+        };
 
         // Get the signer UTXO and assert that it is the one we just wrote.
         let utxo = db
-            .get_signer_utxo(&chain_tip)
+            .get_signer_utxo(&chain_tip.block_hash)
             .await
             .unwrap()
             .expect("no signer utxo");
@@ -4221,7 +4251,7 @@ mod serial {
 
         // Grab the BTC state.
         let btc_state = coord
-            .get_btc_state(&chain_tip, aggregate_key)
+            .get_btc_state(&chain_tip, &signer_set.output_key_set())
             .await
             .unwrap();
 
@@ -4229,8 +4259,14 @@ mod serial {
 
         // Assert that everything's as expected.
         assert_eq!(btc_state.utxo.outpoint.txid, signer_utxo_txid);
-        assert_eq!(btc_state.utxo.public_key, aggregate_key.into());
-        assert_eq!(btc_state.public_key, aggregate_key.into());
+        assert_eq!(
+            btc_state.utxo.key_set,
+            SignerUtxoKeySet::V1(aggregate_key.into())
+        );
+        assert_eq!(
+            btc_state.output_key_set,
+            SignerUtxoKeySet::V1(aggregate_key.into())
+        );
         assert_eq!(btc_state.last_fees, Some(expected_fees));
         assert_eq!(btc_state.magic_bytes, [b'T', b'3']);
 
@@ -4256,7 +4292,7 @@ mod serial {
 
         // Grab the BTC state.
         let btc_state = coord
-            .get_btc_state(&chain_tip, aggregate_key)
+            .get_btc_state(&chain_tip, &signer_set.output_key_set())
             .await
             .unwrap();
 
@@ -5959,13 +5995,17 @@ mod get_eligible_pending_withdrawal_requests {
             test_setup(&db, params.chain_length + 1).await;
 
         let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
+        let active_signer_set = BitcoinSignerSet::V1 {
+            aggregate_key: signer_set.aggregate_key(),
+            signer_public_keys: signer_set.signer_keys().iter().copied().collect(),
+            signatures_required: params.signature_threshold,
+        };
 
         // Define the parameters for the pending requests call.
         let get_requests_params = GetPendingRequestsParams {
-            aggregate_key: &signer_set.aggregate_key(),
+            signer_set: &active_signer_set,
             bitcoin_chain_tip: &bitcoin_chain_tip,
             stacks_chain_tip: &stacks_chain_tip,
-            signature_threshold: params.signature_threshold,
             sbtc_limits: &params.sbtc_limits,
         };
 
@@ -6017,6 +6057,9 @@ async fn should_handle_dkg_coordination_failure() {
             settings.signer.bootstrap_signing_set =
                 std::iter::once(settings.signer.public_key()).collect();
             settings.signer.bootstrap_signatures_required = 1;
+            // DKG only runs before v2 activation, and the chain tip below
+            // has a random height.
+            settings.signer.v2_signing_block_height = Some(u64::MAX.into());
         })
         .build();
 
@@ -6269,7 +6312,7 @@ where
             amount: *amount,
             deposit_script: deposit_script.clone(),
             reclaim_script_hash: model::TaprootScriptHash::from(&reclaim_script),
-            signers_public_key,
+            signers_public_key: signer::bitcoin::utxo::DepositSigningKey::V1(signers_public_key),
         });
     }
 
@@ -6670,6 +6713,9 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
             settings.signer.private_key = signer_info[0].signer_private_key;
             settings.signer.bootstrap_signing_set = signer_info[0].signer_public_keys.clone();
             settings.bitcoin.fallback_fee = fallback_fee;
+            // This test signs with a v1 signer set, and the chain tip
+            // below has a random height.
+            settings.signer.v2_signing_block_height = Some(u64::MAX.into());
         })
         .build();
 
@@ -6849,14 +6895,18 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
     // Coordinator should be the current signer, since the bootstrap
     // signing set has only the current signer in it.
     assert!(coordinator.is_coordinator(&bitcoin_chain_tip.block_hash));
+    let active_signer_set = BitcoinSignerSet::V1 {
+        aggregate_key,
+        signer_public_keys: context.config().signer.bootstrap_signing_set.clone(),
+        signatures_required: context.config().signer.bootstrap_signatures_required,
+    };
 
     // Ensure all the created requests are pending and accepted
     let requests = coordinator
         .get_pending_requests(
             &bitcoin_chain_tip,
             &stacks_block.block_hash,
-            &aggregate_key,
-            &context.config().signer.bootstrap_signing_set,
+            &active_signer_set,
         )
         .await
         .unwrap()

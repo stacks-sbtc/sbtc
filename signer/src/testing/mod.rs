@@ -119,7 +119,7 @@ pub fn set_witness_data(unsigned: &mut UnsignedTransaction, keypair: secp256k1::
         let deposit_msg = secp256k1::Message::from(sighash);
         let signature = SECP256K1.sign_schnorr(&deposit_msg, &keypair);
         let signature = bitcoin::taproot::Signature { signature, sighash_type };
-        deposit.construct_witness_data(signature)
+        deposit.construct_v1_witness_data(signature)
     });
 
     let witness_data: Vec<Witness> = std::iter::once(signer_witness)

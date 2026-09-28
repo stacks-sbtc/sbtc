@@ -44,7 +44,7 @@ use signer::{
         contracts::SmartContract,
         wallet::SignerWallet,
     },
-    storage::postgres::PgStore,
+    storage::{DbWrite as _, model, postgres::PgStore},
     testing::{self, context::*},
     transaction_coordinator::TxCoordinatorEventLoop,
     transaction_signer::{STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop},
@@ -59,7 +59,8 @@ use crate::{
     utxo_construction::make_deposit_request_to,
 };
 
-async fn start_signers(
+#[allow(clippy::too_many_arguments)]
+pub async fn start_signers(
     bitcoin_client: &BitcoinCoreClient,
     bitcoin_chain_tip_poller: &BitcoinChainTipPoller,
     stacks_client: &StacksClient,
@@ -67,6 +68,8 @@ async fn start_signers(
     network: &WanNetwork,
     num_signers: usize,
     signatures_required: u16,
+    v2_signing_block_height: Option<u64>,
+    bitcoin_processing_delay: Duration,
 ) -> Vec<(
     IntegrationTestContext<StacksClient>,
     PgStore,
@@ -113,13 +116,25 @@ async fn start_signers(
             .with_emily_client(emily_client.clone())
             .with_stacks_client(stacks_client.clone())
             .modify_settings(|settings| {
+                settings.signer.private_key = kp.secret_key().into();
                 settings.signer.bootstrap_signing_set = public_keys.iter().cloned().collect();
                 settings.signer.bootstrap_signatures_required = signatures_required;
-                settings.signer.bitcoin_processing_delay = Duration::from_millis(500);
+                // Without an explicit height we keep the configured one;
+                // overriding it with None would fall back to the testnet
+                // activation height, which the regtest chain is already past.
+                if let Some(height) = v2_signing_block_height {
+                    settings.signer.v2_signing_block_height = Some(height.into());
+                }
+                settings.signer.bitcoin_processing_delay = bitcoin_processing_delay;
                 settings.signer.deployer = wallet.address().clone();
                 settings.signer.stacks_fees_max_ustx = NonZero::new(1_000_000).unwrap();
             })
             .build();
+
+        let key_set = ctx.config().signer.v2_signer_key_set().unwrap();
+        db.write_signer_key_set(&model::SignerKeySet::from(key_set))
+            .await
+            .unwrap();
 
         let network = network.connect(&ctx);
 
@@ -259,6 +274,8 @@ async fn deposit() {
         &network,
         num_signers,
         signatures_required,
+        None,
+        Duration::from_millis(500),
     )
     .await;
 

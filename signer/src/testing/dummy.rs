@@ -58,6 +58,7 @@ use crate::bitcoin::rpc::OutputScriptPubKey;
 use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::bitcoin::utxo::SignerUtxo;
+use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::bitcoin::validation::TxRequestIds;
 use crate::codec::Encode as _;
 use crate::ecdsa::Signed;
@@ -583,14 +584,14 @@ impl fake::Dummy<&[PublicKey]> for SignerBtcState {
             fee_rate: Faker.fake_with_rng(rng),
             last_fees: Faker.fake_with_rng(rng),
             magic_bytes: [1, 2],
-            public_key: aggregate_key_x_only,
+            output_key_set: SignerUtxoKeySet::V1(aggregate_key_x_only),
             utxo: SignerUtxo {
                 amount: Faker.fake_with_rng(rng),
                 outpoint: OutPoint {
                     txid: txid(&Faker, rng),
                     vout: Faker.fake_with_rng(rng),
                 },
-                public_key: aggregate_key_x_only,
+                key_set: SignerUtxoKeySet::V1(aggregate_key_x_only),
             },
         }
     }

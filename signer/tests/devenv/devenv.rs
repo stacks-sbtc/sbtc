@@ -253,10 +253,10 @@ where
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script_hash,
-        signers_public_key: match &dep.signing_info {
+        signers_public_key: signer::bitcoin::utxo::DepositSigningKey::V1(match &dep.signing_info {
             sbtc::deposits::DepositSigningInfo::V1 { public_key } => *public_key,
             sbtc::deposits::DepositSigningInfo::V2 { .. } => unreachable!("v1 test deposit"),
-        },
+        }),
     };
     (deposit_tx, req, dep)
 }

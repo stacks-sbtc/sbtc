@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
@@ -721,7 +722,10 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
             .await
             .unwrap();
         let votes = db
-            .get_withdrawal_request_signer_votes(&qualified_id, &signer_public_key)
+            .get_withdrawal_request_signer_votes(
+                &qualified_id,
+                &BTreeSet::from([signer_public_key]),
+            )
             .await
             .unwrap();
         assert!(decisions.is_empty());
@@ -758,7 +762,10 @@ async fn do_not_procceed_with_blocked_addresses(is_withdrawal: bool, is_blocked:
             .await
             .unwrap();
         let votes = db
-            .get_withdrawal_request_signer_votes(&qualified_id, &signer_public_key)
+            .get_withdrawal_request_signer_votes(
+                &qualified_id,
+                &BTreeSet::from([signer_public_key]),
+            )
             .await
             .unwrap();
 

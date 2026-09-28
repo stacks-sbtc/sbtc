@@ -33,6 +33,7 @@ use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
+use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::block_observer::get_signer_set_info;
 use signer::context::SbtcLimits;
 use signer::emily_client::EmilyInteract;
@@ -594,9 +595,9 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         deposits: vec![deposit_request.clone()],
         withdrawals: Vec::new(),
         signer_state: SignerBtcState {
+            output_key_set: SignerUtxoKeySet::V1(signers_public_key),
             utxo: db.get_signer_utxo(&chain_tip).await.unwrap().unwrap(),
             fee_rate: 10.0,
-            public_key: signers_public_key,
             last_fees: None,
             magic_bytes: *b"T3",
         },
@@ -765,15 +766,15 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
         deposits: vec![deposit_request1, deposit_request2, deposit_request3],
         withdrawals: Vec::new(),
         signer_state: SignerBtcState {
+            output_key_set: SignerUtxoKeySet::V1(signers_public_key2),
             utxo: SignerUtxo {
                 outpoint: signer_outpoint,
                 amount: signers_amount,
-                public_key: signers_public_key1,
+                key_set: SignerUtxoKeySet::V1(signers_public_key1),
             },
             fee_rate: 2.0,
             // This ensures that the new signer UTXO is locked by the new
             // aggregate key.
-            public_key: signers_public_key2,
             last_fees: None,
             magic_bytes: *b"T3",
         },
@@ -1837,7 +1838,7 @@ fn make_coinbase_deposit_request(
         amount: deposit_tx.output[0].value.to_sat(),
         deposit_script: deposit_script.clone(),
         reclaim_script_hash,
-        signers_public_key,
+        signers_public_key: signer::bitcoin::utxo::DepositSigningKey::V1(signers_public_key),
     };
     let info = sbtc::deposits::DepositInfo {
         outpoint: req.outpoint,

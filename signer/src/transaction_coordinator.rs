@@ -25,7 +25,12 @@ use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo;
+use crate::bitcoin::utxo::BitcoinSignerSet;
+use crate::bitcoin::utxo::DepositSigningKey;
+use crate::bitcoin::utxo::SignatureCollector;
+use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
+use crate::bitcoin::utxo::V2Input;
 use crate::context::Context;
 use crate::context::P2PEvent;
 use crate::context::RequestDeciderEvent;
@@ -43,6 +48,7 @@ use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::message;
 use crate::message::BitcoinPreSignRequest;
+use crate::message::BitcoinSignatureRequest;
 use crate::message::Payload;
 use crate::message::SignerMessage;
 use crate::message::StacksTransactionSignRequest;
@@ -77,6 +83,7 @@ use crate::wsts_state_machine::FrostCoordinator;
 use crate::wsts_state_machine::WstsCoordinator;
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 
+use bitcoin::Witness;
 use bitcoin::hashes::Hash as _;
 use wsts::net::SignatureType;
 use wsts::state_machine::OperationResult as WstsOperationResult;
@@ -213,14 +220,10 @@ pub struct GetPendingRequestsParams<'a> {
     pub bitcoin_chain_tip: &'a model::BitcoinBlockRef,
     /// The current stacks chain tip (hash).
     pub stacks_chain_tip: &'a model::StacksBlockHash,
-    /// The current signers' aggregate key.
-    pub aggregate_key: &'a PublicKey,
+    /// The active signer set and its version-specific Bitcoin signing material.
+    pub signer_set: &'a BitcoinSignerSet,
     /// The current sBTC limits.
     pub sbtc_limits: &'a SbtcLimits,
-    /// The threshold for the minimum number of 'accept' votes required for a
-    /// request to be considered for the sweep transaction package, and the
-    /// number of signatures required for each transaction.
-    pub signature_threshold: u16,
 }
 
 /// This function defines which messages this event loop is interested
@@ -403,20 +406,9 @@ where
             return Ok(());
         }
 
-        // Bitcoin transactions are signed by the signer set in the
-        // registry, which must hold a v1 aggregate key.
-        let Some(signer_set_info) = self.context.state().registry_signer_set_info() else {
-            return Err(Error::NoKeyRotationEvent);
-        };
-        let aggregate_key = signer_set_info
-            .aggregate_key
-            .v1_public_key()
-            .ok_or(Error::NoKeyRotationEvent)?;
-        let bitcoin_processing_fut = self.construct_and_sign_bitcoin_sbtc_transactions(
-            &bitcoin_chain_tip,
-            &aggregate_key,
-            &signer_set_info.signer_set,
-        );
+        let bitcoin_signer_set = BitcoinSignerSet::load(&self.context, &bitcoin_chain_tip).await?;
+        let bitcoin_processing_fut = self
+            .construct_and_sign_bitcoin_sbtc_transactions(&bitcoin_chain_tip, &bitcoin_signer_set);
 
         if let Err(error) = bitcoin_processing_fut.await {
             tracing::error!(%error, "failed to construct and sign bitcoin transactions");
@@ -680,8 +672,7 @@ where
     async fn construct_and_sign_bitcoin_sbtc_transactions(
         &mut self,
         bitcoin_chain_tip: &model::BitcoinBlockRef,
-        aggregate_key: &PublicKey,
-        signer_public_keys: &BTreeSet<PublicKey>,
+        signer_set: &BitcoinSignerSet,
     ) -> Result<(), Error> {
         // Fetch the stacks chain tip from the signer state.
         let stacks_chain_tip = self
@@ -696,12 +687,8 @@ where
 
         // Create a future that fetches pending deposit and withdrawal requests
         // from the database.
-        let pending_requests_fut = self.get_pending_requests(
-            bitcoin_chain_tip,
-            &stacks_chain_tip.block_hash,
-            aggregate_key,
-            signer_public_keys,
-        );
+        let pending_requests_fut =
+            self.get_pending_requests(bitcoin_chain_tip, &stacks_chain_tip.block_hash, signer_set);
 
         // If `get_pending_requests()` returns `Ok(None)` then there are no
         // eligible requests to service; we can exit early.
@@ -1538,24 +1525,34 @@ where
     ) -> Result<(), Error> {
         let db = self.context.get_storage();
         let sighashes = transaction.construct_digests()?;
-        let locking_public_key = sighashes.signers_aggregate_key.into();
-        let mut fire_coordinator =
-            FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
-
         let msg = sighashes.signers.to_raw_hash().to_byte_array();
 
         let txid = transaction.tx.compute_txid();
         let message_id = txid.into();
         let instant = std::time::Instant::now();
-        let signature = self
-            .coordinate_signing_round(
-                bitcoin_chain_tip,
-                &mut fire_coordinator,
-                message_id,
-                &msg,
-                SignatureType::Taproot,
-            )
-            .await?;
+        let signer_witness = match sighashes.signers_key_set {
+            SignerUtxoKeySet::V1(public_key) => {
+                let locking_public_key = (*public_key).into();
+                let mut fire_coordinator =
+                    FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
+                let signature = self
+                    .coordinate_signing_round(
+                        bitcoin_chain_tip,
+                        &mut fire_coordinator,
+                        message_id,
+                        &msg,
+                        SignatureType::Taproot,
+                    )
+                    .await?;
+                Witness::p2tr_key_spend(&signature.into())
+            }
+            SignerUtxoKeySet::V2(key_set) => {
+                let input = V2Input::SignerUtxo(key_set);
+                let collector = SignatureCollector::new(input, sighashes.signers);
+                self.coordinate_independent_signatures(bitcoin_chain_tip, collector)
+                    .await?
+            }
+        };
 
         metrics::histogram!(
             Metrics::SigningRoundDurationSeconds,
@@ -1571,27 +1568,35 @@ where
         )
         .increment(1);
 
-        let signer_witness = bitcoin::Witness::p2tr_key_spend(&signature.into());
-
         let mut deposit_witness = Vec::new();
 
         for (deposit, sighash) in sighashes.deposits.into_iter() {
             let msg = sighash.to_raw_hash().to_byte_array();
 
-            let locking_public_key = deposit.signers_public_key.into();
-            let mut fire_coordinator =
-                FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
-
             let instant = std::time::Instant::now();
-            let signature = self
-                .coordinate_signing_round(
-                    bitcoin_chain_tip,
-                    &mut fire_coordinator,
-                    message_id,
-                    &msg,
-                    SignatureType::Schnorr,
-                )
-                .await?;
+            let witness = match &deposit.signers_public_key {
+                DepositSigningKey::V1(locking_public_key) => {
+                    let locking_public_key = (*locking_public_key).into();
+                    let mut fire_coordinator =
+                        FireCoordinator::load(&db, locking_public_key, self.private_key).await?;
+                    let signature = self
+                        .coordinate_signing_round(
+                            bitcoin_chain_tip,
+                            &mut fire_coordinator,
+                            message_id,
+                            &msg,
+                            SignatureType::Schnorr,
+                        )
+                        .await?;
+                    deposit.construct_v1_witness_data(signature.into())
+                }
+                DepositSigningKey::V2 { key_set, recipient } => {
+                    let input = V2Input::Deposit { deposit, key_set, recipient };
+                    let collector = SignatureCollector::new(input, sighash);
+                    self.coordinate_independent_signatures(bitcoin_chain_tip, collector)
+                        .await?
+                }
+            };
 
             metrics::histogram!(
                 Metrics::SigningRoundDurationSeconds,
@@ -1605,8 +1610,6 @@ where
                 "kind" => "sweep",
             )
             .increment(1);
-
-            let witness = deposit.construct_witness_data(signature.into());
 
             deposit_witness.push(witness);
         }
@@ -1647,6 +1650,60 @@ where
         .increment(1);
 
         response
+    }
+
+    /// Collect independent BIP340 signatures for a v2 input and return
+    /// its witness.
+    async fn coordinate_independent_signatures(
+        &mut self,
+        bitcoin_chain_tip: &model::BitcoinBlockHash,
+        mut collector: SignatureCollector<'_>,
+    ) -> Result<Witness, Error> {
+        let sighash = model::SigHash::from(collector.sighash());
+        let signal_stream = self
+            .context
+            .as_signal_stream(signed_message_filter)
+            .filter_map(Self::to_signed_message);
+
+        self.send_message(BitcoinSignatureRequest { sighash }, bitcoin_chain_tip)
+            .await?;
+
+        tokio::pin!(signal_stream);
+        let collect = async {
+            loop {
+                let Some(message) = signal_stream.next().await else {
+                    return Err(Error::SignerShutdown);
+                };
+                let Signed {
+                    signer_public_key,
+                    inner:
+                        SignerMessage {
+                            bitcoin_chain_tip: response_tip,
+                            payload: Payload::BitcoinSignatureResponse(response),
+                        },
+                    ..
+                } = message
+                else {
+                    continue;
+                };
+                if response_tip != *bitcoin_chain_tip || response.sighash != sighash {
+                    continue;
+                }
+
+                let signing_key = sbtc::derive_signing_public_key(signer_public_key.into());
+                match collector.add_signature(signing_key, response.signature) {
+                    Ok(Some(witness)) => return Ok(witness),
+                    Ok(None) => {}
+                    Err(error) => {
+                        tracing::warn!(%error, %signer_public_key, %sighash, "rejected v2 signature");
+                    }
+                }
+            }
+        };
+
+        tokio::time::timeout(self.signing_round_max_duration, collect)
+            .await
+            .map_err(|_| Error::CoordinatorTimeout(self.signing_round_max_duration.as_secs()))?
     }
 
     #[tracing::instrument(skip_all)]
@@ -1904,13 +1961,13 @@ where
         given_key_is_coordinator(signer_public_key, bitcoin_chain_tip, &signer_public_keys)
     }
 
-    /// Constructs a new [`utxo::SignerBtcState`] based on the current market
-    /// fee rate, the signer's UTXO, and the last sweep package.
+    /// Load the signer UTXO state and choose the output key set active at the
+    /// supplied Bitcoin chain tip.
     #[tracing::instrument(skip_all)]
     pub async fn get_btc_state(
         &self,
-        chain_tip: &model::BitcoinBlockHash,
-        aggregate_key: &PublicKey,
+        chain_tip: &model::BitcoinBlockRef,
+        output_key_set: &SignerUtxoKeySet,
     ) -> Result<utxo::SignerBtcState, Error> {
         let bitcoin_client = self.context.get_bitcoin_client();
         // Target next block confirmation
@@ -1920,7 +1977,7 @@ where
         let utxo = self
             .context
             .get_storage()
-            .get_signer_utxo(chain_tip)
+            .get_signer_utxo(&chain_tip.block_hash)
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
 
@@ -1931,7 +1988,7 @@ where
         Ok(utxo::SignerBtcState {
             fee_rate,
             utxo,
-            public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+            output_key_set: output_key_set.clone(),
             last_fees,
             magic_bytes: *b"T3",
         })
@@ -2020,7 +2077,7 @@ where
                 params.bitcoin_chain_tip.as_ref(),
                 params.stacks_chain_tip,
                 min_bitcoin_height,
-                params.signature_threshold,
+                params.signer_set.signatures_required(),
             )
             .await?;
 
@@ -2092,12 +2149,14 @@ where
             }
 
             // Fetch the votes for the withdrawal request from storage for the
-            // public keys of the signers in the current signing set, based on
-            // the current signers' aggregate key. Note: this could have been
+            // public keys in the active signer set. Note: this could have been
             // baked into the initial query, but we need the votes' values for
             // our return value.
             let votes = storage
-                .get_withdrawal_request_signer_votes(&req.qualified_id(), params.aggregate_key)
+                .get_withdrawal_request_signer_votes(
+                    &req.qualified_id(),
+                    params.signer_set.signer_public_keys(),
+                )
                 .await?;
 
             // Calculate the number of votes accepted, rejected, and missing.
@@ -2117,13 +2176,13 @@ where
             // required number of signers _in the current signer set_ (the
             // initial query only checks the total number of votes accepted by
             // any signer).
-            if num_votes_accepted < params.signature_threshold {
+            if num_votes_accepted < params.signer_set.signatures_required() {
                 tracing::warn!(
                     request_id = req.request_id,
                     num_votes_accepted,
                     num_votes_rejected,
                     num_votes_missing,
-                    required_votes = params.signature_threshold,
+                    required_votes = params.signer_set.signatures_required(),
                     reason = SKIP_REASON_INSUFFICIENT_VOTES,
                     message = REQUEST_SKIPPED_MESSAGE
                 );
@@ -2159,7 +2218,7 @@ where
             .get_pending_accepted_deposit_requests(
                 params.bitcoin_chain_tip,
                 context_window,
-                params.signature_threshold,
+                params.signer_set.signatures_required(),
             )
             .await?;
 
@@ -2169,12 +2228,15 @@ where
             return Ok(eligible_deposits);
         }
 
-        // Iterate through each deposit request, fetch its votes from storage
-        // for the public keys of the signers in the current signing set, based
-        // on the current signers' aggregate key.
+        // Iterate through each deposit request and fetch its votes from storage
+        // for the public keys in the active signer set.
         for req in pending_deposit_requests {
             let votes = storage
-                .get_deposit_request_signer_votes(&req.txid, req.output_index, params.aggregate_key)
+                .get_deposit_request_signer_votes(
+                    &req.txid,
+                    req.output_index,
+                    params.signer_set.signer_public_keys(),
+                )
                 .await?;
 
             // A row that we cannot convert means our database is
@@ -2200,8 +2262,7 @@ where
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockRef,
         stacks_chain_tip: &model::StacksBlockHash,
-        aggregate_key: &PublicKey,
-        signer_public_keys: &BTreeSet<PublicKey>,
+        signer_set: &BitcoinSignerSet,
     ) -> Result<Option<utxo::SbtcRequests>, Error> {
         tracing::info!("preparing pending requests for processing");
 
@@ -2210,14 +2271,11 @@ where
 
         // Get the current sBTC limits (caps).
         let sbtc_limits = self.context.state().get_current_limits();
-        let signature_threshold = config.signer.bootstrap_signatures_required;
-
         // Setup the parameters for fetching pending requests.
         let params = GetPendingRequestsParams {
             bitcoin_chain_tip,
             stacks_chain_tip,
-            aggregate_key,
-            signature_threshold,
+            signer_set,
             sbtc_limits: &sbtc_limits,
         };
 
@@ -2244,14 +2302,13 @@ where
 
         // Get the current signers' BTC state.
         let signer_state = self
-            .get_btc_state(&bitcoin_chain_tip.block_hash, aggregate_key)
+            .get_btc_state(bitcoin_chain_tip, &signer_set.output_key_set())
             .await?;
 
-        // Count the number of signers in the current signer set.
-        let num_signers = signer_public_keys
-            .len()
-            .try_into()
-            .map_err(|_| Error::TypeConversion)?;
+        // Count the number of signers in the current signer set. Note that
+        // the number of signers is capped at [`sbtc::MAX_SIGNERS`], so,
+        // the value here is well under the u16::MAX limit.
+        let num_signers = signer_set.signer_public_keys().len() as u16;
 
         let max_deposits_per_bitcoin_tx = config.signer.max_deposits_per_bitcoin_tx.get();
 
@@ -2260,7 +2317,7 @@ where
             deposits,
             withdrawals,
             signer_state,
-            accept_threshold: signature_threshold,
+            accept_threshold: signer_set.signatures_required(),
             num_signers,
             sbtc_limits,
             max_deposits_per_bitcoin_tx,
@@ -2745,6 +2802,8 @@ mod tests {
                 settings.signer.bootstrap_signatures_required = 1;
                 settings.signer.bootstrap_signing_set =
                     std::iter::once(settings.signer.public_key()).collect();
+                settings.signer.v2_signing_block_height =
+                    Some(model::BitcoinBlockHeight::from(u64::MAX));
             })
             .build();
 
@@ -2861,8 +2920,6 @@ mod tests {
                 settings.signer.bootstrap_signatures_required = 1;
                 settings.signer.bootstrap_signing_set =
                     std::iter::once(settings.signer.public_key()).collect();
-                settings.signer.v2_signing_block_height =
-                    Some(model::BitcoinBlockHeight::from(u64::MAX));
             })
             .build();
 

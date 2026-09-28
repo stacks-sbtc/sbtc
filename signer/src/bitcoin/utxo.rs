@@ -1,5 +1,7 @@
 //! Utxo management and transaction construction
 
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::sync::LazyLock;
@@ -32,6 +34,7 @@ use bitcoin::transaction::Version;
 use bitvec::array::BitArray;
 use bitvec::field::BitField as _;
 use prost::Message as _;
+use sbtc::SignerKeySet;
 use sbtc::idpack::BitmapSegmenter;
 use sbtc::idpack::Decodable as _;
 use sbtc::idpack::Encodable as _;
@@ -48,10 +51,15 @@ use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::bitcoin::packaging::Weighted;
 use crate::bitcoin::packaging::compute_optimal_packages;
 use crate::bitcoin::rpc::BitcoinTxInfo;
+use crate::context::Context;
 use crate::context::SbtcLimits;
 use crate::error::Error;
+use crate::keys::PublicKey;
+use crate::keys::PublicKeyXOnly;
 use crate::keys::SignerScriptPubKey as _;
 use crate::proto;
+use crate::stacks::api::SignerSetInfo;
+use crate::storage::DbRead as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::KeySetId;
@@ -59,6 +67,7 @@ use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SignerVotes;
 use crate::storage::model::StacksBlockHash;
+use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::TaprootScriptHash;
 use crate::storage::model::TxOutput;
@@ -83,12 +92,21 @@ pub const SOLO_DEPOSIT_TX_VSIZE: f64 = 249.0;
 /// transaction servicing only one withdrawal request, except the
 /// withdrawal output is not in the transaction. This way the sweep
 /// transaction's OP_RETURN output is the right size, and we can handle the
-/// variability of output sizes.
-pub const BASE_WITHDRAWAL_TX_VSIZE: f64 = MAX_BASE_TX_VSIZE as f64;
+/// variability of output sizes. The signers' input is a v1 key-path input.
+pub const BASE_WITHDRAWAL_TX_VSIZE: f64 = 137.0;
 
 /// This constant represents the maximum virtual size (in vBytes) of a BTC
 /// transaction excluding withdrawals outputs and deposit inputs.
-pub const MAX_BASE_TX_VSIZE: u64 = 137;
+///
+/// The largest signers' input is a v2 script-path input for a 16-of-16
+/// key set, which has a weight of 1804 weight units, or 451 vBytes.
+pub const MAX_BASE_TX_VSIZE: f64 = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + 451.0;
+
+/// The virtual size (in vBytes) of the parts of a sweep transaction that
+/// don't depend on its requests or its signers' input: the transaction
+/// overhead, the signers' new output, and the largest OP_RETURN output.
+/// Adding a v1 key-path signers' input gives [`BASE_WITHDRAWAL_TX_VSIZE`].
+pub const BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT: f64 = 79.25;
 
 /// It appears that bitcoin-core tracks fee rates in sats per kilo-vbyte
 /// (or BTC per kilo-vbyte). Since we work in sats per vbyte, this constant
@@ -186,6 +204,8 @@ pub struct RequestPreprocessor<'a> {
     /// The total fee amount and the fee rate for the last transaction that
     /// used this UTXO as an input.
     last_fees: Option<Fees>,
+    /// The virtual size of the signers' input.
+    signer_input_vsize: f64,
 }
 
 impl<'a> RequestPreprocessor<'a> {
@@ -195,7 +215,14 @@ impl<'a> RequestPreprocessor<'a> {
             sbtc_limits,
             fee_rate,
             last_fees,
+            signer_input_vsize: BASE_WITHDRAWAL_TX_VSIZE - BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT,
         }
+    }
+
+    /// Return the virtual size of a sweep transaction servicing only a
+    /// request of the given virtual size.
+    fn solo_tx_vsize(&self, request_vsize: u64) -> f64 {
+        BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + self.signer_input_vsize + request_vsize as f64
     }
 
     /// Validate deposit requests based on four constraints:
@@ -209,8 +236,8 @@ impl<'a> RequestPreprocessor<'a> {
         amount_to_mint: &mut Amount,
         req: &'a DepositRequest,
     ) -> Option<RequestRef<'a>> {
-        let minimum_fee =
-            compute_transaction_fee(SOLO_DEPOSIT_TX_VSIZE, self.fee_rate, self.last_fees);
+        let tx_vsize = self.solo_tx_vsize(req.vsize());
+        let minimum_fee = compute_transaction_fee(tx_vsize, self.fee_rate, self.last_fees);
 
         let is_fee_valid = req.max_fee.min(req.amount) >= minimum_fee;
         let is_above_dust = req.amount.saturating_sub(minimum_fee) >= DEPOSIT_DUST_LIMIT;
@@ -263,7 +290,7 @@ impl<'a> RequestPreprocessor<'a> {
         // so we check here as well.
         let is_above_minimum = req.script_pubkey.minimal_non_dust().to_sat() <= req.amount;
 
-        let tx_vsize = BASE_WITHDRAWAL_TX_VSIZE + req.vsize() as f64;
+        let tx_vsize = self.solo_tx_vsize(req.vsize());
         let is_fee_valid =
             req.max_fee >= compute_transaction_fee(tx_vsize, self.fee_rate, self.last_fees);
 
@@ -311,14 +338,14 @@ impl<'a> RequestPreprocessor<'a> {
 
 /// Summary of the Signers' UTXO and information necessary for
 /// constructing their next UTXO.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SignerBtcState {
     /// The outstanding signer UTXO.
     pub utxo: SignerUtxo,
     /// The current market fee rate in sat/vByte.
     pub fee_rate: f64,
-    /// The current public key of the signers
-    pub public_key: XOnlyPublicKey,
+    /// The key material and version for newly-created signer outputs.
+    pub output_key_set: SignerUtxoKeySet,
     /// The total fee amount and the fee rate for the last transaction that
     /// used this UTXO as an input.
     pub last_fees: Option<Fees>,
@@ -368,6 +395,7 @@ impl SbtcRequests {
             sbtc_limits: &self.sbtc_limits,
             fee_rate: self.signer_state.fee_rate,
             last_fees: self.signer_state.last_fees,
+            signer_input_vsize: self.signer_state.utxo.input_vsize() as f64,
         };
         let deposits = request_preprocessor.filter_deposits(&self.deposits);
         let withdrawals = request_preprocessor.preprocess_withdrawals(&self.withdrawals);
@@ -378,7 +406,7 @@ impl SbtcRequests {
         let max_votes_against = self.reject_capacity();
         let max_needs_signature = self.max_deposits_per_bitcoin_tx;
         compute_optimal_packages(items, max_votes_against, max_needs_signature)
-            .scan(self.signer_state, |state, request_refs| {
+            .scan(self.signer_state.clone(), |state, request_refs| {
                 let requests = Requests::new(request_refs);
                 let tx = UnsignedTransaction::new(requests, state);
                 if let Ok(tx_ref) = tx.as_ref() {
@@ -474,19 +502,39 @@ pub struct DepositRequest {
     /// means they use 32 bytes instead of the 33 byte public keys used
     /// before where the additional byte indicated the y-coordinate's
     /// parity.
-    pub signers_public_key: XOnlyPublicKey,
+    pub signers_public_key: DepositSigningKey,
+}
+
+/// Identifies the signing scheme and key material locking a deposit.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DepositSigningKey {
+    /// A v1 WSTS aggregate x-only public key.
+    V1(XOnlyPublicKey),
+    /// A v2 key set using independent signatures.
+    V2 {
+        /// The validated key set in the deposit script's `multi_a` script.
+        key_set: SignerKeySet,
+        /// The Stacks principal committed to by the deposit script. The
+        /// deposit-data preimage is derived from it and the max fee.
+        recipient: StacksPrincipal,
+    },
 }
 
 impl DepositRequest {
-    /// Create a TxIn object with witness data for the deposit script of
-    /// the given request. Only a valid signature is needed to satisfy the
-    /// deposit script.
+    /// Create a transaction input with a correctly-sized witness for fee
+    /// estimation. The v2 witness is intentionally not valid for broadcast.
     fn as_tx_input(&self, signature: Signature) -> TxIn {
         TxIn {
             previous_output: self.outpoint,
             script_sig: ScriptBuf::new(),
             sequence: Sequence(0),
-            witness: self.construct_witness_data(signature),
+            witness: match &self.signers_public_key {
+                DepositSigningKey::V1(_) => self.construct_v1_witness_data(signature),
+                DepositSigningKey::V2 { key_set, recipient } => {
+                    let signatures = dummy_threshold_signatures(key_set, signature);
+                    self.construct_v2_witness_data(key_set, recipient, &signatures)
+                }
+            },
         }
     }
 
@@ -518,7 +566,7 @@ impl DepositRequest {
     /// given by self.signers_public_key. The public key used for key-path
     /// spending is self.taproot_public_key, and is supposed to be a dummy
     /// public key.
-    pub fn construct_witness_data(&self, signature: Signature) -> Witness {
+    pub fn construct_v1_witness_data(&self, signature: Signature) -> Witness {
         let ver = LeafVersion::TapScript;
         let taproot = self.construct_taproot_info(ver);
 
@@ -535,6 +583,43 @@ impl DepositRequest {
             self.deposit_script.to_bytes(),
             control_block.serialize(),
         ];
+        Witness::from_slice(&witness_data)
+    }
+
+    /// Return the 32-byte preimage that a v2 deposit script commits to,
+    /// given the recipient it commits to.
+    fn deposit_data_preimage(&self, recipient: &StacksPrincipal) -> [u8; 32] {
+        sbtc::deposits::deposit_data_preimage(self.max_fee, recipient)
+    }
+
+    /// Construct the witness for the v2 deposit script-path spend.
+    ///
+    /// The caller must supply exactly `key_set.signatures_required`
+    /// signatures, each for a key in `key_set`; the [`SignatureCollector`]
+    /// guarantees this. The deposit script is the hash-lock prefix followed
+    /// by the key set's `multi_a` script, so the witness is the signatures,
+    /// the deposit-data preimage, the script, and the control block.
+    fn construct_v2_witness_data(
+        &self,
+        key_set: &SignerKeySet,
+        recipient: &StacksPrincipal,
+        signatures: &BTreeMap<XOnlyPublicKey, Signature>,
+    ) -> Witness {
+        let ver = LeafVersion::TapScript;
+        let taproot = self.construct_taproot_info(ver);
+
+        // TaprootSpendInfo::control_block returns None if the key given,
+        // (script, version), is not in the tree. But this key is definitely
+        // in the tree (see the variable leaf1 in the `construct_taproot_info`
+        // function).
+        let control_block = taproot
+            .control_block(&(self.deposit_script.clone(), ver))
+            .expect("We just inserted the deposit script into the tree");
+
+        let mut witness_data = multi_a_signatures(key_set, signatures);
+        witness_data.push(self.deposit_data_preimage(recipient).to_vec());
+        witness_data.push(self.deposit_script.to_bytes());
+        witness_data.push(control_block.serialize());
         Witness::from_slice(&witness_data)
     }
 
@@ -558,9 +643,21 @@ impl DepositRequest {
 
     /// Try convert from a model::DepositRequest with some additional info.
     pub fn from_model(request: model::DepositRequest, votes: SignerVotes) -> Result<Self, Error> {
-        // The signer does not support v2 deposits yet.
-        let KeySetId::V1(signers_public_key) = request.key_set_id else {
-            return Err(sbtc::error::Error::InvalidDepositScript.into());
+        let signers_public_key = match request.key_set_id {
+            KeySetId::V1(public_key) => DepositSigningKey::V1(public_key.into()),
+            KeySetId::V2(_) => {
+                let script = ScriptBuf::from_bytes(request.spend_script.clone());
+                let inputs = sbtc::deposits::DepositScriptInputs::parse_v2(
+                    &script,
+                    request.recipient.clone().into(),
+                    request.max_fee,
+                )?;
+
+                DepositSigningKey::V2 {
+                    key_set: inputs.signer_key_set,
+                    recipient: request.recipient.clone(),
+                }
+            }
         };
         Ok(Self {
             outpoint: request.outpoint(),
@@ -569,7 +666,7 @@ impl DepositRequest {
             amount: request.amount,
             deposit_script: ScriptBuf::from_bytes(request.spend_script),
             reclaim_script_hash: request.reclaim_script_hash,
-            signers_public_key: signers_public_key.into(),
+            signers_public_key,
         })
     }
 }
@@ -782,47 +879,368 @@ impl<'a> Requests<'a> {
 /// This object is useful for transforming the UTXO into valid input and
 /// output in another transaction. Some notes:
 ///
-/// * This struct assumes that the spend script for each signer UTXO uses
-///   taproot. This is necessary because the signers collectively generate
-///   Schnorr signatures, which requires taproot.
-/// * The taproot script for each signer UTXO is a key-spend only script.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// This struct assumes that each signer UTXO uses Taproot. Version 1 UTXOs
+/// use a key-path spend, while version 2 UTXOs use a `multi_a` script-path
+/// spend.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SignerUtxo {
     /// The outpoint of the signers' UTXO
     pub outpoint: OutPoint,
     /// The amount associated with the above UTXO
     pub amount: u64,
-    /// The public key used to create the key-spend only taproot script.
-    pub public_key: XOnlyPublicKey,
+    /// The key-set version and signing material controlling this UTXO.
+    pub key_set: SignerUtxoKeySet,
+}
+
+/// The version-specific signer set used to authorize Bitcoin transactions.
+///
+/// This type keeps the signer identity keys used for request votes together
+/// with the Bitcoin spending material derived from the same active set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BitcoinSignerSet {
+    /// A legacy signer set that produces a threshold WSTS signature.
+    V1 {
+        /// The aggregate key in the registry, which locks the next signer
+        /// UTXO.
+        ///
+        /// The signer set and threshold below come from the latest verified
+        /// DKG shares instead. Taking this key from the registry prevents an
+        /// in-flight rotation from changing the signer UTXO early.
+        aggregate_key: PublicKey,
+        /// The signer identity keys whose request votes are authoritative.
+        signer_public_keys: BTreeSet<PublicKey>,
+        /// The number of signer approvals and signature shares required.
+        signatures_required: u16,
+    },
+    /// A signer set that produces independent BIP340 signatures.
+    V2 {
+        /// The signer identity keys whose request votes are authoritative.
+        signer_public_keys: BTreeSet<PublicKey>,
+        /// The validated, derived Bitcoin spending key set.
+        key_set: SignerKeySet,
+    },
+}
+
+impl BitcoinSignerSet {
+    /// Load the signer set that authorizes Bitcoin transactions at the
+    /// given chain tip.
+    ///
+    /// Before v2 activation, the latest verified DKG shares give the signer
+    /// set and threshold, and the aggregate key in the registry locks the
+    /// next signer UTXO. At and after activation, the registry signer set
+    /// is authoritative and no DKG material is required.
+    pub async fn load<C>(ctx: &C, chain_tip: &model::BitcoinBlockRef) -> Result<Self, Error>
+    where
+        C: Context,
+    {
+        let signer_set_info = ctx
+            .state()
+            .registry_signer_set_info()
+            .ok_or(Error::NoKeyRotationEvent)?;
+        let v2_signing_is_active = ctx
+            .config()
+            .signer
+            .is_v2_signing_active(chain_tip.block_height);
+
+        if v2_signing_is_active {
+            return Self::new_v2(signer_set_info);
+        }
+
+        let aggregate_key = signer_set_info
+            .aggregate_key
+            .v1_public_key()
+            .ok_or(Error::NoKeyRotationEvent)?;
+        let shares = ctx
+            .get_storage()
+            .get_latest_verified_dkg_shares()
+            .await?
+            .ok_or(Error::NoVerifiedDkgShares)?;
+
+        Ok(Self::V1 {
+            aggregate_key,
+            signer_public_keys: shares.signer_set_public_keys(),
+            signatures_required: shares.signature_share_threshold,
+        })
+    }
+
+    /// Construct a v2 Bitcoin signer set from the signer set in the
+    /// registry.
+    ///
+    /// The registry's aggregate-key field is not used, since a v2 key set
+    /// is derived from the signer identity keys and the threshold.
+    pub fn new_v2(signer_set_info: SignerSetInfo) -> Result<Self, Error> {
+        let SignerSetInfo {
+            signer_set: signer_public_keys,
+            signatures_required,
+            ..
+        } = signer_set_info;
+        let public_keys = signer_public_keys
+            .iter()
+            .copied()
+            .map(secp256k1::PublicKey::from);
+        let key_set = SignerKeySet::derive(public_keys, signatures_required)?;
+        Ok(Self::V2 { signer_public_keys, key_set })
+    }
+
+    /// Return the signer identity keys whose request votes are authoritative.
+    pub fn signer_public_keys(&self) -> &BTreeSet<PublicKey> {
+        match self {
+            Self::V1 { signer_public_keys, .. } | Self::V2 { signer_public_keys, .. } => {
+                signer_public_keys
+            }
+        }
+    }
+
+    /// Return the number of approvals and signatures required by this set.
+    pub fn signatures_required(&self) -> u16 {
+        match self {
+            Self::V1 { signatures_required, .. } => *signatures_required,
+            Self::V2 { key_set, .. } => key_set.signatures_required(),
+        }
+    }
+
+    /// Return the key set that should lock the next signer UTXO.
+    pub fn output_key_set(&self) -> SignerUtxoKeySet {
+        match self {
+            Self::V1 { aggregate_key, .. } => {
+                SignerUtxoKeySet::V1(XOnlyPublicKey::from(*aggregate_key))
+            }
+            Self::V2 { key_set, .. } => SignerUtxoKeySet::V2(key_set.clone()),
+        }
+    }
+}
+
+/// The version-specific key material controlling a signer UTXO.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SignerUtxoKeySet {
+    /// A legacy key-path UTXO controlled by a WSTS aggregate key.
+    /// The aggregate x-only public key controlling the UTXO.
+    V1(XOnlyPublicKey),
+    /// A script-path UTXO controlled by independent signatures.
+    /// The validated `multi_a` signer key set controlling the UTXO.
+    V2(SignerKeySet),
+}
+
+impl SignerUtxoKeySet {
+    /// Return the stable identifier for this key set.
+    pub fn id(&self) -> KeySetId {
+        match self {
+            Self::V1(public_key) => PublicKeyXOnly::from(*public_key).into(),
+            Self::V2(key_set) => key_set.id().into(),
+        }
+    }
 }
 
 impl SignerUtxo {
     /// Create a TxIn object for the signers' UTXO
     ///
-    /// The signers' UTXO is always a key-spend only taproot UTXO, so a
-    /// valid signature is all that is needed to spend it.
+    /// The key-set variant determines whether the witness uses the v1 key
+    /// path or the v2 script path.
     fn as_tx_input(&self, signature: &Signature) -> TxIn {
+        let witness = match &self.key_set {
+            SignerUtxoKeySet::V1(_) => Witness::p2tr_key_spend(signature),
+            SignerUtxoKeySet::V2(key_set) => {
+                let signatures = dummy_threshold_signatures(key_set, *signature);
+                Self::construct_v2_witness(key_set, &signatures)
+            }
+        };
         TxIn {
             previous_output: self.outpoint,
             sequence: Sequence::ZERO,
-            witness: Witness::p2tr_key_spend(signature),
+            witness,
             script_sig: ScriptBuf::new(),
         }
     }
 
-    /// Construct the UTXO associated with this outpoint.
-    fn as_tx_output(&self) -> TxOut {
-        Self::new_tx_output(self.public_key, self.amount)
+    /// Return the virtual size of this UTXO's input in a sweep
+    /// transaction.
+    fn input_vsize(&self) -> u64 {
+        self.as_tx_input(&DUMMY_SIGNATURE)
+            .segwit_weight()
+            .to_vbytes_ceil()
     }
 
-    /// Construct the new signers' UTXO
-    ///
-    /// The signers' UTXO is always a key-spend only taproot UTXO.
+    /// Construct the UTXO associated with this outpoint.
+    fn as_tx_output(&self) -> TxOut {
+        match &self.key_set {
+            SignerUtxoKeySet::V2(key_set) => TxOut {
+                value: Amount::from_sat(self.amount),
+                script_pubkey: key_set.script_pubkey(),
+            },
+            SignerUtxoKeySet::V1(public_key) => Self::new_tx_output(*public_key, self.amount),
+        }
+    }
+
+    /// Construct a legacy v1 key-path signers' UTXO.
     fn new_tx_output(public_key: XOnlyPublicKey, sats: u64) -> TxOut {
         TxOut {
             value: Amount::from_sat(sats),
             script_pubkey: public_key.signers_script_pubkey(),
         }
+    }
+
+    /// Construct a script-path witness for a v2 signer UTXO.
+    ///
+    /// The caller must supply exactly `key_set.signatures_required`
+    /// signatures, each for a key in `key_set`; the [`SignatureCollector`]
+    /// guarantees this.
+    fn construct_v2_witness(
+        key_set: &SignerKeySet,
+        signatures: &BTreeMap<XOnlyPublicKey, Signature>,
+    ) -> Witness {
+        let mut witness = multi_a_signatures(key_set, signatures);
+        witness.push(key_set.signing_script().to_bytes());
+        witness.push(key_set.control_block().serialize());
+        Witness::from_slice(&witness)
+    }
+}
+
+/// Serialize the signature elements of a `multi_a` witness.
+///
+/// Tapscript consumes the top stack item first, so signatures appear in
+/// reverse script-key order, with an empty element for each key that did
+/// not sign. The `multi_a` script ends in `<k> OP_NUMEQUAL`, so callers
+/// must supply exactly `key_set.signatures_required` signatures.
+fn multi_a_signatures(
+    key_set: &SignerKeySet,
+    signatures: &BTreeMap<XOnlyPublicKey, Signature>,
+) -> Vec<Vec<u8>> {
+    key_set
+        .public_keys()
+        .iter()
+        .rev()
+        .map(|key| {
+            signatures
+                .get(key)
+                .map(|sig| sig.to_vec())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// Return `signature` for each of the first `signatures_required` keys in
+/// the key set. The result produces a correctly-sized witness for fee
+/// estimation, but not one that is valid for broadcast.
+fn dummy_threshold_signatures(
+    key_set: &SignerKeySet,
+    signature: Signature,
+) -> BTreeMap<XOnlyPublicKey, Signature> {
+    key_set
+        .public_keys()
+        .iter()
+        .take(usize::from(key_set.signatures_required()))
+        .map(|key| (*key, signature))
+        .collect()
+}
+
+/// A transaction input that the signers authorize with independent BIP-340
+/// signatures over a `multi_a` script.
+#[derive(Debug, Clone, Copy)]
+pub enum V2Input<'a> {
+    /// A v2 signers' UTXO, spent through its key set's `multi_a` script.
+    SignerUtxo(&'a SignerKeySet),
+    /// A v2 deposit, spent through its deposit script. The key set and
+    /// recipient must be the ones in `request.signers_public_key`.
+    Deposit {
+        /// The deposit request being spent.
+        deposit: &'a DepositRequest,
+        /// The key set in the deposit script.
+        key_set: &'a SignerKeySet,
+        /// The recipient committed to by the deposit script.
+        recipient: &'a StacksPrincipal,
+    },
+}
+
+impl V2Input<'_> {
+    /// Return the key set whose signatures authorize this input.
+    fn key_set(&self) -> &SignerKeySet {
+        match self {
+            Self::SignerUtxo(key_set) | Self::Deposit { key_set, .. } => key_set,
+        }
+    }
+
+    /// Construct this input's witness. The caller must supply exactly the
+    /// key set's threshold of signatures, each for a key in the key set.
+    fn construct_witness(&self, signatures: &BTreeMap<XOnlyPublicKey, Signature>) -> Witness {
+        match self {
+            Self::SignerUtxo(key_set) => SignerUtxo::construct_v2_witness(key_set, signatures),
+            Self::Deposit { deposit, key_set, recipient } => {
+                deposit.construct_v2_witness_data(key_set, recipient, signatures)
+            }
+        }
+    }
+}
+
+/// Collects the independent BIP-340 signatures that authorize spending a
+/// v2 input, and constructs the input's witness once it has enough of them.
+///
+/// Every signature is verified against the sighash when it is added, so a
+/// witness returned by [`SignatureCollector::add_signature`] holds exactly
+/// the key set's threshold of valid signatures.
+#[derive(Debug)]
+pub struct SignatureCollector<'a> {
+    input: V2Input<'a>,
+    sighash: TapSighash,
+    signatures: BTreeMap<XOnlyPublicKey, Signature>,
+}
+
+impl<'a> SignatureCollector<'a> {
+    /// Create a collector for signatures over `sighash`, which must be the
+    /// script-path sighash of `input`.
+    pub fn new(input: V2Input<'a>, sighash: TapSighash) -> Self {
+        Self {
+            input,
+            sighash,
+            signatures: BTreeMap::new(),
+        }
+    }
+
+    /// Return the sighash that signatures must sign.
+    pub fn sighash(&self) -> TapSighash {
+        self.sighash
+    }
+
+    /// Add a signature by the holder of `public_key`.
+    ///
+    /// Returns the input's witness when this signature brings the number of
+    /// collected signatures up to the key set's threshold, and `None`
+    /// before then. Returning the witness also clears the collected
+    /// signatures. A second signature from a key that has already signed is
+    /// ignored.
+    ///
+    /// Returns an error, and leaves the collector unchanged, if the key is
+    /// not in the key set or the signature does not verify against the
+    /// sighash.
+    pub fn add_signature(
+        &mut self,
+        public_key: XOnlyPublicKey,
+        signature: secp256k1::schnorr::Signature,
+    ) -> Result<Option<Witness>, Error> {
+        let key_set = self.input.key_set();
+        if !key_set.public_keys().contains(&public_key) {
+            return Err(Error::SigningKeyNotInKeySet(public_key));
+        }
+        if self.signatures.contains_key(&public_key) {
+            return Ok(None);
+        }
+
+        let message = secp256k1::Message::from(self.sighash);
+        SECP256K1
+            .verify_schnorr(&signature, &message, &public_key)
+            .map_err(Error::SchnorrSignatureFailedVerification)?;
+
+        let signature = Signature {
+            signature,
+            sighash_type: TapSighashType::All,
+        };
+
+        self.signatures.insert(public_key, signature);
+        if self.signatures.len() < usize::from(key_set.signatures_required()) {
+            return Ok(None);
+        }
+
+        let signatures = std::mem::take(&mut self.signatures);
+        Ok(Some(self.input.construct_witness(&signatures)))
     }
 }
 
@@ -858,8 +1276,6 @@ pub struct UnsignedTransaction<'a> {
     pub requests: Requests<'a>,
     /// The BTC transaction that needs to be signed.
     pub tx: Transaction,
-    /// The public key used for the public key of the signers' UTXO output.
-    pub signer_public_key: XOnlyPublicKey,
     /// The signers' UTXO used as inputs to this transaction.
     pub signer_utxo: SignerBtcState,
     /// The total amount of fees associated with the transaction.
@@ -878,9 +1294,8 @@ pub struct SignatureHashes<'a> {
     pub signer_outpoint: OutPoint,
     /// The sighash of the signers' input UTXO for the transaction.
     pub signers: TapSighash,
-    /// The aggregate key associated with the signers' UTXO that is being
-    /// spent in the transaction.
-    pub signers_aggregate_key: XOnlyPublicKey,
+    /// The key set controlling the signer input.
+    pub signers_key_set: &'a SignerUtxoKeySet,
     /// Each deposit request is associated with a UTXO input for the peg-in
     /// transaction. This field contains digests/signature hashes that need
     /// Schnorr signatures and the associated deposit request for each hash.
@@ -898,9 +1313,9 @@ pub struct SignatureHash {
     pub sighash: TapSighash,
     /// The type of prevout that we are referring to.
     pub prevout_type: TxPrevoutType,
-    /// The aggregate key that is locking the output associated with this
-    /// signature hash.
-    pub aggregate_key: XOnlyPublicKey,
+    /// Identifier of the key set locking the output, which determines the
+    /// signing scheme for the input.
+    pub key_set_id: KeySetId,
 }
 
 impl SignatureHashes<'_> {
@@ -909,12 +1324,18 @@ impl SignatureHashes<'_> {
         self.deposits.sort_by_key(|(x, _)| x.outpoint);
         self.deposits
             .into_iter()
-            .map(|(deposit, sighash)| SignatureHash {
-                txid: self.txid,
-                outpoint: deposit.outpoint,
-                sighash,
-                prevout_type: TxPrevoutType::Deposit,
-                aggregate_key: deposit.signers_public_key,
+            .map(|(deposit, sighash)| {
+                let key_set_id = match &deposit.signers_public_key {
+                    DepositSigningKey::V1(key) => KeySetId::V1(key.into()),
+                    DepositSigningKey::V2 { key_set, .. } => KeySetId::V2(key_set.id()),
+                };
+                SignatureHash {
+                    txid: self.txid,
+                    outpoint: deposit.outpoint,
+                    sighash,
+                    prevout_type: TxPrevoutType::Deposit,
+                    key_set_id,
+                }
             })
             .collect()
     }
@@ -926,7 +1347,7 @@ impl SignatureHashes<'_> {
             outpoint: self.signer_outpoint,
             sighash: self.signers,
             prevout_type: TxPrevoutType::SignersInput,
-            aggregate_key: self.signers_aggregate_key,
+            key_set_id: self.signers_key_set.id(),
         }
     }
 }
@@ -942,7 +1363,7 @@ impl UnsignedMockTransaction {
         let utxo = SignerUtxo {
             outpoint: OutPoint::null(),
             amount: Self::AMOUNT,
-            public_key: signer_public_key,
+            key_set: SignerUtxoKeySet::V1(signer_public_key),
         };
 
         let tx = Transaction {
@@ -1076,8 +1497,7 @@ impl<'a> UnsignedTransaction<'a> {
         Ok(Self {
             tx,
             requests,
-            signer_public_key: state.public_key,
-            signer_utxo: *state,
+            signer_utxo: state.clone(),
             tx_fee,
             tx_vsize,
         })
@@ -1095,8 +1515,8 @@ impl<'a> UnsignedTransaction<'a> {
     /// 2. The other inputs to the Transaction in the `tx` field are ordered
     ///    the same order as DepositRequests in the `requests` field.
     ///
-    /// Other noteworthy assumptions is that the signers' UTXO is always a
-    /// key-spend path only taproot UTXO.
+    /// The signers' input is a v1 key-path spend or a v2 script-path spend,
+    /// as recorded in its persisted key set.
     pub fn construct_digests(&self) -> Result<SignatureHashes<'_>, Error> {
         let deposit_requests = self.requests.iter().filter_map(RequestRef::as_deposit);
         let deposit_utxos = deposit_requests.clone().map(DepositRequest::as_tx_out);
@@ -1110,10 +1530,23 @@ impl<'a> UnsignedTransaction<'a> {
         let sighash_type = TapSighashType::All;
         let mut sighasher = SighashCache::new(&self.tx);
         // The signers' UTXO is always the first input in the transaction.
-        // Moreover, the signers can only spend this UTXO using the taproot
-        // key-spend path of UTXO.
-        let signer_sighash =
-            sighasher.taproot_key_spend_signature_hash(0, &prevouts, sighash_type)?;
+        // Its persisted key set selects the legacy key-spend sighash or the
+        // v2 script-spend sighash.
+        let signer_sighash = match &self.signer_utxo.utxo.key_set {
+            SignerUtxoKeySet::V2(key_set) => {
+                let signing_script = key_set.signing_script();
+                let leaf_hash = TapLeafHash::from_script(&signing_script, LeafVersion::TapScript);
+                sighasher.taproot_script_spend_signature_hash(
+                    0,
+                    &prevouts,
+                    leaf_hash,
+                    sighash_type,
+                )?
+            }
+            SignerUtxoKeySet::V1(_) => {
+                sighasher.taproot_key_spend_signature_hash(0, &prevouts, sighash_type)?
+            }
+        };
         // Each deposit UTXO is spendable by using the script path spend
         // of the taproot address. These UTXO inputs are after the sole
         // signer UTXO input.
@@ -1136,7 +1569,7 @@ impl<'a> UnsignedTransaction<'a> {
         Ok(SignatureHashes {
             txid: self.tx.compute_txid(),
             signer_outpoint: self.signer_utxo.utxo.outpoint,
-            signers_aggregate_key: self.signer_utxo.utxo.public_key,
+            signers_key_set: &self.signer_utxo.utxo.key_set,
             signers: signer_sighash,
             deposits: deposit_sighashes,
         })
@@ -1170,7 +1603,17 @@ impl<'a> UnsignedTransaction<'a> {
 
         let signer_input = state.utxo.as_tx_input(&signature);
         let signer_output_sats = Self::compute_signer_amount(reqs, state)?;
-        let signer_output = SignerUtxo::new_tx_output(state.public_key, signer_output_sats);
+        // Select the output independently of the input key set so that the
+        // first sweep at the activation height spends v1 and creates v2.
+        let signer_output = match &state.output_key_set {
+            SignerUtxoKeySet::V2(key_set) => TxOut {
+                value: Amount::from_sat(signer_output_sats),
+                script_pubkey: key_set.script_pubkey(),
+            },
+            SignerUtxoKeySet::V1(public_key) => {
+                SignerUtxo::new_tx_output(*public_key, signer_output_sats)
+            }
+        };
 
         Ok(Transaction {
             version: Version::TWO,
@@ -1191,7 +1634,7 @@ impl<'a> UnsignedTransaction<'a> {
                 vout: 0,
             },
             amount: self.tx.output[0].value.to_sat(),
-            public_key: self.signer_public_key,
+            key_set: self.signer_utxo.output_key_set.clone(),
         }
     }
 
@@ -1703,10 +2146,12 @@ mod tests {
     use fake::Fake as _;
     use model::SignerVote;
     use more_asserts::assert_ge;
+    use more_asserts::assert_gt;
     use rand::distributions::Distribution as _;
     use rand::distributions::Uniform;
     use rand::rngs::OsRng;
     use sbtc::deposits::DepositScriptInputs;
+    use sbtc::deposits::DepositScriptInputsV2;
     use secp256k1::Keypair;
     use secp256k1::SecretKey;
     use stacks_common::types::chainstate::StacksAddress;
@@ -1802,7 +2247,7 @@ mod tests {
             amount,
             deposit_script: deposit_inputs.deposit_script(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key,
+            signers_public_key: DepositSigningKey::V1(signers_public_key),
         }
     }
 
@@ -1919,6 +2364,319 @@ mod tests {
             .expect_err("signature verification should have failed");
     }
 
+    /// Return keypairs keyed by their x-only public key.
+    fn generate_keypairs(count: usize) -> BTreeMap<XOnlyPublicKey, Keypair> {
+        (0..count)
+            .map(|_| Keypair::new_global(&mut OsRng))
+            .map(|keypair| (keypair.x_only_public_key().0, keypair))
+            .collect()
+    }
+
+    fn sign_sighash(keypair: &Keypair, sighash: TapSighash) -> secp256k1::schnorr::Signature {
+        SECP256K1.sign_schnorr_no_aux_rand(&secp256k1::Message::from(sighash), keypair)
+    }
+
+    /// Return a transaction whose only input spends `outpoint`.
+    fn spending_transaction(outpoint: OutPoint) -> Transaction {
+        Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: outpoint,
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::ZERO,
+                witness: Witness::new(),
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(99_000),
+                script_pubkey: ScriptBuf::new_op_return([]),
+            }],
+        }
+    }
+
+    /// Return the script-path sighash for spending `prevout` with `script`
+    /// as the only input of `tx`.
+    fn script_spend_sighash(tx: &Transaction, prevout: &TxOut, script: &ScriptBuf) -> TapSighash {
+        let leaf_hash = TapLeafHash::from_script(script, LeafVersion::TapScript);
+        SighashCache::new(tx)
+            .taproot_script_spend_signature_hash(
+                0,
+                &Prevouts::All(std::slice::from_ref(prevout)),
+                leaf_hash,
+                TapSighashType::All,
+            )
+            .unwrap()
+    }
+
+    /// Check with libbitcoinconsensus that the only input of `tx` validly
+    /// spends `prevout`.
+    fn verify_spend(tx: &Transaction, prevout: &TxOut) {
+        let tx_bytes = bitcoin::consensus::serialize(tx);
+        let prevout_script = prevout.script_pubkey.as_bytes();
+        let consensus_prevout = bitcoinconsensus::Utxo {
+            script_pubkey: prevout_script.as_ptr(),
+            script_pubkey_len: prevout_script.len() as u32,
+            value: prevout.value.to_sat() as i64,
+        };
+        bitcoinconsensus::verify_with_flags(
+            prevout_script,
+            prevout.value.to_sat(),
+            &tx_bytes,
+            Some(&[consensus_prevout]),
+            0,
+            bitcoinconsensus::VERIFY_ALL_PRE_TAPROOT | bitcoinconsensus::VERIFY_TAPROOT,
+        )
+        .expect("the witness must satisfy the prevout's script");
+    }
+
+    /// Return a v2 deposit locked by `key_set`.
+    fn v2_deposit(key_set: &SignerKeySet) -> DepositRequest {
+        let recipient = PrincipalData::from(StacksAddress::burn_address(false));
+        let inputs = DepositScriptInputsV2::new(
+            key_set.public_keys().clone(),
+            key_set.signatures_required(),
+            recipient.clone(),
+            1_000,
+        )
+        .unwrap();
+        let reclaim_script = ScriptBuf::new_op_return([]);
+        DepositRequest {
+            outpoint: OutPoint::null(),
+            max_fee: inputs.max_fee,
+            signer_bitmap: BitArray::ZERO,
+            amount: 100_000,
+            deposit_script: inputs.deposit_script(),
+            reclaim_script_hash: TaprootScriptHash::from(&reclaim_script),
+            signers_public_key: DepositSigningKey::V2 {
+                key_set: inputs.signer_key_set,
+                recipient: recipient.into(),
+            },
+        }
+    }
+
+    /// Return the collector input for a v2 deposit.
+    fn deposit_input(deposit: &DepositRequest) -> V2Input<'_> {
+        let DepositSigningKey::V2 { key_set, recipient } = &deposit.signers_public_key else {
+            panic!("expected a v2 deposit");
+        };
+        V2Input::Deposit { deposit, key_set, recipient }
+    }
+
+    /// A v2 script-path spend uses each derived key directly. In particular,
+    /// the signing keys are not Taproot-tweaked; the output key and control
+    /// block carry the tree tweak.
+    #[test]
+    fn v2_signer_utxo_spend_uses_untweaked_bip340_keys() {
+        let keypairs = generate_keypairs(3);
+        let key_set = SignerKeySet::new(keypairs.keys().copied(), 2).unwrap();
+        let utxo = SignerUtxo {
+            outpoint: OutPoint::null(),
+            amount: 100_000,
+            key_set: SignerUtxoKeySet::V2(key_set.clone()),
+        };
+        let prevout = utxo.as_tx_output();
+        let mut tx = spending_transaction(utxo.outpoint);
+        let sighash = script_spend_sighash(&tx, &prevout, &key_set.signing_script());
+
+        let mut collector = SignatureCollector::new(V2Input::SignerUtxo(&key_set), sighash);
+        let mut keypairs = keypairs.iter();
+        let (key, keypair) = keypairs.next().unwrap();
+        let result = collector.add_signature(*key, sign_sighash(keypair, sighash));
+        assert!(result.unwrap().is_none());
+        let (key, keypair) = keypairs.next().unwrap();
+        let result = collector.add_signature(*key, sign_sighash(keypair, sighash));
+        tx.input[0].witness = result.unwrap().expect("threshold reached");
+
+        verify_spend(&tx, &prevout);
+    }
+
+    /// A v2 deposit spend reveals the deposit-data preimage that the
+    /// deposit derives from its max fee and recipient.
+    #[test]
+    fn v2_deposit_spend_satisfies_the_deposit_script() {
+        let keypairs = generate_keypairs(3);
+        let key_set = SignerKeySet::new(keypairs.keys().copied(), 2).unwrap();
+        let deposit = v2_deposit(&key_set);
+        let prevout = deposit.as_tx_out();
+        let mut tx = spending_transaction(deposit.outpoint);
+        let sighash = script_spend_sighash(&tx, &prevout, &deposit.deposit_script);
+
+        let mut collector = SignatureCollector::new(deposit_input(&deposit), sighash);
+        let mut keypairs = keypairs.iter();
+        let (key, keypair) = keypairs.next().unwrap();
+        let result = collector.add_signature(*key, sign_sighash(keypair, sighash));
+        assert!(result.unwrap().is_none());
+        let (key, keypair) = keypairs.next().unwrap();
+        let result = collector.add_signature(*key, sign_sighash(keypair, sighash));
+        tx.input[0].witness = result.unwrap().expect("threshold reached");
+
+        verify_spend(&tx, &prevout);
+    }
+
+    /// Sign every input of `unsigned` the way the signers do, set the
+    /// witnesses, and check with libbitcoinconsensus that each input
+    /// validly spends its prevout given all of the transaction's prevouts.
+    ///
+    /// The v1 signers' input and v1 deposits are signed by `v1_keypair`,
+    /// which stands in for the WSTS aggregate key. v2 inputs are signed by
+    /// the last threshold-many keys of their key set, so that the witness
+    /// has empty elements for the leading keys.
+    fn sign_and_verify_sweep(
+        unsigned: &mut UnsignedTransaction,
+        v1_keypair: &Keypair,
+        v2_keypairs: &BTreeMap<XOnlyPublicKey, Keypair>,
+    ) {
+        let sign_v2 = |input: V2Input, sighash: TapSighash| -> Witness {
+            let key_set = input.key_set().clone();
+            let mut collector = SignatureCollector::new(input, sighash);
+            key_set
+                .public_keys()
+                .iter()
+                .rev()
+                .find_map(|key| {
+                    let signature = sign_sighash(&v2_keypairs[key], sighash);
+                    collector.add_signature(*key, signature).unwrap()
+                })
+                .expect("the key set's threshold is reached")
+        };
+        let sign_v1 = |keypair: &Keypair, sighash: TapSighash| Signature {
+            signature: sign_sighash(keypair, sighash),
+            sighash_type: TapSighashType::All,
+        };
+
+        let sighashes = unsigned.construct_digests().unwrap();
+        let signer_witness = match sighashes.signers_key_set {
+            SignerUtxoKeySet::V1(_) => {
+                let tweaked = v1_keypair.tap_tweak(SECP256K1, None).to_inner();
+                Witness::p2tr_key_spend(&sign_v1(&tweaked, sighashes.signers))
+            }
+            SignerUtxoKeySet::V2(key_set) => {
+                sign_v2(V2Input::SignerUtxo(key_set), sighashes.signers)
+            }
+        };
+        let deposit_witnesses = sighashes
+            .deposits
+            .iter()
+            .map(|(deposit, sighash)| match &deposit.signers_public_key {
+                DepositSigningKey::V1(_) => {
+                    deposit.construct_v1_witness_data(sign_v1(v1_keypair, *sighash))
+                }
+                DepositSigningKey::V2 { .. } => sign_v2(deposit_input(deposit), *sighash),
+            });
+        let witnesses: Vec<Witness> = std::iter::once(signer_witness)
+            .chain(deposit_witnesses)
+            .collect();
+
+        let prevouts: Vec<TxOut> = std::iter::once(unsigned.signer_utxo.utxo.as_tx_output())
+            .chain(
+                unsigned
+                    .requests
+                    .iter()
+                    .filter_map(RequestRef::as_deposit)
+                    .map(DepositRequest::as_tx_out),
+            )
+            .collect();
+
+        for (tx_in, witness) in unsigned.tx.input.iter_mut().zip(witnesses) {
+            tx_in.witness = witness;
+        }
+        // The fee was computed from the stub witnesses, so the signed
+        // transaction must be exactly as large.
+        assert_eq!(unsigned.tx.vsize(), unsigned.tx_vsize as usize);
+
+        let tx_bytes = bitcoin::consensus::serialize(&unsigned.tx);
+        let consensus_prevouts: Vec<bitcoinconsensus::Utxo> = prevouts
+            .iter()
+            .map(|prevout| bitcoinconsensus::Utxo {
+                script_pubkey: prevout.script_pubkey.as_bytes().as_ptr(),
+                script_pubkey_len: prevout.script_pubkey.len() as u32,
+                value: prevout.value.to_sat() as i64,
+            })
+            .collect();
+        for (index, prevout) in prevouts.iter().enumerate() {
+            bitcoinconsensus::verify_with_flags(
+                prevout.script_pubkey.as_bytes(),
+                prevout.value.to_sat(),
+                &tx_bytes,
+                Some(&consensus_prevouts),
+                index,
+                bitcoinconsensus::VERIFY_ALL_PRE_TAPROOT | bitcoinconsensus::VERIFY_TAPROOT,
+            )
+            .unwrap_or_else(|error| panic!("input {index} is not validly signed: {error:?}"));
+        }
+    }
+
+    /// A sweep that spends the signers' UTXO together with a v1 and a v2
+    /// deposit is valid under consensus rules, both for the sweep at the
+    /// activation height, which spends a v1 signers' UTXO and creates a v2
+    /// one, and for a later sweep, which spends a v2 signers' UTXO.
+    #[test_case(false; "v1 signers' input to a v2 output")]
+    #[test_case(true; "v2 signers' input to a v2 output")]
+    fn sweep_with_v1_and_v2_deposits_is_valid(v2_signer_input: bool) {
+        let v1_keypair = Keypair::new_global(&mut OsRng);
+        let v1_key = v1_keypair.x_only_public_key().0;
+        // The production signer set is 11-of-15.
+        let v2_keypairs = generate_keypairs(15);
+        let key_set = SignerKeySet::new(v2_keypairs.keys().copied(), 11).unwrap();
+
+        let v1_deposit = {
+            let inputs = DepositScriptInputs {
+                signers_public_key: v1_key,
+                max_fee: 100_000,
+                recipient: PrincipalData::from(StacksAddress::burn_address(false)),
+            };
+            DepositRequest {
+                outpoint: generate_outpoint(100_000, 0),
+                max_fee: inputs.max_fee,
+                signer_bitmap: BitArray::ZERO,
+                amount: 100_000,
+                deposit_script: inputs.deposit_script(),
+                reclaim_script_hash: TaprootScriptHash::zeros(),
+                signers_public_key: DepositSigningKey::V1(v1_key),
+            }
+        };
+        let mut v2_deposit = v2_deposit(&key_set);
+        v2_deposit.outpoint = generate_outpoint(v2_deposit.amount, 0);
+
+        let signer_input_key_set = if v2_signer_input {
+            SignerUtxoKeySet::V2(key_set.clone())
+        } else {
+            SignerUtxoKeySet::V1(v1_key)
+        };
+        let requests = SbtcRequests {
+            deposits: vec![v1_deposit, v2_deposit],
+            withdrawals: Vec::new(),
+            signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V2(key_set.clone()),
+                utxo: SignerUtxo {
+                    outpoint: generate_outpoint(550_000_000, 0),
+                    amount: 550_000_000,
+                    key_set: signer_input_key_set.clone(),
+                },
+                fee_rate: 1.0,
+                last_fees: None,
+                magic_bytes: [0; 2],
+            },
+            num_signers: 15,
+            accept_threshold: 11,
+            sbtc_limits: SbtcLimits::unlimited(),
+            max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
+        };
+
+        let mut transactions = requests.construct_transactions().unwrap();
+        assert_eq!(transactions.len(), 1);
+        let mut unsigned = transactions.pop().unwrap();
+        assert_eq!(unsigned.tx.input.len(), 3);
+        assert_eq!(unsigned.signer_utxo.utxo.key_set, signer_input_key_set);
+        assert_eq!(unsigned.tx.output[0].script_pubkey, key_set.script_pubkey());
+        assert_eq!(
+            unsigned.new_signer_utxo().key_set,
+            SignerUtxoKeySet::V2(key_set.clone())
+        );
+
+        sign_and_verify_sweep(&mut unsigned, &v1_keypair, &v2_keypairs);
+    }
+
     #[test]
     fn calculate_solo_tx_sizes_for_consts() {
         // For solo deposits
@@ -1926,13 +2684,13 @@ mod tests {
             deposits: vec![create_deposit(123456, 30_000, 0)],
             withdrawals: Vec::new(),
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(generate_x_only_public_key()),
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(550_000_000, 0),
                     amount: 550_000_000,
-                    public_key: generate_x_only_public_key(),
+                    key_set: SignerUtxoKeySet::V1(generate_x_only_public_key()),
                 },
                 fee_rate: 5.0,
-                public_key: generate_x_only_public_key(),
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -1974,10 +2732,84 @@ mod tests {
         testing::set_witness_data(&mut unsigned, keypair);
 
         assert_eq!(
-            MAX_BASE_TX_VSIZE as usize,
+            BASE_WITHDRAWAL_TX_VSIZE as usize,
             unsigned.tx.vsize(),
             "Base tx vsize needs updating"
         );
+
+        // The same base transaction, without the v1 signers' input.
+        let signer_input_vsize = requests.signer_state.utxo.input_vsize();
+        more_asserts::assert_le!(
+            (BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + signer_input_vsize as f64
+                - BASE_WITHDRAWAL_TX_VSIZE)
+                .abs(),
+            1.0,
+            "Base tx vsize without the signers' input needs updating"
+        );
+    }
+
+    /// The largest signers' input is a v2 input for a key set with the
+    /// most signers allowed, where every signer signs, and
+    /// [`MAX_BASE_TX_VSIZE`] must account for it.
+    #[test]
+    fn max_base_tx_vsize_covers_the_largest_signer_input() {
+        let max_signers = sbtc::MAX_SIGNERS as u16;
+        let public_keys = (0..max_signers).map(|_| generate_x_only_public_key());
+        let key_set = SignerKeySet::new(public_keys, max_signers).unwrap();
+        let utxo = SignerUtxo {
+            outpoint: OutPoint::null(),
+            amount: 0,
+            key_set: SignerUtxoKeySet::V2(key_set),
+        };
+
+        let input_weight = utxo.as_tx_input(&DUMMY_SIGNATURE).segwit_weight();
+        let base_tx_vsize = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + input_weight.to_wu() as f64 / 4.0;
+        assert_eq!(base_tx_vsize, MAX_BASE_TX_VSIZE);
+    }
+
+    /// The pre-filter must only accept a request whose max fee covers the
+    /// solo sweep the signers will assess, which is larger for a v2
+    /// signers' input and a v2 deposit input than the fixed v1 sizes.
+    #[test]
+    fn v2_fee_prefilter_covers_the_solo_sweep() {
+        // The production signer set is 11-of-15.
+        let key_set = SignerKeySet::new((0..15).map(|_| generate_x_only_public_key()), 11).unwrap();
+        let mut deposit = v2_deposit(&key_set);
+        deposit.amount = 10_000_000;
+        deposit.max_fee = deposit.amount;
+        let fee_rate = 10.0;
+        let mut requests = SbtcRequests {
+            deposits: vec![deposit],
+            withdrawals: Vec::new(),
+            signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V2(key_set.clone()),
+                utxo: SignerUtxo {
+                    outpoint: generate_outpoint(550_000_000, 0),
+                    amount: 550_000_000,
+                    key_set: SignerUtxoKeySet::V2(key_set),
+                },
+                fee_rate,
+                last_fees: None,
+                magic_bytes: [0; 2],
+            },
+            num_signers: 15,
+            accept_threshold: 11,
+            sbtc_limits: SbtcLimits::unlimited(),
+            max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
+        };
+
+        let transaction = requests.construct_transactions().unwrap().pop().unwrap();
+        let solo_fee = compute_transaction_fee(transaction.tx_vsize as f64, fee_rate, None);
+        // The v1 sizes would have accepted a much smaller max fee.
+        assert_gt!(solo_fee, (SOLO_DEPOSIT_TX_VSIZE * fee_rate) as u64);
+
+        requests.deposits[0].max_fee = solo_fee - 1;
+        assert!(requests.construct_transactions().unwrap().is_empty());
+
+        // The fixed sizes assume the largest OP_RETURN output, so the
+        // filter asks for a little more than the solo sweep needs.
+        requests.deposits[0].max_fee = solo_fee + 16 * fee_rate as u64;
+        assert_eq!(requests.construct_transactions().unwrap().len(), 1);
     }
 
     #[ignore = "this is for generating the MIN_BITCOIN_INPUT_VSIZE constant"]
@@ -2010,7 +2842,9 @@ mod tests {
             amount: 100_000,
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
+            signers_public_key: DepositSigningKey::V1(
+                XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
+            ),
         };
 
         assert_eq!(deposit.votes().count_ones(), expected);
@@ -2027,11 +2861,13 @@ mod tests {
             amount: 100_000,
             deposit_script: ScriptBuf::from_bytes(vec![1, 2, 3]),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
+            signers_public_key: DepositSigningKey::V1(
+                XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap(),
+            ),
         };
 
         let sig = Signature::from_slice(&[0u8; 64]).unwrap();
-        let witness = deposit.construct_witness_data(sig);
+        let witness = deposit.construct_v1_witness_data(sig);
         assert!(witness.tapscript().is_some());
 
         let sig = *DUMMY_SIGNATURE;
@@ -2042,6 +2878,100 @@ mod tests {
         assert!(tx_in.script_sig.is_empty());
     }
 
+    #[test]
+    fn v2_dummy_witnesses_have_the_same_weight_as_signed_witnesses() {
+        let keypairs = generate_keypairs(3);
+        let key_set = SignerKeySet::new(keypairs.keys().copied(), 2).unwrap();
+        let deposit = v2_deposit(&key_set);
+        let utxo = SignerUtxo {
+            outpoint: OutPoint::null(),
+            amount: 100_000,
+            key_set: SignerUtxoKeySet::V2(key_set.clone()),
+        };
+        let sighash = TapSighash::from_byte_array([1; 32]);
+
+        let cases = [
+            (
+                deposit.as_tx_input(*DUMMY_SIGNATURE),
+                deposit_input(&deposit),
+            ),
+            (
+                utxo.as_tx_input(&DUMMY_SIGNATURE),
+                V2Input::SignerUtxo(&key_set),
+            ),
+        ];
+        for (dummy_input, input) in cases {
+            let mut collector = SignatureCollector::new(input, sighash);
+            let witness = keypairs
+                .iter()
+                .find_map(|(key, keypair)| {
+                    let signature = sign_sighash(keypair, sighash);
+                    collector.add_signature(*key, signature).unwrap()
+                })
+                .expect("threshold reached");
+
+            let mut signed_input = dummy_input.clone();
+            signed_input.witness = witness;
+            assert_eq!(dummy_input.segwit_weight(), signed_input.segwit_weight());
+        }
+    }
+
+    /// The collector returns a witness with exactly the threshold of
+    /// signatures, on the signature that reaches the threshold. Repeat
+    /// signatures from a key do not count towards the threshold.
+    #[test]
+    fn signature_collector_returns_the_witness_at_the_threshold() {
+        let keypairs = generate_keypairs(3);
+        let key_set = SignerKeySet::new(keypairs.keys().copied(), 2).unwrap();
+        let sighash = TapSighash::from_byte_array([1; 32]);
+        let mut collector = SignatureCollector::new(V2Input::SignerUtxo(&key_set), sighash);
+        let mut keypairs = keypairs.iter();
+
+        let (key, keypair) = keypairs.next().unwrap();
+        let signature = sign_sighash(keypair, sighash);
+        assert!(collector.add_signature(*key, signature).unwrap().is_none());
+        assert!(collector.add_signature(*key, signature).unwrap().is_none());
+
+        let (key, keypair) = keypairs.next().unwrap();
+        let signature = sign_sighash(keypair, sighash);
+        let witness = collector.add_signature(*key, signature).unwrap().unwrap();
+
+        let signature_count = witness
+            .iter()
+            .take(key_set.public_keys().len())
+            .filter(|item| !item.is_empty())
+            .count();
+        assert_eq!(signature_count, usize::from(key_set.signatures_required()));
+    }
+
+    /// Signatures from keys outside the key set, or that do not verify
+    /// against the sighash, are rejected and do not count towards the
+    /// threshold.
+    #[test]
+    fn signature_collector_rejects_invalid_signatures() {
+        let keypairs = generate_keypairs(2);
+        let key_set = SignerKeySet::new(keypairs.keys().copied(), 2).unwrap();
+        let sighash = TapSighash::from_byte_array([1; 32]);
+        let mut collector = SignatureCollector::new(V2Input::SignerUtxo(&key_set), sighash);
+        let mut keypairs = keypairs.iter();
+
+        let outsider = Keypair::new_global(&mut OsRng);
+        let outsider_key = outsider.x_only_public_key().0;
+        let result = collector.add_signature(outsider_key, sign_sighash(&outsider, sighash));
+        assert!(matches!(result, Err(Error::SigningKeyNotInKeySet(key)) if key == outsider_key));
+
+        let (key, keypair) = keypairs.next().unwrap();
+        let other_sighash = TapSighash::from_byte_array([2; 32]);
+        let result = collector.add_signature(*key, sign_sighash(keypair, other_sighash));
+        assert!(matches!(
+            result,
+            Err(Error::SchnorrSignatureFailedVerification(_))
+        ));
+
+        let result = collector.add_signature(*key, sign_sighash(keypair, sighash));
+        assert!(result.unwrap().is_none());
+    }
+
     /// The first input and output are related to the signers' UTXO. The
     /// second output is a data output.
     #[test]
@@ -2050,13 +2980,13 @@ mod tests {
             deposits: vec![create_deposit(123456, 0, 0)],
             withdrawals: vec![create_withdrawal(1000, 0, 0), create_withdrawal(2000, 0, 0)],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(generate_x_only_public_key()),
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(5500, 0),
                     amount: 5500,
-                    public_key: generate_x_only_public_key(),
+                    key_set: SignerUtxoKeySet::V1(generate_x_only_public_key()),
                 },
                 fee_rate: 0.0,
-                public_key: generate_x_only_public_key(),
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2105,7 +3035,7 @@ mod tests {
         // The new UTXO should be using the signer public key from the
         // signer state.
         let new_utxo = unsigned_tx.new_signer_utxo();
-        assert_eq!(new_utxo.public_key, requests.signer_state.public_key);
+        assert_eq!(new_utxo.key_set, requests.signer_state.output_key_set);
     }
 
     /// You cannot create sweep transactions that do not service requests.
@@ -2113,13 +3043,13 @@ mod tests {
     fn no_requests_no_sweep() {
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
         let signer_state = SignerBtcState {
+            output_key_set: SignerUtxoKeySet::V1(public_key),
             utxo: SignerUtxo {
                 outpoint: OutPoint::null(),
                 amount: 55,
-                public_key,
+                key_set: SignerUtxoKeySet::V1(public_key),
             },
             fee_rate: 0.0,
-            public_key,
             last_fees: None,
             magic_bytes: [0; 2],
         };
@@ -2146,13 +3076,13 @@ mod tests {
             deposits: vec![create_deposit(100_000, 5_000, 0)],
             withdrawals,
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(500_000_000, 0),
                     amount: 500_000_000,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 1.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: *b"ST",
             },
@@ -2260,13 +3190,13 @@ mod tests {
             ],
             withdrawals: Vec::new(),
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::null(),
                     amount: 55,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 1.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2305,13 +3235,13 @@ mod tests {
             ],
             withdrawals: Vec::new(),
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::null(),
                     amount: 55,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 0.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2356,13 +3286,13 @@ mod tests {
                 create_withdrawal(3000, 0, 0),
             ],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::null(),
                     amount: 9500,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 0.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2404,13 +3334,13 @@ mod tests {
                 create_withdrawal(4000, 0, (1 << 8) | (1 << 9)),
             ],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(300_000, 0),
                     amount: 300_000,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 0.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2464,13 +3394,13 @@ mod tests {
                 create_withdrawal(7000, 0, 0),
             ],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(300_000, 0),
                     amount: 300_000,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 0.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2564,13 +3494,13 @@ mod tests {
                 create_withdrawal(70000, 100_000, 0),
             ],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(300_000, 0),
                     amount: 300_000_000,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 25.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2630,13 +3560,13 @@ mod tests {
                 create_withdrawal(20000, 100_000, 0).wid(1000),
             ],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(300_000, 0),
                     amount: 300_000_000,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 25.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2707,13 +3637,13 @@ mod tests {
                 .map(|id| create_withdrawal(10_000, 100_000, 0).wid(id))
                 .collect(),
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(300_000, 0),
                     amount: 300_000_000,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 25.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2752,13 +3682,13 @@ mod tests {
                 create_withdrawal(3000, 0, 0),
             ],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::null(),
                     amount: 3000,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate: 0.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -2810,13 +3740,13 @@ mod tests {
             deposits: good_fee_deposits.chain(low_fee_deposits).collect(),
             withdrawals: good_fee_withdrawals.chain(low_fee_withdrawals).collect(),
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(public_key),
                 utxo: SignerUtxo {
                     outpoint: generate_outpoint(300_000_000, 0),
                     amount: 300_000_000,
-                    public_key,
+                    key_set: SignerUtxoKeySet::V1(public_key),
                 },
                 fee_rate,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -3084,42 +4014,43 @@ mod tests {
         assert!(combined_fee <= (fee + Amount::from_sat(3u64)));
     }
 
-    #[test_case(
-        create_deposit(
-            DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64,
-            10_000,
-            0
-        ),
-        true; "deposit amounts over the dust limit accepted")]
-    #[test_case(
-        create_deposit(
-            DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64 - 1,
-            10_000,
-            0
-        ),
-        false; "deposit amounts under the dust limit rejected")]
-    fn deposit_requests_respect_dust_limits(req: DepositRequest, is_included: bool) {
+    #[test_case(0, true; "deposit amounts over the dust limit accepted")]
+    #[test_case(-1, false; "deposit amounts under the dust limit rejected")]
+    fn deposit_requests_respect_dust_limits(amount_offset: i64, is_included: bool) {
+        let mut req = create_deposit(0, 10_000, 0);
         let outpoint = req.outpoint;
         let public_key = XOnlyPublicKey::from_str(X_ONLY_PUBLIC_KEY1).unwrap();
 
         // We use a fee rate of 1 to simplify the computation. The
         // filtering done here uses a heuristic where we take the maximum
         // fee that the user could pay, and subtract that amount from the
-        // deposit amount. The maximum fee that a user could pay is the
-        // SOLO_DEPOSIT_TX_VSIZE times the fee rate so with a fee rate of 1
-        // we should filter the request if the deposit amount is less than
-        // SOLO_DEPOSIT_TX_VSIZE + DEPOSIT_DUST_LIMIT.
+        // deposit amount. The maximum fee that a user could pay is the fee
+        // for a sweep of only this deposit, so with a fee rate of 1 we
+        // should filter the request if the deposit amount is less than
+        // that transaction's vsize plus DEPOSIT_DUST_LIMIT.
+        let utxo = SignerUtxo {
+            outpoint: generate_outpoint(300_000, 0),
+            amount: 300_000_000,
+            key_set: SignerUtxoKeySet::V1(public_key),
+        };
+        // This is the preprocessor that construct_transactions uses.
+        let preprocessor = RequestPreprocessor {
+            sbtc_limits: &SbtcLimits::unlimited(),
+            fee_rate: 1.0,
+            last_fees: None,
+            signer_input_vsize: utxo.input_vsize() as f64,
+        };
+        let solo_tx_vsize = preprocessor.solo_tx_vsize(req.vsize());
+        let amount = DEPOSIT_DUST_LIMIT as i64 + solo_tx_vsize.ceil() as i64 + amount_offset;
+        req.amount = amount as u64;
+
         let requests = SbtcRequests {
             deposits: vec![create_deposit(2500000, 100000, 0), req],
             withdrawals: vec![],
             signer_state: SignerBtcState {
-                utxo: SignerUtxo {
-                    outpoint: generate_outpoint(300_000, 0),
-                    amount: 300_000_000,
-                    public_key,
-                },
+                output_key_set: SignerUtxoKeySet::V1(public_key),
+                utxo,
                 fee_rate: 1.0,
-                public_key,
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -3159,13 +4090,13 @@ mod tests {
             deposits,
             withdrawals,
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(generate_x_only_public_key()),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::null(),
                     amount: 1000000,
-                    public_key: generate_x_only_public_key(),
+                    key_set: SignerUtxoKeySet::V1(generate_x_only_public_key()),
                 },
                 fee_rate: 1.0,
-                public_key: generate_x_only_public_key(),
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -3215,13 +4146,13 @@ mod tests {
             deposits,
             withdrawals,
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(generate_x_only_public_key()),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::null(),
                     amount: 100000000,
-                    public_key: generate_x_only_public_key(),
+                    key_set: SignerUtxoKeySet::V1(generate_x_only_public_key()),
                 },
                 fee_rate: 1.0,
-                public_key: generate_x_only_public_key(),
                 last_fees: None,
                 magic_bytes: [0; 2],
             },
@@ -3283,17 +4214,24 @@ mod tests {
         assert_eq!(fees.is_ok(), is_ok);
     }
 
+    /// Return the smallest amount that a deposit from [`create_deposit`]
+    /// can have and stay above the dust limit after paying for a sweep of
+    /// only that deposit at a fee rate of 1 sat/vbyte.
+    fn solo_deposit_dust_threshold() -> u64 {
+        let limits = SbtcLimits::unlimited();
+        let deposit_vsize = create_deposit(0, 0, 0).vsize();
+        let solo_tx_vsize =
+            RequestPreprocessor::new(&limits, 1.0, None).solo_tx_vsize(deposit_vsize);
+        DEPOSIT_DUST_LIMIT + solo_tx_vsize.ceil() as u64
+    }
+
     #[test_case(
-        &[create_deposit(
-            DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64, 10_000, 0
-        )],
+        &[create_deposit(solo_deposit_dust_threshold(), 10_000, 0)],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
         1.0,
-        1, DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64; "deposit_amounts_over_the_dust_limit_accepted")]
+        1, solo_deposit_dust_threshold(); "deposit_amounts_over_the_dust_limit_accepted")]
     #[test_case(
-        &[create_deposit(
-            DEPOSIT_DUST_LIMIT + SOLO_DEPOSIT_TX_VSIZE as u64 - 1, 10_000, 0
-        )],
+        &[create_deposit(solo_deposit_dust_threshold() - 1, 10_000, 0)],
         &create_limits_for_deposits_and_max_mintable(0, 20_000, 100_000),
         1.0,
         0, 0; "should_reject_deposits_under_dust_limit")]

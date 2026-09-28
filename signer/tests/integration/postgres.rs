@@ -39,6 +39,7 @@ use strum::IntoEnumIterator as _;
 use time::OffsetDateTime;
 
 use signer::bitcoin::MockBitcoinInteract;
+use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::bitcoin::validation::DepositConfirmationStatus;
 use signer::context::Context;
 use signer::emily_client::MockEmilyInteract;
@@ -1289,9 +1290,9 @@ async fn writing_withdrawal_reject_requests_postgres() {
     signer::testing::storage::drop_db(store).await;
 }
 
-/// For this test we check that when we get the votes for a deposit request
-/// for a specific aggregate key, that we get a vote for all public keys
-/// for the specific aggregate key. This includes "implicit" votes where we
+/// For this test we check that when we get the votes for a deposit request,
+/// we get a vote for all public keys in the supplied signer set. This
+/// includes "implicit" votes where we
 /// got no response from a particular signer but so we assume that they
 /// vote to reject the transaction.
 #[tokio::test]
@@ -1366,7 +1367,7 @@ async fn fetching_deposit_request_votes() {
 
     // Okay let's test the query and get the votes.
     let votes = store
-        .get_deposit_request_signer_votes(&txid, output_index, &shares.aggregate_key)
+        .get_deposit_request_signer_votes(&txid, output_index, &shares.signer_set_public_keys())
         .await
         .unwrap();
 
@@ -1618,8 +1619,8 @@ async fn fetching_withdrawal_signer_decisions() {
 }
 
 /// For this test we check that when we get the votes for a withdrawal
-/// request for a specific aggregate key, that we get a vote for all public
-/// keys for the specific aggregate key. This includes "implicit" votes
+/// request, we get a vote for all public keys in the supplied signer set.
+/// This includes "implicit" votes
 /// where we got no response from a particular signer but so we assume that
 /// they vote to reject the transaction.
 #[tokio::test]
@@ -1705,7 +1706,7 @@ async fn fetching_withdrawal_request_votes() {
 
     // Okay let's test the query and get the votes.
     let votes = store
-        .get_withdrawal_request_signer_votes(&id, &shares.aggregate_key)
+        .get_withdrawal_request_signer_votes(&id, &shares.signer_set_public_keys())
         .await
         .unwrap();
 
@@ -3604,6 +3605,64 @@ async fn should_get_signer_utxo_unspent() {
         .await;
 
     signer::testing::storage::drop_db(store).await;
+}
+
+/// A signer UTXO locked by a v2 key set loads with that key set, rebuilt
+/// from the stored signing keys and threshold.
+#[tokio::test]
+async fn should_get_signer_utxo_locked_by_a_v2_key_set() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    let signer_set_public_keys = std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
+        .take(3)
+        .collect::<BTreeSet<PublicKey>>();
+    let key_set = sbtc::SignerKeySet::derive(
+        signer_set_public_keys
+            .iter()
+            .copied()
+            .map(secp256k1::PublicKey::from),
+        2,
+    )
+    .unwrap();
+    db.write_signer_key_set(&model::SignerKeySet::from(key_set.clone()))
+        .await
+        .unwrap();
+
+    // A sweep transaction, confirmed in the chain tip, whose signer output
+    // is locked by the v2 key set.
+    let chain_tip: model::BitcoinBlock = fake::Faker.fake_with_rng(&mut rng);
+    db.write_bitcoin_block(&chain_tip).await.unwrap();
+
+    let mut prevout: model::TxPrevout = fake::Faker.fake_with_rng(&mut rng);
+    prevout.prevout_type = model::TxPrevoutType::SignersInput;
+    let output = model::TxOutput {
+        txid: prevout.txid,
+        output_index: 0,
+        script_pubkey: key_set.script_pubkey().into(),
+        amount: 100_000,
+        output_type: model::TxOutputType::SignersOutput,
+    };
+    let tx_ref = model::BitcoinTxRef {
+        txid: prevout.txid,
+        block_hash: chain_tip.block_hash,
+    };
+    db.write_bitcoin_transaction(&tx_ref).await.unwrap();
+    db.write_tx_prevout(&prevout).await.unwrap();
+    db.write_tx_output(&output).await.unwrap();
+
+    let utxo = db
+        .get_signer_utxo(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .expect("the v2 signer UTXO should be found");
+
+    assert_eq!(utxo.outpoint.txid, output.txid.into());
+    assert_eq!(utxo.outpoint.vout, 0);
+    assert_eq!(utxo.amount, output.amount);
+    assert_eq!(utxo.key_set, SignerUtxoKeySet::V2(key_set));
+
+    signer::testing::storage::drop_db(db).await;
 }
 
 #[tokio::test]

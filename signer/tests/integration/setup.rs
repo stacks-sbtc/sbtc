@@ -32,6 +32,7 @@ use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
+use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
@@ -208,13 +209,13 @@ impl TestSweepSetup {
             deposits: vec![deposit_request],
             withdrawals: vec![withdrawal_request],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(signers_public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::new(signer_utxo.txid, signer_utxo.vout),
                     amount: signer_utxo.amount.to_sat(),
-                    public_key: signers_public_key,
+                    key_set: SignerUtxoKeySet::V1(signers_public_key),
                 },
                 fee_rate: 10.0,
-                public_key: signers_public_key,
                 last_fees: None,
                 magic_bytes: *b"T3",
             },
@@ -929,13 +930,15 @@ impl TestSweepSetup2 {
                 .collect(),
             withdrawals,
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(
+                    aggregated_signer.keypair.x_only_public_key().0,
+                ),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::new(signer_utxo.txid, signer_utxo.vout),
                     amount: signer_utxo.amount.to_sat(),
-                    public_key: aggregated_signer.keypair.x_only_public_key().0,
+                    key_set: SignerUtxoKeySet::V1(aggregated_signer.keypair.x_only_public_key().0),
                 },
                 fee_rate: 10.0,
-                public_key: aggregated_signer.keypair.x_only_public_key().0,
                 last_fees,
                 magic_bytes: *b"T3",
             },
@@ -1038,7 +1041,10 @@ impl TestSweepSetup2 {
                 chain_tip: sweep.block_hash.into(),
                 prevout_txid: request.outpoint.txid.into(),
                 prevout_output_index: request.outpoint.vout,
-                key_set_id: model::KeySetId::V1(request.signers_public_key.into()),
+                key_set_id: match &request.signers_public_key {
+                    utxo::DepositSigningKey::V1(key) => model::KeySetId::V1(key.into()),
+                    utxo::DepositSigningKey::V2 { key_set, .. } => key_set.id().into(),
+                },
                 will_sign: true,
                 is_valid_tx: true,
                 validation_result: signer::bitcoin::validation::InputValidationResult::Ok,

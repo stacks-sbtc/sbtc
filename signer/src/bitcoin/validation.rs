@@ -14,6 +14,8 @@ use crate::DEPOSIT_DUST_LIMIT;
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
+use crate::bitcoin::utxo::BitcoinSignerSet;
+use crate::bitcoin::utxo::DepositSigningKey;
 use crate::bitcoin::utxo::FeeAssessment;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::context::Context;
@@ -61,10 +63,9 @@ pub struct BitcoinTxContext {
     pub chain_tip_height: BitcoinBlockHeight,
     /// This signer's public key.
     pub signer_public_key: PublicKey,
-    /// The current aggregate key that was the output of DKG. The DKG
-    /// shares associated with this aggregate key must have passed
-    /// verification.
-    pub aggregate_key: PublicKey,
+    /// The active signer set and its version-specific Bitcoin signing
+    /// material, including the key set that must lock the next signer UTXO.
+    pub signer_set: BitcoinSignerSet,
 }
 
 /// This type is a container for all deposits and withdrawals that are part
@@ -189,7 +190,11 @@ impl BitcoinPreSignRequest {
                 };
 
                 let votes = db
-                    .get_deposit_request_signer_votes(&txid, output_index, &btc_ctx.aggregate_key)
+                    .get_deposit_request_signer_votes(
+                        &txid,
+                        output_index,
+                        btc_ctx.signer_set.signer_public_keys(),
+                    )
                     .await?;
 
                 cache.deposit_reports.insert(outpoint, (report, votes));
@@ -208,7 +213,10 @@ impl BitcoinPreSignRequest {
                 };
 
                 let votes = db
-                    .get_withdrawal_request_signer_votes(qualified_id, &btc_ctx.aggregate_key)
+                    .get_withdrawal_request_signer_votes(
+                        qualified_id,
+                        btc_ctx.signer_set.signer_public_keys(),
+                    )
                     .await?;
 
                 cache
@@ -297,10 +305,11 @@ impl BitcoinPreSignRequest {
         let last_fees =
             assess_mempool_sweep_transaction_fees(&bitcoin_client, &signer_utxo).await?;
 
+        let output_key_set = btc_ctx.signer_set.output_key_set();
         let mut signer_state = SignerBtcState {
             fee_rate: self.fee_rate,
             utxo: signer_utxo,
-            public_key: bitcoin::XOnlyPublicKey::from(btc_ctx.aggregate_key),
+            output_key_set,
             last_fees,
             magic_bytes: *b"T3",
         };
@@ -360,7 +369,7 @@ impl BitcoinPreSignRequest {
         let reports = SbtcReports {
             deposits,
             withdrawals,
-            signer_state,
+            signer_state: signer_state.clone(),
         };
         let mut signer_state = signer_state;
         let tx = reports.create_transaction()?;
@@ -464,7 +473,7 @@ impl BitcoinTxValidationData {
                 txid: sighash.txid.into(),
                 sighash: sighash.sighash.into(),
                 chain_tip: self.chain_tip,
-                key_set_id: crate::storage::model::KeySetId::V1(sighash.aggregate_key.into()),
+                key_set_id: sighash.key_set_id,
                 prevout_txid: sighash.outpoint.txid.into(),
                 prevout_output_index: sighash.outpoint.vout,
                 prevout_type: sighash.prevout_type,
@@ -930,7 +939,7 @@ impl DepositRequestReport {
             amount: self.amount,
             deposit_script: self.deposit_script.clone(),
             reclaim_script_hash: self.reclaim_script_hash.clone(),
-            signers_public_key: self.signers_public_key,
+            signers_public_key: DepositSigningKey::V1(self.signers_public_key),
             signer_bitmap: votes.into(),
         }
     }

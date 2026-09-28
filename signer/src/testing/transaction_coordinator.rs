@@ -10,7 +10,9 @@ use std::time::Duration;
 use super::get_rng;
 use crate::bitcoin::MockBitcoinInteract;
 use crate::bitcoin::rpc::BitcoinTxInfo;
+use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::SignerUtxo;
+use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::context::Context;
 use crate::context::RequestDeciderEvent;
 use crate::emily_client::MockEmilyInteract;
@@ -279,18 +281,18 @@ where
             .last()
             .expect("Empty signer set!")
             .signer_public_keys;
+        let bitcoin_signer_set = BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys: signer_public_keys.clone(),
+            signatures_required: context.config().signer.bootstrap_signatures_required,
+        };
 
         // Get the chain tips from storage.
         let (bitcoin_chain_tip, stacks_chain_tip) = storage.get_chain_tips().await;
 
         // Get pending withdrawals from coordinator
         let pending_requests = coordinator
-            .get_pending_requests(
-                &bitcoin_chain_tip,
-                &stacks_chain_tip,
-                &aggregate_key,
-                signer_public_keys,
-            )
+            .get_pending_requests(&bitcoin_chain_tip, &stacks_chain_tip, &bitcoin_signer_set)
             .await
             .expect("Error getting pending requests")
             .expect("Empty pending requests");
@@ -991,7 +993,7 @@ where
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx.compute_txid(), 0),
             amount: 42,
-            public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+            key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
         };
 
         test_data.remove(original_test_data);
@@ -1116,7 +1118,7 @@ where
             let expected = SignerUtxo {
                 outpoint: bitcoin::OutPoint::new(tx.compute_txid(), 0),
                 amount: amt,
-                public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+                key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
             };
             let signer_utxo = storage
                 .get_signer_utxo(&chain_tip.block_hash)
@@ -1240,7 +1242,7 @@ where
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx_3.compute_txid(), 0),
             amount: 3,
-            public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+            key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
         };
 
         test_data.remove(original_test_data);
@@ -1370,7 +1372,7 @@ where
             SignerUtxo {
                 outpoint: bitcoin::OutPoint::new(tx_a1.compute_txid(), 0),
                 amount: 0xA1,
-                public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+                key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
             }
         );
 
@@ -1385,7 +1387,7 @@ where
             SignerUtxo {
                 outpoint: bitcoin::OutPoint::new(tx_a1.compute_txid(), 0),
                 amount: 0xA1,
-                public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+                key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
             }
         );
 
@@ -1400,7 +1402,7 @@ where
             SignerUtxo {
                 outpoint: bitcoin::OutPoint::new(tx_b1.compute_txid(), 0),
                 amount: 0xB1,
-                public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+                key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
             }
         );
     }

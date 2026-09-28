@@ -642,9 +642,18 @@ pub enum Error {
     #[error("invalid signature")]
     InvalidSignature,
 
+    /// A signature was offered for a key outside the key set being signed
+    /// for.
+    #[error("public key {0} is not in the signing key set")]
+    SigningKeyNotInKeySet(secp256k1::XOnlyPublicKey),
+
     /// Invalid ECDSA signature
     #[error("invalid ECDSA signature")]
     InvalidEcdsaSignature(#[source] secp256k1::Error),
+
+    /// A Schnorr signature failed to verify against the expected message.
+    #[error("invalid Schnorr signature failed verification")]
+    SchnorrSignatureFailedVerification(#[source] secp256k1::Error),
 
     /// Codec error
     #[error("codec error: {0}")]
