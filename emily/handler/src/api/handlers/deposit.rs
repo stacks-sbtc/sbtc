@@ -368,7 +368,7 @@ pub async fn create_deposit(
             );
         }
         // Make table entry.
-        let deposit_entry: DepositEntry = DepositEntry {
+        let mut deposit_entry: DepositEntry = DepositEntry {
             key: DepositEntryKey {
                 bitcoin_txid,
                 bitcoin_tx_output_index,
@@ -390,13 +390,14 @@ pub async fn create_deposit(
             amount: deposit_info.amount,
             reclaim_script: deposit_info.reclaim_script.to_hex_string(),
             deposit_script: deposit_info.deposit_script.to_hex_string(),
+            transaction_hex: Some(body.transaction_hex),
             reclaim_pubkeys_hash,
             ..Default::default()
         };
         // Validate deposit entry.
         deposit_entry.validate()?;
         // Add entry to the table.
-        accessors::add_deposit_entry(&context, &deposit_entry).await?;
+        accessors::add_deposit_entry(&context, &mut deposit_entry).await?;
         // Respond.
         let response: Deposit = deposit_entry.try_into()?;
         Ok(with_status(json(&response), StatusCode::CREATED))
