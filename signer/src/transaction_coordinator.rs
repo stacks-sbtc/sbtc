@@ -2217,8 +2217,16 @@ where
                 .get_deposit_request_signer_votes(&req.txid, req.output_index, params.aggregate_key)
                 .await?;
 
-            let deposit = utxo::DepositRequest::from_model(req, votes);
-            eligible_deposits.push(deposit);
+            // A row that we cannot convert means our database is
+            // inconsistent. We skip it rather than bail, since bailing
+            // would stop every sweep, including ones for withdrawals.
+            let outpoint = req.outpoint();
+            match utxo::DepositRequest::from_model(req, votes) {
+                Ok(deposit) => eligible_deposits.push(deposit),
+                Err(error) => {
+                    tracing::error!(%error, %outpoint, "skipping deposit request we could not load");
+                }
+            }
         }
 
         Ok(eligible_deposits)

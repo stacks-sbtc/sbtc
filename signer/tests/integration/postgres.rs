@@ -1806,6 +1806,35 @@ async fn block_in_canonical_bitcoin_blockchain_in_other_block_chain() {
 
 /// Check that `is_signer_script_pub_key` correctly returns whether a
 /// scriptPubKey value exists in the dkg_shares table.
+/// A donation to a v2 key set has no DKG shares or signers output behind
+/// it, so the key set itself must mark its scriptPubKey as the signers'.
+#[tokio::test]
+async fn is_signer_script_pub_key_checks_signer_key_sets() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    let signer_set_public_keys = std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
+        .take(3)
+        .collect::<BTreeSet<PublicKey>>();
+    let key_set = sbtc::SignerKeySet::derive(
+        signer_set_public_keys
+            .iter()
+            .copied()
+            .map(secp256k1::PublicKey::from),
+        2,
+    )
+    .unwrap();
+    let script_pubkey: ScriptPubKey = key_set.script_pubkey().into();
+    assert!(!db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+
+    db.write_signer_key_set(&model::SignerKeySet::from(key_set))
+        .await
+        .unwrap();
+    assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+
+    signer::testing::storage::drop_db(db).await;
+}
+
 #[tokio::test]
 async fn is_signer_script_pub_key_checks_dkg_shares_for_script_pubkeys() {
     let db = testing::storage::new_test_database().await;
@@ -1894,7 +1923,7 @@ async fn is_signer_script_pub_key_checks_bitcoin_tx_outputs_for_script_pubkeys()
 
 /// The [`DbRead::get_signers_script_pubkeys`] function is only supposed to
 /// fetch the last 365 days worth of scriptPubKeys, but if there are no new
-/// encrypted shares in the database in a year, we should still return the
+/// signer key sets in the database in a year, we should still return the
 /// most recent one.
 #[tokio::test]
 async fn get_signers_script_pubkeys_returns_non_empty_vec_old_rows() {
@@ -1903,41 +1932,40 @@ async fn get_signers_script_pubkeys_returns_non_empty_vec_old_rows() {
     let mut rng = get_rng();
 
     let shares: model::EncryptedDkgShares = fake::Faker.fake_with_rng(&mut rng);
+    let key_set_id =
+        model::KeySetId::from(signer::keys::PublicKeyXOnly::from(shares.aggregate_key));
+    let signer_public_keys: Vec<signer::keys::PublicKeyXOnly> = shares
+        .signer_set_public_keys
+        .iter()
+        .map(|key| model::KeySetVersion::V1.member_key(key))
+        .collect();
 
     sqlx::query(
         r#"
-        INSERT INTO sbtc_signer.dkg_shares (
-            aggregate_key
-            , tweaked_aggregate_key
-            , encrypted_private_shares
-            , public_shares
-            , script_pubkey
-            , signer_set_public_keys
-            , signature_share_threshold
-            , created_at
-            , dkg_shares_status
-            , started_at_bitcoin_block_hash
-            , started_at_bitcoin_block_height
+        INSERT INTO sbtc_signer.signer_key_sets (
+            key_set_id
+          , script_version
+          , script_pubkey
+          , signer_public_keys
+          , signatures_required
+          , created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP - INTERVAL '366 DAYS', $8, $9, $10)
-        ON CONFLICT DO NOTHING"#,
+        VALUES ($1, 'v1', $2, $3, $4, CURRENT_TIMESTAMP - INTERVAL '366 DAYS')"#,
     )
-    .bind(shares.aggregate_key)
-    .bind(shares.tweaked_aggregate_key)
-    .bind(&shares.encrypted_private_shares)
-    .bind(&shares.public_shares)
+    .bind(key_set_id)
     .bind(&shares.script_pubkey)
-    .bind(&shares.signer_set_public_keys)
-    .bind(shares.signature_share_threshold as i32)
-    .bind(shares.dkg_shares_status)
-    .bind(shares.started_at_bitcoin_block_hash)
-    .bind(*shares.started_at_bitcoin_block_height as i64)
+    .bind(&signer_public_keys)
+    .bind(i32::from(shares.signature_share_threshold))
     .execute(db.pool())
     .await
     .unwrap();
 
     let keys = db.get_signers_script_pubkeys().await.unwrap();
     assert_eq!(keys.len(), 1);
+    assert_eq!(
+        ScriptPubKey::from_bytes(keys[0].clone()),
+        shares.script_pubkey
+    );
 
     signer::testing::storage::drop_db(db).await;
 }
@@ -2993,7 +3021,7 @@ async fn can_sign_deposit_tx_rejects_not_in_signer_set() {
 
     // Now for a deposit request where we use the above aggregate key.
     let mut req: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
-    req.signers_public_key = aggregate_key.into();
+    req.key_set_id = signer::keys::PublicKeyXOnly::from(aggregate_key).into();
     db.write_deposit_request(&req).await.unwrap();
 
     // Now we need a row where the aggregate key matches the one we created
@@ -3035,6 +3063,60 @@ async fn can_sign_deposit_tx_rejects_not_in_signer_set() {
         .await
         .unwrap();
     assert_eq!(can_sign, None);
+
+    signer::testing::storage::drop_db(db).await;
+}
+
+/// A v1 deposit can be locked to a key whose bytes equal the hash in a v2
+/// key-set identifier. The signers cannot sign for such a deposit, and its
+/// identifier differs from the v2 one, so it must not match the v2 key set.
+#[tokio::test]
+async fn can_sign_deposit_tx_ignores_key_sets_of_another_version() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    // Find a signer set whose v2 key-set hash is also a valid x-only key,
+    // so that a v1 deposit can be locked to it.
+    let (signer_set_public_keys, key_set, colliding_key) = loop {
+        let signer_set_public_keys = std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
+            .take(3)
+            .collect::<BTreeSet<PublicKey>>();
+        let key_set = sbtc::SignerKeySet::derive(
+            signer_set_public_keys
+                .iter()
+                .copied()
+                .map(secp256k1::PublicKey::from),
+            2,
+        )
+        .unwrap();
+        if let Ok(key) = signer::keys::PublicKeyXOnly::from_slice(&key_set.id().to_bytes()) {
+            break (signer_set_public_keys, key_set, key);
+        }
+    };
+    let key_set = model::SignerKeySet::from(key_set);
+    db.write_signer_key_set(&key_set).await.unwrap();
+
+    let mut v1_request: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+    v1_request.key_set_id = model::KeySetId::V1(colliding_key);
+    db.write_deposit_request(&v1_request).await.unwrap();
+
+    let mut v2_request: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+    v2_request.key_set_id = key_set.key_set_id;
+    db.write_deposit_request(&v2_request).await.unwrap();
+
+    for signer_public_key in signer_set_public_keys.iter() {
+        let can_sign = db
+            .can_sign_deposit_tx(&v1_request.txid, v1_request.output_index, signer_public_key)
+            .await
+            .unwrap();
+        assert_eq!(can_sign, None);
+
+        let can_sign = db
+            .can_sign_deposit_tx(&v2_request.txid, v2_request.output_index, signer_public_key)
+            .await
+            .unwrap();
+        assert_eq!(can_sign, Some(true));
+    }
 
     signer::testing::storage::drop_db(db).await;
 }
@@ -4881,9 +4963,9 @@ async fn can_write_and_get_multiple_bitcoin_txs_sighashes() {
     let results = join_all(withdrawal_outputs_futures).await;
 
     for (output, result) in sighashes.iter().zip(results) {
-        let (will_sign, _, prevout_type) = result.unwrap().unwrap();
-        assert_eq!(will_sign, output.will_sign);
-        assert_eq!(prevout_type, output.prevout_type);
+        let signing_info = result.unwrap().unwrap();
+        assert_eq!(signing_info.will_sign, output.will_sign);
+        assert_eq!(signing_info.prevout_type, output.prevout_type);
     }
     signer::testing::storage::drop_db(db).await;
 }
@@ -5004,7 +5086,9 @@ async fn deposit_requests_max_fee_migration() {
                  , amount
                  , max_fee
                  , lock_time
-                 , signers_public_key
+                 -- This table predates migration 0024, which renamed
+                 -- signers_public_key.
+                 , signers_public_key AS key_set_id
                  , sender_script_pub_keys
             FROM sbtc_signer.deposit_requests2
             WHERE txid = $1
@@ -5047,7 +5131,7 @@ async fn deposit_requests_max_fee_migration() {
         .bind(i64::try_from(deposit.amount).unwrap())
         .bind(i64::try_from(deposit.max_fee).unwrap())
         .bind(i64::from(deposit.lock_time))
-        .bind(deposit.signers_public_key)
+        .bind(deposit.key_set_id)
         .bind(&deposit.sender_script_pub_keys)
         .execute(db.pool())
         .await
@@ -6256,7 +6340,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
         prevout_txid: setup.donation.txid.into(),
         prevout_output_index: setup.donation.vout,
         validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-        aggregate_key: setup.signers.aggregate_key().into(),
+        key_set_id: signer::keys::PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
         is_valid_tx: false,
         will_sign: false,
         chain_tip,
@@ -6336,7 +6420,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         prevout_txid: bitcoin_txid2,
         prevout_output_index: 0,
         validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-        aggregate_key: setup.signers.aggregate_key().into(),
+        key_set_id: signer::keys::PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
         is_valid_tx: false,
         will_sign: false,
         chain_tip,
@@ -6352,7 +6436,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         prevout_txid: bitcoin_txid1,
         prevout_output_index: 0,
         validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-        aggregate_key: setup.signers.aggregate_key().into(),
+        key_set_id: signer::keys::PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
         is_valid_tx: false,
         will_sign: false,
         chain_tip,
@@ -6370,7 +6454,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         prevout_txid: setup.donation.txid.into(),
         prevout_output_index: setup.donation.vout,
         validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-        aggregate_key: setup.signers.aggregate_key().into(),
+        key_set_id: signer::keys::PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
         is_valid_tx: false,
         will_sign: false,
         chain_tip,

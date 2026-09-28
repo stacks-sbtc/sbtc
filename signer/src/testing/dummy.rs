@@ -413,6 +413,19 @@ impl fake::Dummy<fake::Faker> for PublicKeyXOnly {
     }
 }
 
+impl fake::Dummy<fake::Faker> for model::KeySetVersion {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &fake::Faker, _: &mut R) -> Self {
+        Self::V1
+    }
+}
+
+impl fake::Dummy<fake::Faker> for model::KeySetId {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
+        let key: PublicKeyXOnly = fake::Faker.fake_with_rng(rng);
+        key.into()
+    }
+}
+
 /// Used to for fine-grained control of generating fake testing addresses.
 #[derive(Debug)]
 pub struct BitcoinAddresses(pub Range<usize>);

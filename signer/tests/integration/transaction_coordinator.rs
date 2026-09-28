@@ -5381,7 +5381,7 @@ async fn process_rejected_withdrawal(is_completed: bool, is_in_mempool: bool) {
             prevout_txid: donation.txid.into(),
             prevout_output_index: donation.vout,
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-            aggregate_key: aggregate_key.into(),
+            key_set_id: signer::keys::PublicKeyXOnly::from(aggregate_key).into(),
             is_valid_tx: false,
             will_sign: false,
             chain_tip: bitcoin_chain_tip.block_hash,
@@ -6750,7 +6750,7 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
             amount: 100_000_000,
             max_fee: (SOLO_DEPOSIT_TX_VSIZE * max_fee_rate) as u64,
             lock_time: 150,
-            signers_public_key: aggregate_key.into(),
+            key_set_id: signer::keys::PublicKeyXOnly::from(aggregate_key).into(),
             ..fake::Faker.fake_with_rng(&mut rng)
         };
         storage

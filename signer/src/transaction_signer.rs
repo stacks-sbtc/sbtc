@@ -1311,17 +1311,20 @@ where
             .into();
 
         match db.will_sign_bitcoin_tx_sighash(&sighash).await? {
-            Some((true, public_key, prevout_type)) => {
-                if signature_type != expected_signature_type(prevout_type) {
+            Some(signing_info) if signing_info.will_sign => {
+                let model::KeySetId::V1(public_key) = signing_info.key_set_id else {
+                    return Err(Error::InvalidSigHash(sighash));
+                };
+                if signature_type != expected_signature_type(signing_info.prevout_type) {
                     return Err(Error::SignatureTypeMismatch {
                         sighash,
-                        prevout_type,
+                        prevout_type: signing_info.prevout_type,
                         signature_type,
                     });
                 }
                 Ok(AcceptedSigHash { public_key, sighash })
             }
-            Some((false, ..)) => Err(Error::InvalidSigHash(sighash)),
+            Some(_) => Err(Error::InvalidSigHash(sighash)),
             None => Err(Error::UnknownSigHash(sighash)),
         }
     }
@@ -1752,7 +1755,7 @@ mod tests {
 
     use crate::bitcoin::MockBitcoinInteract;
     use crate::emily_client::MockEmilyInteract;
-    use crate::keys::PublicKey;
+    use crate::keys::{PublicKey, PublicKeyXOnly};
     use crate::stacks::api::MockStacksInteract;
     use crate::stacks::api::SignerSetInfo;
     use crate::storage::memory::SharedStore;
@@ -1819,6 +1822,9 @@ mod tests {
         let db = context.get_storage_mut();
         let mut rng = get_rng();
         let sighash: SigHash = Faker.fake_with_rng(&mut rng);
+        let key_set_id =
+            PublicKeyXOnly::from(PublicKey::from(Keypair::new_global(&mut rng).public_key()))
+                .into();
         db.write_bitcoin_txs_sighashes(&[model::BitcoinTxSigHash {
             txid: Faker.fake_with_rng(&mut rng),
             chain_tip: Faker.fake_with_rng(&mut rng),
@@ -1829,7 +1835,7 @@ mod tests {
             validation_result: crate::bitcoin::validation::InputValidationResult::Ok,
             is_valid_tx: true,
             will_sign: true,
-            aggregate_key: Faker.fake_with_rng(&mut rng),
+            key_set_id,
         }])
         .await
         .unwrap();

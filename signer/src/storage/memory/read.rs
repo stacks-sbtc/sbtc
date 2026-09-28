@@ -184,19 +184,15 @@ impl DbRead for SharedStore {
         signer_public_key: &PublicKey,
     ) -> Result<Option<bool>, Error> {
         let store = self.lock().await;
-        let deposit_request = store.deposit_requests.get(&(*txid, output_index)).cloned();
-        let Some(deposit_request) = deposit_request else {
+        let Some(deposit_request) = store.deposit_requests.get(&(*txid, output_index)) else {
+            return Ok(None);
+        };
+        let Some((_, key_set)) = store.signer_key_sets.get(&deposit_request.key_set_id) else {
             return Ok(None);
         };
 
-        let can_sign = store
-            .encrypted_dkg_shares
-            .values()
-            .filter(|(_, shares)| shares.signer_set_public_keys.contains(signer_public_key))
-            .map(|(_, shares)| PublicKeyXOnly::from(shares.aggregate_key))
-            .any(|x_only_key| x_only_key == deposit_request.signers_public_key);
-
-        Ok(Some(can_sign))
+        let member_key = key_set.version.member_key(signer_public_key);
+        Ok(Some(key_set.public_keys.contains(&member_key)))
     }
 
     async fn deposit_request_exists(
@@ -674,13 +670,14 @@ impl DbRead for SharedStore {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error> {
-        Ok(self
-            .lock()
-            .await
-            .bitcoin_sighashes
-            .get(sighash)
-            .map(|s| (s.will_sign, s.aggregate_key, s.prevout_type)))
+    ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
+        Ok(self.lock().await.bitcoin_sighashes.get(sighash).map(|s| {
+            model::BitcoinTxSigHashSigningInfo {
+                will_sign: s.will_sign,
+                key_set_id: s.key_set_id,
+                prevout_type: s.prevout_type,
+            }
+        }))
     }
 
     // The postgres implementation uses a timestamp to figure out when a
@@ -1167,7 +1164,7 @@ impl DbRead for InMemoryTransaction {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error> {
+    ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
         self.store.will_sign_bitcoin_tx_sighash(sighash).await
     }
 

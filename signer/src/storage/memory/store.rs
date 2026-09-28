@@ -89,6 +89,9 @@ pub struct Store {
     /// Encrypted DKG shares
     pub encrypted_dkg_shares: BTreeMap<PublicKeyXOnly, (OffsetDateTime, model::EncryptedDkgShares)>,
 
+    /// Signer key sets, together with their insertion times.
+    pub signer_key_sets: BTreeMap<model::KeySetId, (OffsetDateTime, model::SignerKeySet)>,
+
     /// Rotate keys transactions
     pub rotate_keys_transactions: HashMap<model::StacksBlockHash, Vec<model::KeyRotationEvent>>,
 

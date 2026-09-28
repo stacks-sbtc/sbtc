@@ -35,6 +35,7 @@ use signer::context::SbtcLimits;
 use signer::error::Error;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
+use signer::keys::PublicKeyXOnly;
 use signer::message::BitcoinPreSignRequest;
 use signer::message::StacksTransactionSignRequest;
 use signer::message::WstsMessage;
@@ -658,20 +659,20 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
 
     // Check that the intentions to sign the requests sighashes
     // are stored in the database
-    let (will_sign, ..) = db
+    let signing_info = db
         .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into())
         .await
         .expect("query to check if signer sighash is stored failed")
         .expect("signer sighash not stored");
 
-    assert!(will_sign);
-    let (will_sign, ..) = db
+    assert!(signing_info.will_sign);
+    let signing_info = db
         .will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into())
         .await
         .expect("query to check if deposit sighash is stored failed")
         .expect("deposit sighash not stored");
 
-    assert!(will_sign);
+    assert!(signing_info.will_sign);
 
     testing::storage::drop_db(db).await;
 }
@@ -992,7 +993,10 @@ mod serial {
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
             is_valid_tx: true,
             will_sign: true,
-            aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
+            key_set_id: PublicKeyXOnly::from(PublicKey::from_private_key(
+                &tx_signer.signer_private_key,
+            ))
+            .into(),
         };
 
         db.write_bitcoin_txs_sighashes(&[row]).await.unwrap();
@@ -1124,7 +1128,10 @@ mod serial {
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
             is_valid_tx: true,
             will_sign: true,
-            aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
+            key_set_id: PublicKeyXOnly::from(PublicKey::from_private_key(
+                &tx_signer.signer_private_key,
+            ))
+            .into(),
         };
 
         db.write_bitcoin_txs_sighashes(&[row]).await.unwrap();

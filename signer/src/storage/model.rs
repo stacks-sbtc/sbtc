@@ -7,10 +7,11 @@ use std::num::TryFromIntError;
 use std::ops::Deref;
 use std::ops::{Add, Sub};
 
+use bitcoin::OutPoint;
+use bitcoin::ScriptBuf;
 use bitcoin::hashes::Hash as _;
 use bitcoin::hex::DisplayHex as _;
 use bitcoin::hex::FromHex as _;
-use bitcoin::{OutPoint, ScriptBuf};
 use bitvec::array::BitArray;
 use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use clarity::vm::types::PrincipalData;
@@ -243,9 +244,8 @@ pub struct DepositRequest {
     /// The relative lock time in the reclaim script.
     #[cfg_attr(feature = "testing", dummy(faker = "3..u16::MAX as u32"))]
     pub lock_time: u32,
-    /// The public key used in the deposit script. The signers public key
-    /// is for Schnorr signatures.
-    pub signers_public_key: PublicKeyXOnly,
+    /// Identifier of the key set used in the deposit script.
+    pub key_set_id: KeySetId,
     /// The addresses of the input UTXOs funding the deposit request.
     #[cfg_attr(
         feature = "testing",
@@ -265,11 +265,13 @@ impl From<Deposit> for DepositRequest {
 
         let reclaim_script_hash = TaprootScriptHash::from(&deposit.info.reclaim_script);
 
-        let DepositSigningInfo::V1 { public_key } = deposit.info.signing_info else {
-            unreachable!("DepositRequestValidator::validate rejects v2 deposits");
+        let key_set_id = match &deposit.info.signing_info {
+            DepositSigningInfo::V1 { public_key } => KeySetId::V1(public_key.into()),
+            DepositSigningInfo::V2 { key_set } => KeySetId::V2(key_set.id()),
         };
 
         Self {
+            key_set_id,
             txid: deposit.info.outpoint.txid.into(),
             output_index: deposit.info.outpoint.vout,
             spend_script: deposit.info.deposit_script.to_bytes(),
@@ -278,8 +280,147 @@ impl From<Deposit> for DepositRequest {
             amount: deposit.info.amount,
             max_fee: deposit.info.max_fee,
             lock_time: deposit.info.lock_time.to_consensus_u32(),
-            signers_public_key: public_key.into(),
             sender_script_pub_keys: sender_script_pub_keys.into_iter().collect(),
+        }
+    }
+}
+
+/// The identifier of a signer key set, which also determines its version.
+///
+/// In storage, a v1 identifier is the 32-byte x-only aggregate key, and a
+/// v2 identifier is [`KeySetId::V2_TAG`] followed by the 32-byte
+/// [`sbtc::KeySetId`]. The two kinds therefore never collide, and the
+/// version can be read from the identifier alone.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum KeySetId {
+    /// A v1 key set, identified by its x-only aggregate public key.
+    V1(PublicKeyXOnly),
+    /// A v2 key set, identified by the hash of its threshold and keys.
+    V2(sbtc::KeySetId),
+}
+
+impl KeySetId {
+    /// The first byte of a stored v2 identifier.
+    pub const V2_TAG: u8 = 0xFF;
+
+    /// Return the signing scheme of the identified key set.
+    pub fn version(&self) -> KeySetVersion {
+        match self {
+            Self::V1(_) => KeySetVersion::V1,
+            Self::V2(_) => KeySetVersion::V2,
+        }
+    }
+
+    /// Return the stored encoding of this identifier.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::V1(public_key) => public_key.serialize().to_vec(),
+            Self::V2(id) => std::iter::once(Self::V2_TAG).chain(id.to_bytes()).collect(),
+        }
+    }
+
+    /// Parse an identifier from its stored encoding.
+    pub fn from_slice(bytes: &[u8]) -> Result<Self, Error> {
+        match bytes {
+            [Self::V2_TAG, id @ ..] if id.len() == 32 => {
+                let id: [u8; 32] = id.try_into().map_err(|_| Error::TypeConversion)?;
+                Ok(Self::V2(id.into()))
+            }
+            _ => PublicKeyXOnly::from_slice(bytes).map(Self::V1),
+        }
+    }
+}
+
+impl From<sbtc::KeySetId> for KeySetId {
+    fn from(value: sbtc::KeySetId) -> Self {
+        Self::V2(value)
+    }
+}
+
+impl From<PublicKeyXOnly> for KeySetId {
+    fn from(value: PublicKeyXOnly) -> Self {
+        Self::V1(value)
+    }
+}
+
+impl std::fmt::Display for KeySetId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        hex::encode(self.to_bytes()).fmt(f)
+    }
+}
+
+/// The signing scheme associated with a key set.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type)]
+#[sqlx(type_name = "script_version", rename_all = "lowercase")]
+pub enum KeySetVersion {
+    /// Legacy WSTS aggregate-key signing.
+    V1,
+    /// Independent BIP340 `multi_a` signing.
+    V2,
+}
+
+impl std::fmt::Display for KeySetVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::V1 => f.write_str("v1"),
+            Self::V2 => f.write_str("v2"),
+        }
+    }
+}
+
+impl KeySetVersion {
+    /// Return the key that represents the signer with the given identity
+    /// key in a key set of this version.
+    ///
+    /// A v1 key set holds the x-only form of each signer's identity key,
+    /// while a v2 key set holds each signer's derived signing key.
+    pub fn member_key(self, signer_public_key: &PublicKey) -> PublicKeyXOnly {
+        match self {
+            Self::V1 => PublicKeyXOnly::from(signer_public_key),
+            Self::V2 => sbtc::derive_signing_public_key((*signer_public_key).into()).into(),
+        }
+    }
+}
+
+impl From<sbtc::deposits::DepositScriptVersion> for KeySetVersion {
+    fn from(value: sbtc::deposits::DepositScriptVersion) -> Self {
+        match value {
+            sbtc::deposits::DepositScriptVersion::V1 => Self::V1,
+            sbtc::deposits::DepositScriptVersion::V2 => Self::V2,
+        }
+    }
+}
+
+/// A persisted signer key set.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct SignerKeySet {
+    /// Stable key-set identifier.
+    pub key_set_id: KeySetId,
+    /// The signing scheme associated with this key set.
+    pub version: KeySetVersion,
+    /// Bitcoin scriptPubKey controlled by the set.
+    pub script_pubkey: ScriptPubKey,
+    /// The key that represents each signer in this set. For a v1 signer
+    /// set, this is the x-only public key associated with the signer. For
+    /// v2 signer sets, this is the derived public key from the signer's
+    /// identity key. see [`KeySetVersion::member_key`].
+    pub public_keys: BTreeSet<PublicKeyXOnly>,
+    /// Number of signatures required.
+    pub signatures_required: u16,
+}
+
+impl From<sbtc::SignerKeySet> for SignerKeySet {
+    fn from(value: sbtc::SignerKeySet) -> Self {
+        Self {
+            key_set_id: value.id().into(),
+            version: KeySetVersion::V2,
+            script_pubkey: value.script_pubkey().into(),
+            public_keys: value
+                .public_keys()
+                .iter()
+                .map(PublicKeyXOnly::from)
+                .collect(),
+            signatures_required: value.signatures_required(),
         }
     }
 }
@@ -1371,9 +1512,8 @@ pub struct BitcoinTxSigHash {
     pub chain_tip: BitcoinBlockHash,
     /// The txid that created the output that is being spent.
     pub prevout_txid: BitcoinTxId,
-    /// The signers' aggregate key that is locking the output that is being
-    /// spent.
-    pub aggregate_key: PublicKeyXOnly,
+    /// Identifier of the key set locking the output being spent.
+    pub key_set_id: KeySetId,
     /// The index of the vout from the transaction that created this
     /// output.
     #[cfg_attr(feature = "testing", dummy(faker = "0..i32::MAX as u32"))]
@@ -1393,6 +1533,18 @@ pub struct BitcoinTxSigHash {
     /// Whether the signer will participate in a signing round for the
     /// sighash.
     pub will_sign: bool,
+}
+
+/// The persisted signing decision and script metadata for a Bitcoin sighash.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, sqlx::FromRow)]
+pub struct BitcoinTxSigHashSigningInfo {
+    /// Whether this signer approved the sighash.
+    pub will_sign: bool,
+    /// Identifier of the key set locking the input, which determines the
+    /// signing protocol.
+    pub key_set_id: KeySetId,
+    /// The kind of output being spent.
+    pub prevout_type: TxPrevoutType,
 }
 
 /// An output that was created due to a withdrawal request.

@@ -54,6 +54,7 @@ use crate::keys::SignerScriptPubKey as _;
 use crate::proto;
 use crate::storage::model;
 use crate::storage::model::BitcoinTxId;
+use crate::storage::model::KeySetId;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SignerVotes;
@@ -556,16 +557,20 @@ impl DepositRequest {
     }
 
     /// Try convert from a model::DepositRequest with some additional info.
-    pub fn from_model(request: model::DepositRequest, votes: SignerVotes) -> Self {
-        Self {
+    pub fn from_model(request: model::DepositRequest, votes: SignerVotes) -> Result<Self, Error> {
+        // The signer does not support v2 deposits yet.
+        let KeySetId::V1(signers_public_key) = request.key_set_id else {
+            return Err(sbtc::error::Error::InvalidDepositScript.into());
+        };
+        Ok(Self {
             outpoint: request.outpoint(),
             max_fee: request.max_fee,
             signer_bitmap: votes.into(),
             amount: request.amount,
             deposit_script: ScriptBuf::from_bytes(request.spend_script),
             reclaim_script_hash: request.reclaim_script_hash,
-            signers_public_key: request.signers_public_key.into(),
-        }
+            signers_public_key: signers_public_key.into(),
+        })
     }
 }
 
@@ -2874,7 +2879,7 @@ mod tests {
         ];
         let votes = SignerVotes::from(signer_votes.to_vec());
         let request: model::DepositRequest = fake::Faker.fake_with_rng(&mut OsRng);
-        let deposit_request = DepositRequest::from_model(request, votes.clone());
+        let deposit_request = DepositRequest::from_model(request, votes.clone()).unwrap();
 
         // One explicit vote against and one implicit vote against.
         assert_eq!(deposit_request.votes().count_ones(), 2);

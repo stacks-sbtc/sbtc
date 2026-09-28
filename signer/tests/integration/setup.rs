@@ -43,6 +43,7 @@ use signer::context::SbtcLimits;
 use signer::emily_client::EmilyClient;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
+use signer::keys::PublicKeyXOnly;
 use signer::keys::SignerScriptPubKey as _;
 use signer::stacks::api::MockStacksInteract;
 use signer::stacks::wallet::SignerWallet;
@@ -1022,7 +1023,7 @@ impl TestSweepSetup2 {
             chain_tip: sweep.block_hash.into(),
             prevout_txid: self.donation.txid.into(),
             prevout_output_index: self.donation.vout,
-            aggregate_key: self.signers.aggregate_key().into(),
+            key_set_id: PublicKeyXOnly::from(self.signers.aggregate_key()).into(),
             will_sign: true,
             is_valid_tx: true,
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
@@ -1037,7 +1038,7 @@ impl TestSweepSetup2 {
                 chain_tip: sweep.block_hash.into(),
                 prevout_txid: request.outpoint.txid.into(),
                 prevout_output_index: request.outpoint.vout,
-                aggregate_key: request.signers_public_key.into(),
+                key_set_id: model::KeySetId::V1(request.signers_public_key.into()),
                 will_sign: true,
                 is_valid_tx: true,
                 validation_result: signer::bitcoin::validation::InputValidationResult::Ok,

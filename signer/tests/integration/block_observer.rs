@@ -2006,7 +2006,10 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
     let deposit = &deposits[0];
     assert_eq!(deposit.amount, amount_1);
     assert_eq!(deposit.max_fee, max_fee_1);
-    assert_eq!(deposit.signers_public_key, signers_public_key.into());
+    assert_eq!(
+        deposit.key_set_id,
+        model::KeySetId::V1(signers_public_key.into())
+    );
 
     let deposit = &deposits[1];
     assert_eq!(deposit.amount, amount_2);
