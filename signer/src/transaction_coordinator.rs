@@ -421,7 +421,7 @@ where
         Ok(())
     }
 
-    /// Submit a rotation when the active v1 key, or after v2 activation the
+    /// Submit a rotation when the active DKG key, or after DKG is disabled the
     /// configured signer set, differs from the smart-contract registry.
     #[tracing::instrument(skip_all)]
     async fn check_and_submit_rotate_key_transaction(
@@ -434,14 +434,14 @@ where
             .as_ref()
             .map(|info| info.aggregate_key);
 
-        let is_v2_signing_active = self
+        let is_dkg_disabled = self
             .context
             .config()
             .signer
-            .is_v2_signing_active(bitcoin_chain_tip.block_height);
+            .is_dkg_disabled(bitcoin_chain_tip.block_height);
 
-        if is_v2_signing_active {
-            // when v2 signing is active, RotateKeysV1::load is infallible.
+        if is_dkg_disabled {
+            // Once DKG is disabled, RotateKeysV1::load is infallible.
             let rotate_keys = RotateKeysV1::load(&self.context, bitcoin_chain_tip).await?;
             if rotate_keys.matches_registry(current_signer_set_info.as_ref()) {
                 return Ok(None);
@@ -2564,12 +2564,12 @@ pub async fn should_run_dkg(
 ) -> Result<bool, Error> {
     let storage = context.get_storage();
     let config = context.config();
-    let is_v2_signing_active = config
+    let is_dkg_disabled = config
         .signer
-        .is_v2_signing_active(bitcoin_chain_tip.block_height);
+        .is_dkg_disabled(bitcoin_chain_tip.block_height);
 
-    if is_v2_signing_active {
-        tracing::info!("v2 signing is active; skipping DKG");
+    if is_dkg_disabled {
+        tracing::info!("the DKG disable height has been reached; skipping DKG");
         return Ok(false);
     }
 
@@ -3092,17 +3092,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn should_not_run_dkg_after_v2_activation() {
+    async fn should_run_dkg_after_v2_activation_before_dkg_is_disabled() {
         let activation_height = BitcoinBlockHeight::from(100_u64);
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.v2_signing_block_height = Some(activation_height);
+                settings.signer.dkg_disable_block_height = Some(u64::MAX.into());
             })
             .build();
         let bitcoin_chain_tip = model::BitcoinBlockRef {
             block_height: activation_height,
+            block_hash: Faker.fake(),
+        };
+
+        assert!(should_run_dkg(&context, &bitcoin_chain_tip).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn should_not_run_dkg_at_disable_height() {
+        let activation_height = BitcoinBlockHeight::from(100_u64);
+        let dkg_disable_height = BitcoinBlockHeight::from(200_u64);
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(activation_height);
+                settings.signer.dkg_disable_block_height = Some(dkg_disable_height);
+            })
+            .build();
+        let bitcoin_chain_tip = model::BitcoinBlockRef {
+            block_height: dkg_disable_height,
             block_hash: Faker.fake(),
         };
 

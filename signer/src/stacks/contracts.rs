@@ -1254,14 +1254,14 @@ impl RotateKeysV1 {
 
     /// Load the key rotation target active at the given Bitcoin block reference.
     ///
-    /// Before v2 activation, the target is the latest DKG result. At and after
-    /// activation, it is the signer key set derived from the signer config.
+    /// Before DKG is disabled, the target is the latest DKG result. At and
+    /// after the cutoff, it is the signer key set derived from configuration.
     pub async fn load<C>(ctx: &C, block_ref: &BitcoinBlockRef) -> Result<Self, Error>
     where
         C: Context,
     {
         let config = &ctx.config().signer;
-        if config.is_v2_signing_active(block_ref.block_height) {
+        if config.is_dkg_disabled(block_ref.block_height) {
             return Ok(Self {
                 aggregate_key: block_ref.block_hash.into(),
                 new_keys: config.bootstrap_signing_set.clone(),
@@ -1359,15 +1359,15 @@ impl AsContractCall for RotateKeysV1 {
     ///
     /// 1. That the smart contract deployer matches the deployer in our context.
     /// 2. That the signing set matches the signing set for the most recent
-    ///    DKG run, or after v2 activation the configured signing set.
+    ///    DKG run, or after DKG is disabled the configured signing set.
     /// 3. That the aggregate key matches the one that was output as part of
-    ///    the most recent DKG, or after v2 activation that it identifies the
+    ///    the most recent DKG, or after DKG is disabled that it identifies the
     ///    current Bitcoin chain tip.
-    /// 4. Before v2 activation, that the DKG shares are in the verified
+    /// 4. Before DKG is disabled, that the DKG shares are in the verified
     ///    state.
     /// 5. That the signature threshold matches the one that was used in the
-    ///    most recent DKG, or after v2 activation the configured threshold.
-    /// 6. After v2 activation, that the registry does not already hold this
+    ///    most recent DKG, or after DKG is disabled the configured threshold.
+    /// 6. After DKG is disabled, that the registry does not already hold this
     ///    signer set and threshold.
     /// 7. That there are no other rotate-keys contract calls with these same
     ///    details already confirmed on the canonical Stacks blockchain.
@@ -1383,8 +1383,8 @@ impl AsContractCall for RotateKeysV1 {
         }
 
         let config = &ctx.config().signer;
-        let v2_is_active = config.is_v2_signing_active(req_ctx.chain_tip.block_height);
-        let latest_dkg = if v2_is_active {
+        let dkg_is_disabled = config.is_dkg_disabled(req_ctx.chain_tip.block_height);
+        let latest_dkg = if dkg_is_disabled {
             None
         } else {
             Some(
@@ -1413,7 +1413,7 @@ impl AsContractCall for RotateKeysV1 {
             return Err(RotateKeysErrorMsg::AggregateKeyMismatch.into_error(req_ctx, self));
         }
 
-        // 4. Before v2 activation, that the DKG shares are verified.
+        // 4. Before DKG is disabled, the DKG shares must be verified.
         if latest_dkg
             .as_ref()
             .is_some_and(|shares| !matches!(shares.dkg_shares_status, DkgSharesStatus::Verified))
@@ -1429,12 +1429,12 @@ impl AsContractCall for RotateKeysV1 {
             return Err(RotateKeysErrorMsg::SignaturesRequiredMismatch.into_error(req_ctx, self));
         }
 
-        // 6. After v2 activation, that the registry does not already hold
+        // 6. After DKG is disabled, the registry must not already hold
         //    this signer set and threshold. A v2 registry key is unique to
         //    each block, so the check below never catches a rotation that
         //    changes nothing, and each one costs the signers a fee.
         let registry = ctx.state().registry_signer_set_info();
-        if v2_is_active && self.matches_registry(registry.as_ref()) {
+        if dkg_is_disabled && self.matches_registry(registry.as_ref()) {
             return Err(RotateKeysErrorMsg::RegistryUpToDate.into_error(req_ctx, self));
         }
 
@@ -1654,6 +1654,7 @@ mod tests {
     use secp256k1::SecretKey;
 
     use crate::config::NetworkKind;
+    use crate::storage::DbWrite as _;
     use crate::storage::model::StacksBlockHash;
     use crate::storage::model::StacksTxId;
     use crate::testing::context::BuildContext as _;
@@ -1772,6 +1773,7 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.v2_signing_block_height = Some(activation_height);
+                settings.signer.dkg_disable_block_height = Some(activation_height);
             })
             .build();
 
@@ -1790,6 +1792,42 @@ mod tests {
         assert_eq!(
             rotate_keys.signatures_required,
             config.bootstrap_signatures_required
+        );
+    }
+
+    #[tokio::test]
+    async fn rotate_keys_uses_dkg_after_v2_signing_activation() {
+        let v2_activation_height = BitcoinBlockHeight::from(100_u64);
+        let block_ref = BitcoinBlockRef {
+            block_hash: [42; 32].into(),
+            block_height: v2_activation_height,
+        };
+        let mut rng = get_rng();
+        let mut shares: crate::storage::model::EncryptedDkgShares =
+            fake::Faker.fake_with_rng(&mut rng);
+        shares.dkg_shares_status = DkgSharesStatus::Verified;
+
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(v2_activation_height);
+                settings.signer.dkg_disable_block_height = Some(u64::MAX.into());
+            })
+            .build();
+        context
+            .get_storage_mut()
+            .write_encrypted_dkg_shares(&shares)
+            .await
+            .unwrap();
+
+        let rotate_keys = RotateKeysV1::load(&context, &block_ref).await.unwrap();
+
+        assert_eq!(rotate_keys.aggregate_key, shares.aggregate_key.into());
+        assert_eq!(rotate_keys.new_keys, shares.signer_set_public_keys());
+        assert_eq!(
+            rotate_keys.signatures_required,
+            shares.signature_share_threshold
         );
     }
 
@@ -1850,6 +1888,7 @@ mod tests {
             .with_mocked_clients()
             .modify_settings(|settings| {
                 settings.signer.v2_signing_block_height = Some(activation_height);
+                settings.signer.dkg_disable_block_height = Some(activation_height);
             })
             .build();
         let config = &context.config().signer;

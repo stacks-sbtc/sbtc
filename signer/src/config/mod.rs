@@ -16,7 +16,9 @@ use url::Url;
 use sbtc::SignerKeySet;
 
 use crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+use crate::MAINNET_DKG_DISABLE_BLOCK_HEIGHT;
 use crate::MAINNET_V2_SIGNING_BLOCK_HEIGHT;
+use crate::TESTNET_DKG_DISABLE_BLOCK_HEIGHT;
 use crate::TESTNET_V2_SIGNING_BLOCK_HEIGHT;
 use crate::config::error::SignerConfigError;
 use crate::config::serialization::duration_milliseconds_deserializer;
@@ -377,6 +379,13 @@ pub struct SignerConfig {
     /// Mainnet always uses [`MAINNET_V2_SIGNING_BLOCK_HEIGHT`].
     #[serde(default)]
     pub v2_signing_block_height: Option<BitcoinBlockHeight>,
+    /// Bitcoin height at which DKG is disabled and rotate-keys calls switch to
+    /// the v2 registry-key encoding on non-mainnet networks.
+    ///
+    /// Mainnet always uses [`MAINNET_DKG_DISABLE_BLOCK_HEIGHT`]. This must be
+    /// greater than or equal to the effective v2 signing block height.
+    #[serde(default)]
+    pub dkg_disable_block_height: Option<BitcoinBlockHeight>,
     /// The private key of the signer
     #[serde(deserialize_with = "private_key_deserializer")]
     pub private_key: PrivateKey,
@@ -474,6 +483,16 @@ impl Validatable for SignerConfig {
             return Err(ConfigError::Message(err.to_string()));
         }
 
+        let v2_signing_block_height = self.v2_signing_block_height();
+        let dkg_disable_block_height = self.dkg_disable_block_height();
+        if dkg_disable_block_height < v2_signing_block_height {
+            let err = SignerConfigError::DkgDisableHeightBeforeV2Signing {
+                dkg_disable_block_height: *dkg_disable_block_height,
+                v2_signing_block_height: *v2_signing_block_height,
+            };
+            return Err(ConfigError::Message(err.to_string()));
+        }
+
         if self.deployer.is_mainnet() != self.network.is_mainnet() {
             let err = SignerConfigError::NetworkDeployerMismatch;
             return Err(ConfigError::Message(err.to_string()));
@@ -560,6 +579,21 @@ impl SignerConfig {
     /// Return whether newly-created signer outputs should use v2.
     pub fn is_v2_signing_active(&self, block_height: BitcoinBlockHeight) -> bool {
         block_height >= self.v2_signing_block_height()
+    }
+
+    /// Return the Bitcoin height at which DKG is disabled.
+    pub fn dkg_disable_block_height(&self) -> BitcoinBlockHeight {
+        if self.network.is_mainnet() {
+            MAINNET_DKG_DISABLE_BLOCK_HEIGHT
+        } else {
+            self.dkg_disable_block_height
+                .unwrap_or(TESTNET_DKG_DISABLE_BLOCK_HEIGHT)
+        }
+    }
+
+    /// Return whether DKG is disabled at the given Bitcoin block height.
+    pub fn is_dkg_disabled(&self, block_height: BitcoinBlockHeight) -> bool {
+        block_height >= self.dkg_disable_block_height()
     }
 
     /// Derive the configured v2 signer key set.
@@ -792,6 +826,10 @@ mod tests {
         assert_eq!(settings.signer.dkg_max_duration, Duration::from_secs(120));
         assert_eq!(settings.signer.dkg_verification_window, 10);
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
+        assert_eq!(
+            settings.signer.dkg_disable_block_height(),
+            TESTNET_DKG_DISABLE_BLOCK_HEIGHT
+        );
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
         assert_eq!(settings.emily.timeout, Duration::from_secs(10));
     }
@@ -1383,6 +1421,51 @@ mod tests {
             settings.unwrap_err(),
             ConfigError::Message(msg) if msg == SignerConfigError::TooManySigners(17).to_string()
         ));
+    }
+
+    #[test]
+    fn dkg_disable_height_cannot_precede_v2_signing_height() {
+        clear_env();
+        let mut settings = Settings::new_from_default_config().unwrap();
+        settings.signer.v2_signing_block_height = Some(300_u64.into());
+        settings.signer.dkg_disable_block_height = Some(299_u64.into());
+
+        assert!(matches!(
+            settings.validate().unwrap_err(),
+            ConfigError::Message(msg)
+                if msg == SignerConfigError::DkgDisableHeightBeforeV2Signing {
+                    dkg_disable_block_height: 299,
+                    v2_signing_block_height: 300,
+                }
+                .to_string()
+        ));
+    }
+
+    #[test]
+    fn dkg_disable_height_can_equal_v2_signing_height() {
+        clear_env();
+        let mut settings = Settings::new_from_default_config().unwrap();
+        settings.signer.v2_signing_block_height = Some(300_u64.into());
+        settings.signer.dkg_disable_block_height = Some(300_u64.into());
+
+        settings.validate().unwrap();
+        assert_eq!(
+            settings.signer.dkg_disable_block_height(),
+            BitcoinBlockHeight::from(300_u64)
+        );
+    }
+
+    #[test]
+    fn mainnet_ignores_configured_dkg_disable_height() {
+        clear_env();
+        let mut settings = Settings::new_from_default_config().unwrap();
+        settings.signer.network = NetworkKind::Mainnet;
+        settings.signer.dkg_disable_block_height = Some(300_u64.into());
+
+        assert_eq!(
+            settings.signer.dkg_disable_block_height(),
+            MAINNET_DKG_DISABLE_BLOCK_HEIGHT
+        );
     }
 
     #[test]

@@ -198,6 +198,7 @@ async fn rotate_key_validation_switches_to_v2_checks_at_activation() {
         .with_mocked_clients()
         .modify_settings(|settings| {
             settings.signer.v2_signing_block_height = Some(activation_height);
+            settings.signer.dkg_disable_block_height = Some(activation_height);
             settings.signer.bootstrap_signing_set = configured_signers;
             settings.signer.bootstrap_signatures_required = setup.signatures_required;
             settings.signer.deployer = StacksAddress::burn_address(false);
@@ -253,6 +254,46 @@ async fn rotate_key_validation_switches_to_v2_checks_at_activation() {
 }
 
 #[tokio::test]
+async fn rotate_keys_continue_to_use_dkg_after_v2_signing_activation() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let test_model_params = testing::storage::model::Params {
+        num_bitcoin_blocks: 20,
+        num_stacks_blocks_per_bitcoin_block: 3,
+        num_deposit_requests_per_block: 0,
+        num_withdraw_requests_per_block: 0,
+        num_signers_per_request: 0,
+        consecutive_blocks: false,
+    };
+    TestData::generate(&mut rng, &[], &test_model_params)
+        .write_to(&db)
+        .await;
+
+    let setup = TestRotateKeySetup::new(&db, 2, 3, &mut rng).await;
+    setup.store_dkg_shares(&db).await;
+    let activation_height = setup.chain_tip.block_height;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.v2_signing_block_height = Some(activation_height);
+            settings.signer.dkg_disable_block_height = Some(u64::MAX.into());
+            settings.signer.deployer = StacksAddress::burn_address(false);
+        })
+        .build();
+
+    let (_, req_ctx) = make_rotate_key(&setup);
+    let rotate_keys = RotateKeysV1::load(&ctx, &req_ctx.chain_tip).await.unwrap();
+
+    assert_eq!(rotate_keys.aggregate_key, setup.aggregate_key().into());
+    assert_eq!(rotate_keys.new_keys, setup.wallet.public_keys().clone());
+    assert_eq!(rotate_keys.signatures_required, setup.signatures_required);
+    rotate_keys.validate(&ctx, &req_ctx).await.unwrap();
+
+    testing::storage::drop_db(db).await;
+}
+
+#[tokio::test]
 async fn rotate_key_validation_v2_rejects_registry_up_to_date() {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
@@ -276,6 +317,7 @@ async fn rotate_key_validation_v2_rejects_registry_up_to_date() {
         .with_mocked_clients()
         .modify_settings(|settings| {
             settings.signer.v2_signing_block_height = Some(activation_height);
+            settings.signer.dkg_disable_block_height = Some(activation_height);
             settings.signer.bootstrap_signing_set = configured_signers;
             settings.signer.bootstrap_signatures_required = setup.signatures_required;
             settings.signer.deployer = StacksAddress::burn_address(false);

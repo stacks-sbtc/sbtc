@@ -44,7 +44,7 @@ use signer::{
         contracts::SmartContract,
         wallet::SignerWallet,
     },
-    storage::{DbWrite as _, model, postgres::PgStore},
+    storage::{DbRead as _, DbWrite as _, model, postgres::PgStore},
     testing::{self, context::*},
     transaction_coordinator::TxCoordinatorEventLoop,
     transaction_signer::{STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop},
@@ -238,6 +238,94 @@ async fn get_sbtc_balance(
             "expected a response but got something else",
         )),
     }
+}
+
+/// DKG remains available after the v2 signer-output activation height until
+/// the separately configured DKG disable height is reached.
+#[tokio::test]
+async fn dkg_runs_after_v2_signing_activation() {
+    let stack = TestContainersBuilder::start_stacks().await;
+    let bitcoin = stack.bitcoin().await;
+    let stacks = stack.stacks().await;
+
+    let rpc = bitcoin.rpc();
+    let faucet = bitcoin.get_faucet();
+    let stacks_client = stacks.get_client();
+    let (emily_client, emily_tables) = new_emily_setup().await;
+    let network = WanNetwork::default();
+
+    faucet.generate_fee_data();
+
+    // V2 is already active when the signers observe their first new block.
+    // DKG remains enabled because its disable height retains the u64::MAX
+    // default.
+    let v2_signing_block_height = rpc.get_block_count().unwrap();
+    let bitcoin_chain_tip_poller = bitcoin.start_chain_tip_poller().await;
+    let signers = start_signers(
+        &bitcoin.get_client(),
+        &bitcoin_chain_tip_poller,
+        &stacks_client,
+        &emily_client,
+        &network,
+        3,
+        2,
+        Some(v2_signing_block_height),
+        Duration::from_millis(500),
+    )
+    .await;
+
+    // Check that no shares have been written yet.
+    for (_, db, _, _) in &signers {
+        let shares = db
+            .get_latest_encrypted_dkg_shares()
+            .await
+            .unwrap();
+
+        assert!(shares.is_none());
+    }
+
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
+
+    let mut aggregate_key = None;
+    for (context, db, _, _) in &signers {
+        let bitcoin_chain_tip = db
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .expect("signer did not persist the Bitcoin chain tip");
+
+        let is_v2_signing_active = context
+            .config()
+            .signer
+            .is_v2_signing_active(bitcoin_chain_tip.block_height);
+        let is_dkg_disabled = context
+            .config()
+            .signer
+            .is_dkg_disabled(bitcoin_chain_tip.block_height);
+
+        assert!(is_v2_signing_active);
+        assert!(!is_dkg_disabled);
+
+        let shares = db
+            .get_latest_encrypted_dkg_shares()
+            .await
+            .unwrap()
+            .expect("DKG should write shares after v2 signing activation");
+        assert_eq!(shares.started_at_bitcoin_block_hash, chain_tip);
+
+        // Check that all signers have the same aggregate key. Meaning that
+        // DKG has been run.
+        match aggregate_key {
+            Some(expected) => assert_eq!(shares.aggregate_key, expected),
+            None => aggregate_key = Some(shares.aggregate_key),
+        }
+    }
+
+    for (_, db, _, _) in signers {
+        testing::storage::drop_db(db).await;
+    }
+    clean_emily_setup(emily_tables).await;
 }
 
 /// End to end test for deposits: after the sBTC bootstrap a deposit is created

@@ -135,6 +135,15 @@ network = "regtest"
 # Environment: SIGNER_SIGNER__V2_SIGNING_BLOCK_HEIGHT
 # v2_signing_block_height = 245
 
+# Bitcoin height at which non-mainnet signers disable DKG and switch rotate-keys
+# calls to the v2 registry-key encoding. Mainnet ignores this setting and uses
+# the compiled-in height. The height must not be lower than the effective v2
+# signing height and defaults to u64::MAX.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__DKG_DISABLE_BLOCK_HEIGHT
+# dkg_disable_block_height = 245
+
 # The address that deployed the sbtc smart contracts.
 #
 # Required: true

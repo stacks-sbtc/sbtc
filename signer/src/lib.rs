@@ -238,6 +238,12 @@ pub const MAINNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeig
 /// Testnet activation height for v2 signer UTXOs.
 pub const TESTNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(245);
 
+/// Mainnet Bitcoin height at which DKG is disabled.
+pub const MAINNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(u64::MAX);
+
+/// Default testnet Bitcoin height at which DKG is disabled.
+pub const TESTNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(u64::MAX);
+
 // These are all build info variables. Many of them are set in build.rs.
 
 /// The name of the binary that is being run,
