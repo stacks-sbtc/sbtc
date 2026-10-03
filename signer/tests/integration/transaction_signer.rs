@@ -28,6 +28,7 @@ use test_case::test_case;
 
 use signer::bitcoin::utxo::RequestRef;
 use signer::bitcoin::utxo::Requests;
+use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::bitcoin::utxo::UnsignedTransaction;
 use signer::bitcoin::validation::TxRequestIds;
 use signer::context::Context as _;
@@ -35,6 +36,7 @@ use signer::context::SbtcLimits;
 use signer::error::Error;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
+use signer::keys::PublicKeyXOnly;
 use signer::message::BitcoinPreSignRequest;
 use signer::message::StacksTransactionSignRequest;
 use signer::message::WstsMessage;
@@ -536,15 +538,6 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
 
     let mut rng = get_rng();
     let fee_rate = 1.3;
-    // Build the test context with mocked clients
-    let ctx = TestContext::builder()
-        .with_storage(db.clone())
-        .with_mocked_clients()
-        .modify_settings(|settings| {
-            settings.signer.bootstrap_signatures_required = 2;
-        })
-        .build();
-    ctx.state().update_current_limits(SbtcLimits::unlimited());
 
     let stack = TestContainersBuilder::start_bitcoin().await;
     let bitcoin = stack.bitcoin().await;
@@ -553,6 +546,19 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
 
     // Create a test setup with a confirmed deposit transaction
     let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
+
+    // Build the test context with mocked clients. The signer is the
+    // setup's aggregated signer, whose votes the setup stores.
+    let signer_private_key = setup.aggregated_signer.keypair.secret_key().into();
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+            settings.signer.private_key = signer_private_key;
+        })
+        .build();
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
     // Backfill the blockchain data into the database
     let chain_tip = BitcoinBlockRef {
         block_hash: setup.sweep_block_hash.into(),
@@ -615,6 +621,7 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
     };
 
     let sbtc_state = signer::bitcoin::utxo::SignerBtcState {
+        output_key_set: SignerUtxoKeySet::V1(setup.aggregated_signer.keypair.public_key().into()),
         utxo: ctx
             .get_storage()
             .get_signer_utxo(&chain_tip.block_hash)
@@ -623,7 +630,6 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
             .unwrap(),
         fee_rate,
         last_fees: None,
-        public_key: setup.aggregated_signer.keypair.public_key().into(),
         magic_bytes: *b"T3",
     };
 
@@ -658,20 +664,20 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
 
     // Check that the intentions to sign the requests sighashes
     // are stored in the database
-    let (will_sign, ..) = db
+    let signing_info = db
         .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into())
         .await
         .expect("query to check if signer sighash is stored failed")
         .expect("signer sighash not stored");
 
-    assert!(will_sign);
-    let (will_sign, ..) = db
+    assert!(signing_info.will_sign);
+    let signing_info = db
         .will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into())
         .await
         .expect("query to check if deposit sighash is stored failed")
         .expect("deposit sighash not stored");
 
-    assert!(will_sign);
+    assert!(signing_info.will_sign);
 
     testing::storage::drop_db(db).await;
 }
@@ -992,7 +998,10 @@ mod serial {
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
             is_valid_tx: true,
             will_sign: true,
-            aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
+            key_set_id: PublicKeyXOnly::from(PublicKey::from_private_key(
+                &tx_signer.signer_private_key,
+            ))
+            .into(),
         };
 
         db.write_bitcoin_txs_sighashes(&[row]).await.unwrap();
@@ -1124,7 +1133,10 @@ mod serial {
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
             is_valid_tx: true,
             will_sign: true,
-            aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
+            key_set_id: PublicKeyXOnly::from(PublicKey::from_private_key(
+                &tx_signer.signer_private_key,
+            ))
+            .into(),
         };
 
         db.write_bitcoin_txs_sighashes(&[row]).await.unwrap();
@@ -1345,8 +1357,12 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
     assert_eq!(tx_signer.wsts_state_machines.len(), 1);
 
     // If we say the current chain tip is something else, a new state
-    // machine will be created associated with that chain tip
-    report.chain_tip = Faker.fake_with_rng(&mut rng);
+    // machine will be created associated with that chain tip. We keep the
+    // height, since DKG does not run at or after the v2 activation height.
+    report.chain_tip = BitcoinBlockRef {
+        block_hash: Faker.fake_with_rng(&mut rng),
+        block_height: chain_tip.block_height,
+    };
 
     tx_signer
         .handle_wsts_message(&dkg_begin_msg, msg_public_key, &report)

@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
+use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::bitcoin::validation::BitcoinTxContext;
 use crate::context::Context;
@@ -27,6 +28,8 @@ use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::message;
 use crate::message::BitcoinPreSignAck;
+use crate::message::BitcoinSignatureRequest;
+use crate::message::BitcoinSignatureResponse;
 use crate::message::Payload;
 use crate::message::StacksTransactionSignRequest;
 use crate::message::WstsMessageId;
@@ -45,6 +48,7 @@ use crate::storage::DbWrite as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::DkgSharesStatus;
+use crate::storage::model::RegistryKey;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksTxId;
 use crate::transaction_coordinator::should_run_dkg;
@@ -177,6 +181,23 @@ fn expected_signature_type(prevout_type: model::TxPrevoutType) -> SignatureType 
     }
 }
 
+/// Load the signer-set information used to validate a Bitcoin pre-sign
+/// request.
+async fn bitcoin_tx_context<C>(
+    context: &C,
+    chain_tip: &model::BitcoinBlockRef,
+) -> Result<BitcoinTxContext, Error>
+where
+    C: Context,
+{
+    Ok(BitcoinTxContext {
+        chain_tip: chain_tip.block_hash,
+        chain_tip_height: chain_tip.block_height,
+        signer_public_key: context.config().signer.public_key(),
+        signer_set: BitcoinSignerSet::load(context, chain_tip).await?,
+    })
+}
+
 /// An enum identifying requests for which we can sign for on stacks only once
 /// per tenure.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -187,7 +208,7 @@ pub enum StacksSignRequestId {
     /// for one of them at any time, we don't differentiate.
     CompleteWithdrawal(u64),
     /// A rotate keys transaction for an aggregate key
-    RotateKeys(PublicKey),
+    RotateKeys(RegistryKey),
     /// A new contract deployment
     SmartContract(SmartContract),
 }
@@ -239,6 +260,7 @@ fn run_loop_message_filter(signal: &SignerSignal) -> bool {
                 | message::Payload::SignerWithdrawalDecision(_)
                 | message::Payload::StacksTransactionSignature(_)
                 | message::Payload::BitcoinPreSignAck(_)
+                | message::Payload::BitcoinSignatureResponse(_)
         ),
         SignerSignal::Command(SignerCommand::Shutdown)
         | SignerSignal::Event(SignerEvent::TxCoordinator(TxCoordinatorEvent::MessageGenerated(
@@ -382,8 +404,13 @@ where
                 Metrics::increment_presign_validation(instant.elapsed(), &presign_result);
                 presign_result?;
             }
+            (Payload::BitcoinSignatureRequest(request), true, ChainTipStatus::Canonical) => {
+                self.handle_bitcoin_signature_request(request, &chain_tip)
+                    .await?;
+            }
             // Message types ignored by the transaction signer
             (Payload::StacksTransactionSignature(_), _, _)
+            | (Payload::BitcoinSignatureResponse(_), _, _)
             | (Payload::SignerDepositDecision(_), _, _)
             | (Payload::SignerWithdrawalDecision(_), _, _) => (),
 
@@ -394,6 +421,38 @@ where
         };
 
         Ok(())
+    }
+
+    /// Validate and answer an independent v2 Bitcoin signature request.
+    async fn handle_bitcoin_signature_request(
+        &mut self,
+        request: &BitcoinSignatureRequest,
+        chain_tip: &model::BitcoinBlockRef,
+    ) -> Result<(), Error> {
+        let Some(signing_info) = self
+            .context
+            .get_storage()
+            .will_sign_bitcoin_tx_sighash(&request.sighash)
+            .await?
+        else {
+            return Err(Error::UnknownSigHash(request.sighash));
+        };
+
+        let is_v2 = matches!(signing_info.key_set_id, model::KeySetId::V2(_));
+        if !signing_info.will_sign || !is_v2 {
+            return Err(Error::InvalidSigHash(request.sighash));
+        }
+
+        let secret_key = sbtc::derive_signing_secret_key(self.signer_private_key.into());
+        let keypair = secp256k1::Keypair::from_secret_key(secp256k1::SECP256K1, &secret_key);
+        let message = secp256k1::Message::from_digest(request.sighash.to_byte_array());
+
+        let response = BitcoinSignatureResponse {
+            sighash: request.sighash,
+            signature: secp256k1::SECP256K1.sign_schnorr(&message, &keypair),
+        };
+
+        self.send_message(response, &chain_tip.block_hash).await
     }
 
     /// Find out the status of the given chain tip
@@ -448,30 +507,7 @@ where
         }
         self.last_presign_block = Some(chain_tip.block_hash);
 
-        let aggregate_key = self
-            .context
-            .state()
-            .registry_signer_set_info()
-            .map(|info| info.aggregate_key)
-            .ok_or(Error::NoDkgShares)?;
-
-        let dkg_shares = db.get_encrypted_dkg_shares(aggregate_key).await?;
-        let aggregate_key = match dkg_shares.map(|shares| shares.dkg_shares_status) {
-            Some(DkgSharesStatus::Verified) => aggregate_key,
-            None | Some(DkgSharesStatus::Unverified) | Some(DkgSharesStatus::Failed) => {
-                db.get_latest_verified_dkg_shares()
-                    .await?
-                    .ok_or(Error::NoVerifiedDkgShares)?
-                    .aggregate_key
-            }
-        };
-
-        let btc_ctx = BitcoinTxContext {
-            chain_tip: chain_tip.block_hash,
-            chain_tip_height: chain_tip.block_height,
-            signer_public_key: self.signer_public_key(),
-            aggregate_key,
-        };
+        let btc_ctx = bitcoin_tx_context(&self.context, chain_tip).await?;
 
         tracing::debug!(%request, "validating bitcoin transaction pre-sign");
         let sighashes = request
@@ -585,8 +621,17 @@ where
         // If the sbtc-registry has not been deployed yet, then we allow
         // any DKG shares for smart contract deployments, but require
         // verified DKG shares for other transactions.
+        let config = &self.context.config().signer;
         let signer_set_info = match state.registry_signer_set_info() {
             Some(info) => info,
+            // After v2 activation there is no DKG, so the configured
+            // bootstrap signer set is the signing set until the first
+            // rotation, as it is in the tx-coordinator.
+            None if config.is_v2_signing_active(chain_tip.block_height) => SignerSetInfo {
+                aggregate_key: chain_tip.block_hash.into(),
+                signer_set: config.bootstrap_signing_set.clone(),
+                signatures_required: config.bootstrap_signatures_required,
+            },
             None => match db.get_latest_verified_dkg_shares().await? {
                 Some(info) => info.into(),
                 None if matches!(request.contract_tx, StacksTx::SmartContract(_))
@@ -612,7 +657,6 @@ where
             stacks_chain_tip: stacks_chain_tip.block_hash,
             context_window: self.context_window,
             origin: *origin_public_key,
-            aggregate_key: signer_set_info.aggregate_key,
             signatures_required: signer_set_info.signatures_required,
             deployer: self.context.config().signer.deployer.clone(),
         };
@@ -1311,17 +1355,20 @@ where
             .into();
 
         match db.will_sign_bitcoin_tx_sighash(&sighash).await? {
-            Some((true, public_key, prevout_type)) => {
-                if signature_type != expected_signature_type(prevout_type) {
+            Some(signing_info) if signing_info.will_sign => {
+                let model::KeySetId::V1(public_key) = signing_info.key_set_id else {
+                    return Err(Error::InvalidSigHash(sighash));
+                };
+                if signature_type != expected_signature_type(signing_info.prevout_type) {
                     return Err(Error::SignatureTypeMismatch {
                         sighash,
-                        prevout_type,
+                        prevout_type: signing_info.prevout_type,
                         signature_type,
                     });
                 }
                 Ok(AcceptedSigHash { public_key, sighash })
             }
-            Some((false, ..)) => Err(Error::InvalidSigHash(sighash)),
+            Some(_) => Err(Error::InvalidSigHash(sighash)),
             None => Err(Error::UnknownSigHash(sighash)),
         }
     }
@@ -1744,6 +1791,8 @@ mod tests {
     use std::num::NonZeroUsize;
     use std::time::Duration;
 
+    use crate::bitcoin::utxo::SignerUtxoKeySet;
+
     use bitcoin::Txid;
     use fake::{Fake as _, Faker};
     use network::InMemoryNetwork;
@@ -1752,7 +1801,7 @@ mod tests {
 
     use crate::bitcoin::MockBitcoinInteract;
     use crate::emily_client::MockEmilyInteract;
-    use crate::keys::PublicKey;
+    use crate::keys::{PublicKey, PublicKeyXOnly};
     use crate::stacks::api::MockStacksInteract;
     use crate::stacks::api::SignerSetInfo;
     use crate::storage::memory::SharedStore;
@@ -1762,6 +1811,171 @@ mod tests {
     use crate::transaction_coordinator::TxCoordinatorEventLoop;
 
     use super::*;
+
+    #[tokio::test]
+    async fn v2_bitcoin_context_uses_registry_set_without_dkg_shares() {
+        let activation_height = model::BitcoinBlockHeight::from(100_u64);
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(activation_height);
+            })
+            .build();
+        let mut rng = get_rng();
+        let signer_public_key: PublicKey = Faker.fake_with_rng(&mut rng);
+        let signer_set = BTreeSet::from([signer_public_key]);
+        context
+            .state()
+            .update_registry_signer_set_info(SignerSetInfo {
+                aggregate_key: model::RegistryKey::V2(Faker.fake_with_rng(&mut rng)),
+                signer_set: signer_set.clone(),
+                signatures_required: 1,
+            });
+        let chain_tip = model::BitcoinBlockRef {
+            block_hash: Faker.fake_with_rng(&mut rng),
+            block_height: activation_height,
+        };
+
+        let btc_context = bitcoin_tx_context(&context, &chain_tip).await.unwrap();
+
+        assert_eq!(
+            btc_context.signer_public_key,
+            context.config().signer.public_key()
+        );
+        assert!(matches!(
+            btc_context.signer_set.output_key_set(),
+            SignerUtxoKeySet::V2(_)
+        ));
+        let BitcoinSignerSet::V2 { signer_public_keys, .. } = btc_context.signer_set else {
+            panic!("expected a v2 signer set");
+        };
+        assert_eq!(signer_public_keys, signer_set);
+    }
+
+    #[tokio::test]
+    async fn v1_bitcoin_context_uses_dkg_voters_and_registry_output_key() {
+        let activation_height = model::BitcoinBlockHeight::from(100_u64);
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(activation_height);
+            })
+            .build();
+        let mut rng = get_rng();
+        let mut shares: model::EncryptedDkgShares = Faker.fake_with_rng(&mut rng);
+        shares.dkg_shares_status = model::DkgSharesStatus::Verified;
+        context
+            .get_storage_mut()
+            .write_encrypted_dkg_shares(&shares)
+            .await
+            .unwrap();
+
+        let registry_key: PublicKey = Faker.fake_with_rng(&mut rng);
+        context
+            .state()
+            .update_registry_signer_set_info(SignerSetInfo {
+                aggregate_key: registry_key.into(),
+                signer_set: BTreeSet::from([Faker.fake_with_rng(&mut rng)]),
+                signatures_required: 1,
+            });
+        let chain_tip = model::BitcoinBlockRef {
+            block_hash: Faker.fake_with_rng(&mut rng),
+            block_height: model::BitcoinBlockHeight::from(99_u64),
+        };
+
+        let btc_context = bitcoin_tx_context(&context, &chain_tip).await.unwrap();
+
+        assert_eq!(
+            btc_context.signer_set.output_key_set(),
+            SignerUtxoKeySet::V1(registry_key.into())
+        );
+        let BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys,
+            signatures_required,
+        } = btc_context.signer_set
+        else {
+            panic!("expected a v1 signer set");
+        };
+        assert_eq!(aggregate_key, registry_key);
+        assert_eq!(signer_public_keys, shares.signer_set_public_keys());
+        assert_eq!(signatures_required, shares.signature_share_threshold);
+    }
+
+    /// A network that starts after v2 activation has no DKG shares, so
+    /// before the first rotation signers validate against the configured
+    /// bootstrap signer set.
+    #[tokio::test]
+    async fn v2_stacks_sign_request_uses_bootstrap_set_without_registry() {
+        let activation_height = model::BitcoinBlockHeight::from(100_u64);
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(activation_height);
+            })
+            .build();
+        context
+            .with_stacks_client(|client| {
+                client.expect_get_contract_source().returning(|_, _| {
+                    Box::pin(async {
+                        Ok(
+                            blockstack_lib::net::api::getcontractsrc::ContractSrcResponse {
+                                source: String::new(),
+                                publish_height: 1,
+                                marf_proof: None,
+                            },
+                        )
+                    })
+                });
+            })
+            .await;
+        let stacks_block: model::StacksBlock = Faker.fake();
+        context.state().set_stacks_chain_tip(stacks_block.into());
+
+        let chain_tip = model::BitcoinBlockRef {
+            block_hash: Faker.fake(),
+            block_height: activation_height,
+        };
+        let request = StacksTransactionSignRequest {
+            aggregate_key: None,
+            contract_tx: StacksTx::SmartContract(SmartContract::SbtcRegistry),
+            nonce: 0,
+            tx_fee: 1,
+            txid: Faker.fake(),
+        };
+        let origin = context.config().signer.public_key();
+
+        let network = InMemoryNetwork::new();
+        let new_signer = |signer_private_key| TxSignerEventLoop {
+            context: context.clone(),
+            network: network.connect(),
+            signer_private_key,
+            context_window: 1,
+            wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            last_presign_block: None,
+            dkg_begin_pause: None,
+            dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+            stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        };
+
+        // A signer in the bootstrap set gets past the signer set check,
+        // and here fails the contract check that comes after it.
+        let mut signer = new_signer(context.config().signer.private_key);
+        let result = signer
+            .assert_valid_stacks_tx_sign_request(&request, &chain_tip, &origin)
+            .await;
+        assert!(matches!(result, Err(Error::ContractAlreadyDeployed(_))));
+
+        // A signer outside the bootstrap set is rejected.
+        let mut signer = new_signer(PrivateKey::new(&mut rand::rngs::OsRng));
+        let result = signer
+            .assert_valid_stacks_tx_sign_request(&request, &chain_tip, &origin)
+            .await;
+        assert!(matches!(result, Err(Error::ValidationSignerSet(_))));
+    }
 
     #[allow(clippy::type_complexity)]
     fn test_environment() -> testing::transaction_signer::TestEnvironment<
@@ -1819,6 +2033,9 @@ mod tests {
         let db = context.get_storage_mut();
         let mut rng = get_rng();
         let sighash: SigHash = Faker.fake_with_rng(&mut rng);
+        let key_set_id =
+            PublicKeyXOnly::from(PublicKey::from(Keypair::new_global(&mut rng).public_key()))
+                .into();
         db.write_bitcoin_txs_sighashes(&[model::BitcoinTxSigHash {
             txid: Faker.fake_with_rng(&mut rng),
             chain_tip: Faker.fake_with_rng(&mut rng),
@@ -1829,7 +2046,7 @@ mod tests {
             validation_result: crate::bitcoin::validation::InputValidationResult::Ok,
             is_valid_tx: true,
             will_sign: true,
-            aggregate_key: Faker.fake_with_rng(&mut rng),
+            key_set_id,
         }])
         .await
         .unwrap();
@@ -2254,7 +2471,7 @@ mod tests {
 
         let signer_set_info = SignerSetInfo {
             signer_set: registry_signer_set.clone(),
-            aggregate_key: *registry_signer_set.first().unwrap(),
+            aggregate_key: (*registry_signer_set.first().unwrap()).into(),
             signatures_required: 2,
         };
         context

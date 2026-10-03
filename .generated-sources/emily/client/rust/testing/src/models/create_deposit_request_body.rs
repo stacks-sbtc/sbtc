@@ -23,6 +23,22 @@ pub struct CreateDepositRequestBody {
     /// Deposit script.
     #[serde(rename = "depositScript")]
     pub deposit_script: String,
+    /// Maximum fee in satoshis. Required for v2 deposits.
+    #[serde(
+        rename = "maxFee",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub max_fee: Option<Option<u64>>,
+    /// The consensus-encoded Stacks principal, represented as hex. Required for v2 deposits.
+    #[serde(
+        rename = "recipient",
+        default,
+        with = "::serde_with::rust::double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub recipient: Option<Option<String>>,
     /// Reclaim script.
     #[serde(rename = "reclaimScript")]
     pub reclaim_script: String,
@@ -44,6 +60,8 @@ impl CreateDepositRequestBody {
             bitcoin_tx_output_index,
             bitcoin_txid,
             deposit_script,
+            max_fee: None,
+            recipient: None,
             reclaim_script,
             transaction_hex,
         }

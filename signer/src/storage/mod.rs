@@ -335,7 +335,7 @@ pub trait DbRead {
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
-        aggregate_key: &PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
@@ -362,21 +362,21 @@ pub trait DbRead {
         chain_tip: &model::BitcoinBlockHash,
     ) -> impl Future<Output = Result<Option<SignerUtxo>, Error>> + Send;
 
-    /// For the given outpoint and aggregate key, get the list all signer
-    /// votes in the signer set.
+    /// For the given outpoint, get the votes for every member of the supplied
+    /// signer set.
     fn get_deposit_request_signer_votes(
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> impl Future<Output = Result<model::SignerVotes, Error>> + Send;
 
-    /// For the given withdrawal request identifier, and aggregate key, get
-    /// the list for how the signers voted against the request.
+    /// For the given withdrawal request identifier, get the votes for every
+    /// member of the supplied signer set.
     fn get_withdrawal_request_signer_votes(
         &self,
         id: &model::QualifiedRequestId,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> impl Future<Output = Result<model::SignerVotes, Error>> + Send;
 
     /// Check for whether  the given block hash is in the database.
@@ -462,12 +462,11 @@ pub trait DbRead {
         output_index: u32,
     ) -> impl Future<Output = Result<Option<model::DepositRequest>, Error>> + Send;
 
-    /// Get whether this signer will sign the given bitcoin sighash, the
-    /// aggregate key locking the prevout, and the prevout type.
+    /// Get this signer's decision and the script metadata for a Bitcoin sighash.
     fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> impl Future<Output = Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<model::BitcoinTxSigHashSigningInfo>, Error>> + Send;
 
     /// Returns the list of stored peers.
     fn get_p2p_peers(&self) -> impl Future<Output = Result<Vec<model::P2PPeer>, Error>> + Send;
@@ -475,6 +474,13 @@ pub trait DbRead {
 
 /// Represents the ability to write data to the signer storage.
 pub trait DbWrite {
+    /// Persist a signer key set, leaving an existing identical identifier in place.
+    fn write_signer_key_set(
+        &self,
+        _key_set: &model::SignerKeySet,
+    ) -> impl Future<Output = Result<(), Error>> + Send {
+        async { Ok(()) }
+    }
     /// Write a bitcoin block.
     fn write_bitcoin_block(
         &self,

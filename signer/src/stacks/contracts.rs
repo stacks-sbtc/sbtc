@@ -49,6 +49,7 @@ use crate::bitcoin::validation::WithdrawalRequestStatus;
 use crate::context::Context;
 use crate::error::Error;
 use crate::keys::PublicKey;
+use crate::stacks::api::SignerSetInfo;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
 use crate::storage::model::BitcoinBlockHash;
@@ -57,6 +58,7 @@ use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::QualifiedRequestId;
+use crate::storage::model::RegistryKey;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::ToLittleEndianOrder as _;
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
@@ -98,10 +100,6 @@ pub struct ReqContext {
     /// [`AsContractCall::validate`] function, but is here for logging and
     /// tracking purposes.
     pub origin: PublicKey,
-    /// This is the aggregate public key used to lock funds on bitcoin that
-    /// was the output of DKG. We use it to identify the signing set for
-    /// the stacks transaction that the signer was asked to sign.
-    pub aggregate_key: PublicKey,
     /// The number of signatures required for an accepted deposit request.
     pub signatures_required: u16,
     /// The expected deployer of the sBTC smart contract.
@@ -1222,8 +1220,8 @@ pub struct RotateKeysV1 {
     /// The new set of public keys for all known signers during this
     /// PoX cycle.
     pub new_keys: BTreeSet<PublicKey>,
-    /// The signers bitcoin aggregate key
-    pub aggregate_key: PublicKey,
+    /// The v1 aggregate key or unique v2 rotation identifier written to the registry.
+    pub aggregate_key: RegistryKey,
     /// The address that deployed the contract.
     pub deployer: StacksAddress,
     /// The number of signatures required for the multi-sig wallet.
@@ -1239,31 +1237,50 @@ impl RotateKeysV1 {
         bitcoin_aggregate_key: &PublicKey,
     ) -> Self {
         Self {
-            aggregate_key: *bitcoin_aggregate_key,
+            aggregate_key: (*bitcoin_aggregate_key).into(),
             new_keys: wallet.public_keys().clone(),
             deployer,
             signatures_required: wallet.signatures_required(),
         }
     }
 
-    /// Create a rotate-key instance that will be associated with the given
-    /// aggregate key using the associated DKG shares in the database. If
-    /// no such shares exist then return an error.
-    pub async fn load<C>(ctx: &C, aggregate_key: &PublicKey) -> Result<Self, Error>
+    /// Return whether the registry already contains this rotation's signer
+    /// set and threshold.
+    pub fn matches_registry(&self, registry: Option<&SignerSetInfo>) -> bool {
+        registry.is_some_and(|info| {
+            info.signer_set == self.new_keys && info.signatures_required == self.signatures_required
+        })
+    }
+
+    /// Load the key rotation target active at the given Bitcoin block reference.
+    ///
+    /// Before DKG is disabled, the target is the latest DKG result. At and
+    /// after the cutoff, it is the signer key set derived from configuration.
+    pub async fn load<C>(ctx: &C, block_ref: &BitcoinBlockRef) -> Result<Self, Error>
     where
         C: Context,
     {
-        let db = ctx.get_storage();
-
-        match db.get_encrypted_dkg_shares(aggregate_key).await? {
-            Some(shares) => Ok(Self {
-                aggregate_key: shares.aggregate_key,
-                new_keys: shares.signer_set_public_keys(),
-                deployer: ctx.config().signer.deployer.clone(),
-                signatures_required: shares.signature_share_threshold,
-            }),
-            None => Err(Error::MissingDkgShares(aggregate_key.into())),
+        let config = &ctx.config().signer;
+        if config.is_dkg_disabled(block_ref.block_height) {
+            return Ok(Self {
+                aggregate_key: block_ref.block_hash.into(),
+                new_keys: config.bootstrap_signing_set.clone(),
+                deployer: config.deployer.clone(),
+                signatures_required: config.bootstrap_signatures_required,
+            });
         }
+
+        let shares = ctx
+            .get_storage()
+            .get_latest_encrypted_dkg_shares()
+            .await?
+            .ok_or(Error::NoDkgShares)?;
+        Ok(Self {
+            aggregate_key: shares.aggregate_key.into(),
+            new_keys: shares.signer_set_public_keys(),
+            deployer: config.deployer.clone(),
+            signatures_required: shares.signature_share_threshold,
+        })
     }
 
     /// This function returns the clarity description of one of the inputs
@@ -1328,7 +1345,7 @@ impl AsContractCall for RotateKeysV1 {
 
         // The public key needs to be exactly 33 bytes in this contract
         // call.
-        let key: [u8; 33] = self.aggregate_key.serialize();
+        let key = self.aggregate_key.to_bytes();
 
         vec![
             ClarityValue::Sequence(SequenceData::List(new_keys)),
@@ -1342,13 +1359,17 @@ impl AsContractCall for RotateKeysV1 {
     ///
     /// 1. That the smart contract deployer matches the deployer in our context.
     /// 2. That the signing set matches the signing set for the most recent
-    ///    DKG run.
+    ///    DKG run, or after DKG is disabled the configured signing set.
     /// 3. That the aggregate key matches the one that was output as part of
-    ///    the most recent DKG.
-    /// 4. That the DKG shares are in the verified state.
+    ///    the most recent DKG, or after DKG is disabled that it identifies the
+    ///    current Bitcoin chain tip.
+    /// 4. Before DKG is disabled, that the DKG shares are in the verified
+    ///    state.
     /// 5. That the signature threshold matches the one that was used in the
-    ///    most recent DKG.
-    /// 6. That there are no other rotate-keys contract calls with these same
+    ///    most recent DKG, or after DKG is disabled the configured threshold.
+    /// 6. After DKG is disabled, that the registry does not already hold this
+    ///    signer set and threshold.
+    /// 7. That there are no other rotate-keys contract calls with these same
     ///    details already confirmed on the canonical Stacks blockchain.
     async fn validate<C>(&self, ctx: &C, req_ctx: &ReqContext) -> Result<(), Error>
     where
@@ -1361,37 +1382,63 @@ impl AsContractCall for RotateKeysV1 {
             return Err(RotateKeysErrorMsg::DeployerMismatch.into_error(req_ctx, self));
         }
 
-        // 2. That the signing set matches the signing set for the most recent
-        //    DKG run.
-        let Some(latest_dkg) = db.get_latest_encrypted_dkg_shares().await? else {
-            return Err(Error::NoDkgShares);
+        let config = &ctx.config().signer;
+        let dkg_is_disabled = config.is_dkg_disabled(req_ctx.chain_tip.block_height);
+        let latest_dkg = if dkg_is_disabled {
+            None
+        } else {
+            Some(
+                db.get_latest_encrypted_dkg_shares()
+                    .await?
+                    .ok_or(Error::NoDkgShares)?,
+            )
         };
-        let latest_public_key = latest_dkg
-            .signer_set_public_keys
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        if self.new_keys != latest_public_key {
+        let expected_public_keys = latest_dkg
+            .as_ref()
+            .map(|shares| shares.signer_set_public_keys())
+            .unwrap_or_else(|| config.bootstrap_signing_set.clone());
+
+        // 2. That the signing set matches the active key set.
+        if self.new_keys != expected_public_keys {
             return Err(RotateKeysErrorMsg::SignerSetMismatch.into_error(req_ctx, self));
         }
 
-        // 3. That the aggregate key matches the one that was output as part of
-        //    the most recent DKG.
-        if self.aggregate_key != latest_dkg.aggregate_key {
+        // 3. That the registry key is the active v1 aggregate key or, for a
+        //    v2 rotation, is uniquely derived from this Bitcoin chain tip.
+        let expected_registry_key = match &latest_dkg {
+            Some(shares) => shares.aggregate_key.into(),
+            None => req_ctx.chain_tip.block_hash.into(),
+        };
+        if self.aggregate_key != expected_registry_key {
             return Err(RotateKeysErrorMsg::AggregateKeyMismatch.into_error(req_ctx, self));
         }
 
-        // 4. That the DKG shares are in the verified state.
-        if !matches!(latest_dkg.dkg_shares_status, DkgSharesStatus::Verified) {
+        // 4. Before DKG is disabled, the DKG shares must be verified.
+        if latest_dkg
+            .as_ref()
+            .is_some_and(|shares| !matches!(shares.dkg_shares_status, DkgSharesStatus::Verified))
+        {
             return Err(RotateKeysErrorMsg::DkgSharesNotVerified.into_error(req_ctx, self));
         }
 
-        // 5. That the signature threshold matches the one that was used in the
-        //    most recent DKG.
-        if self.signatures_required != latest_dkg.signature_share_threshold {
+        // 5. That the signature threshold matches the active key set.
+        let expected_threshold = latest_dkg
+            .map(|shares| shares.signature_share_threshold)
+            .unwrap_or(config.bootstrap_signatures_required);
+        if self.signatures_required != expected_threshold {
             return Err(RotateKeysErrorMsg::SignaturesRequiredMismatch.into_error(req_ctx, self));
         }
 
-        // 6. That there are no other rotate-keys contract calls with these same
+        // 6. After DKG is disabled, the registry must not already hold
+        //    this signer set and threshold. A v2 registry key is unique to
+        //    each block, so the check below never catches a rotation that
+        //    changes nothing, and each one costs the signers a fee.
+        let registry = ctx.state().registry_signer_set_info();
+        if dkg_is_disabled && self.matches_registry(registry.as_ref()) {
+            return Err(RotateKeysErrorMsg::RegistryUpToDate.into_error(req_ctx, self));
+        }
+
+        // 7. That there are no other rotate-keys contract calls with these same
         //    details already confirmed on the canonical Stacks blockchain.
         let key_rotation_exists_fut = db.key_rotation_exists(
             &req_ctx.stacks_chain_tip,
@@ -1441,18 +1488,23 @@ pub enum RotateKeysErrorMsg {
     /// The smart contract deployer is fixed, so this should always match.
     #[error("The deployer in the transaction does not match the expected deployer")]
     DeployerMismatch,
-    /// The signer set does not match the latest DKG.
-    #[error("the signer set does not match the latest DKG")]
+    /// The signer set does not match the latest values, which could be
+    /// from a DKG or from a bootstrap signer set.
+    #[error("the signer set does not match the latest values")]
     SignerSetMismatch,
-    /// The aggregate key does not match the latest DKG.
-    #[error("the aggregate key does not match the latest DKG")]
+    /// The registry key does not match the active rotation target.
+    #[error("the registry key does not match the active rotation target")]
     AggregateKeyMismatch,
-    /// The number of required signatures does not match the latest DKG.
-    #[error("the number of required signatures does not match the latest DKG")]
+    /// The number of required signatures does not match the latest values,
+    /// which could be from a DKG or from a bootstrap signer set.
+    #[error("the number of required signatures does not match the latest values")]
     SignaturesRequiredMismatch,
     /// There is already a key rotation with the same details.
     #[error("there is already a key rotation with the same details")]
     KeyRotationExists,
+    /// The registry already contains the signer set and threshold.
+    #[error("the registry already contains the signer set and threshold")]
+    RegistryUpToDate,
     /// The aggregate key is known but the associated secret shares have
     /// not passed verification.
     #[error("the shares associated with the aggregate key have not passes verification")]
@@ -1602,8 +1654,14 @@ mod tests {
     use secp256k1::SecretKey;
 
     use crate::config::NetworkKind;
+    use crate::storage::DbWrite as _;
     use crate::storage::model::StacksBlockHash;
     use crate::storage::model::StacksTxId;
+    use crate::testing::context::BuildContext as _;
+    use crate::testing::context::ConfigureMockedClients as _;
+    use crate::testing::context::ConfigureSettings as _;
+    use crate::testing::context::ConfigureStorage as _;
+    use crate::testing::context::TestContext;
     use crate::testing::get_rng;
 
     use super::*;
@@ -1686,6 +1744,184 @@ mod tests {
         // This is to check that this function doesn't implicitly panic. If
         // it doesn't panic now, it can never panic at runtime.
         let _ = call.as_contract_call();
+    }
+
+    #[test]
+    fn v2_rotate_keys_uses_block_hash_registry_encoding() {
+        let block_hash = BitcoinBlockHash::from([42; 32]);
+        let call = RotateKeysV1 {
+            new_keys: BTreeSet::new(),
+            aggregate_key: RegistryKey::V2(block_hash),
+            deployer: StacksAddress::burn_address(false),
+            signatures_required: 1,
+        };
+
+        let args = call.as_contract_args();
+        let ClarityValue::Sequence(SequenceData::Buffer(buffer)) = &args[1] else {
+            panic!("aggregate-key argument must be a buffer");
+        };
+        assert_eq!(buffer.data, RegistryKey::V2(block_hash).to_bytes());
+        assert_eq!(buffer.data[0], 0xff);
+        assert_eq!(&buffer.data[1..], block_hash.into_bytes());
+    }
+
+    #[tokio::test]
+    async fn v2_rotate_keys_loads_the_configured_key_set_without_dkg() {
+        let activation_height = BitcoinBlockHeight::from(100_u64);
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(activation_height);
+                settings.signer.dkg_disable_block_height = Some(activation_height);
+            })
+            .build();
+
+        let block_ref = BitcoinBlockRef {
+            block_hash: [42; 32].into(),
+            block_height: activation_height,
+        };
+        let rotate_keys = RotateKeysV1::load(&context, &block_ref).await.unwrap();
+        let config = &context.config().signer;
+
+        assert_eq!(rotate_keys.new_keys, config.bootstrap_signing_set);
+        assert_eq!(
+            rotate_keys.aggregate_key,
+            RegistryKey::V2(block_ref.block_hash)
+        );
+        assert_eq!(
+            rotate_keys.signatures_required,
+            config.bootstrap_signatures_required
+        );
+    }
+
+    #[tokio::test]
+    async fn rotate_keys_uses_dkg_after_v2_signing_activation() {
+        let v2_activation_height = BitcoinBlockHeight::from(100_u64);
+        let block_ref = BitcoinBlockRef {
+            block_hash: [42; 32].into(),
+            block_height: v2_activation_height,
+        };
+        let mut rng = get_rng();
+        let mut shares: crate::storage::model::EncryptedDkgShares =
+            fake::Faker.fake_with_rng(&mut rng);
+        shares.dkg_shares_status = DkgSharesStatus::Verified;
+
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(v2_activation_height);
+                settings.signer.dkg_disable_block_height = Some(u64::MAX.into());
+            })
+            .build();
+        context
+            .get_storage_mut()
+            .write_encrypted_dkg_shares(&shares)
+            .await
+            .unwrap();
+
+        let rotate_keys = RotateKeysV1::load(&context, &block_ref).await.unwrap();
+
+        assert_eq!(rotate_keys.aggregate_key, shares.aggregate_key.into());
+        assert_eq!(rotate_keys.new_keys, shares.signer_set_public_keys());
+        assert_eq!(
+            rotate_keys.signatures_required,
+            shares.signature_share_threshold
+        );
+    }
+
+    #[test]
+    fn registry_match_depends_only_on_the_signer_set_and_threshold() {
+        let mut rng = get_rng();
+        let signer_set = (0..3)
+            .map(|_| fake::Faker.fake_with_rng(&mut rng))
+            .collect::<BTreeSet<PublicKey>>();
+        let target = RotateKeysV1 {
+            new_keys: signer_set.clone(),
+            aggregate_key: RegistryKey::V2([1; 32].into()),
+            deployer: crate::config::Settings::new_from_default_config()
+                .unwrap()
+                .signer
+                .deployer,
+            signatures_required: 2,
+        };
+        let current = SignerSetInfo {
+            signer_set,
+            aggregate_key: RegistryKey::V2([2; 32].into()),
+            signatures_required: 2,
+        };
+
+        // A different v2 rotation identifier does not call for a rotation.
+        assert!(target.matches_registry(Some(&current)));
+
+        // Neither does crossing the activation height with a v1 key in the
+        // registry.
+        let current_v1 = SignerSetInfo {
+            aggregate_key: fake::Faker.fake_with_rng::<PublicKey, _>(&mut rng).into(),
+            ..current.clone()
+        };
+        assert!(target.matches_registry(Some(&current_v1)));
+
+        // A change to the signer set or threshold does.
+        let mut changed_set = current.clone();
+        changed_set.signer_set.pop_first();
+        assert!(!target.matches_registry(Some(&changed_set)));
+
+        let changed_threshold = SignerSetInfo {
+            signatures_required: 3,
+            ..current
+        };
+        assert!(!target.matches_registry(Some(&changed_threshold)));
+
+        // As does a registry with no signer set yet.
+        assert!(!target.matches_registry(None));
+    }
+
+    /// After v2 activation the signers reject a rotation that would leave
+    /// the registry's signer set and threshold unchanged.
+    #[tokio::test]
+    async fn v2_rotate_keys_validation_rejects_a_rotation_that_changes_nothing() {
+        let activation_height = BitcoinBlockHeight::from(100_u64);
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                settings.signer.v2_signing_block_height = Some(activation_height);
+                settings.signer.dkg_disable_block_height = Some(activation_height);
+            })
+            .build();
+        let config = &context.config().signer;
+
+        let chain_tip = BitcoinBlockRef {
+            block_hash: [42; 32].into(),
+            block_height: activation_height,
+        };
+        let req_ctx = ReqContext {
+            chain_tip,
+            stacks_chain_tip: [43; 32].into(),
+            context_window: 10,
+            origin: config.public_key(),
+            signatures_required: config.bootstrap_signatures_required,
+            deployer: config.deployer.clone(),
+        };
+        let rotate_keys = RotateKeysV1::load(&context, &chain_tip).await.unwrap();
+
+        // The registry has the configured signer set and threshold, so
+        // this rotation changes nothing.
+        context
+            .state()
+            .update_registry_signer_set_info(SignerSetInfo {
+                aggregate_key: RegistryKey::V2([7; 32].into()),
+                signer_set: config.bootstrap_signing_set.clone(),
+                signatures_required: config.bootstrap_signatures_required,
+            });
+        let error = rotate_keys.validate(&context, &req_ctx).await.unwrap_err();
+        assert!(matches!(
+            error,
+            Error::RotateKeysValidation(error)
+                if matches!(error.error, RotateKeysErrorMsg::RegistryUpToDate)
+        ));
     }
 
     #[test_case::test_case(SmartContract::SbtcBootstrapSigners; "sbtc-bootstrap")]

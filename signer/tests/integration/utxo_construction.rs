@@ -31,6 +31,7 @@ use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
+use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::utxo::WithdrawalRequest;
 use signer::config::Settings;
@@ -142,6 +143,8 @@ where
         outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
         deposit_script,
         reclaim_script,
+        recipient: None,
+        max_fee: None,
     };
 
     let dep = create_req.validate_tx(&deposit_tx, false).unwrap();
@@ -153,7 +156,10 @@ where
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script_hash: TaprootScriptHash::from(&dep.reclaim_script),
-        signers_public_key: dep.signers_public_key,
+        signers_public_key: signer::bitcoin::utxo::DepositSigningKey::V1(match &dep.signing_info {
+            sbtc::deposits::DepositSigningInfo::V1 { public_key } => *public_key,
+            sbtc::deposits::DepositSigningInfo::V2 { .. } => unreachable!("v1 test deposit"),
+        }),
     };
 
     (deposit_tx, req, dep)
@@ -253,13 +259,13 @@ mod serial {
             deposits: vec![deposit_request],
             withdrawals: Vec::new(),
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(signers_public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::new(signer_utxo.txid, signer_utxo.vout),
                     amount: signer_utxo.amount.to_sat(),
-                    public_key: signers_public_key,
+                    key_set: SignerUtxoKeySet::V1(signers_public_key),
                 },
                 fee_rate: 10.0,
-                public_key: signers_public_key,
                 last_fees: None,
                 magic_bytes: *b"T3",
             },
@@ -318,13 +324,13 @@ mod serial {
             deposits: Vec::new(),
             withdrawals: vec![withdrawal_request.clone()],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(signers_public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::new(signer_utxo.txid, signer_utxo.vout),
                     amount: signer_utxo.amount.to_sat(),
-                    public_key: signers_public_key,
+                    key_set: SignerUtxoKeySet::V1(signers_public_key),
                 },
                 fee_rate: FEE_RATE,
-                public_key: signers_public_key,
                 last_fees: None,
                 magic_bytes: *b"T3",
             },
@@ -463,13 +469,13 @@ mod serial {
             deposits: vec![deposit_request],
             withdrawals: withdrawal_requests.clone(),
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(signers_public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::new(signer_utxo.txid, signer_utxo.vout),
                     amount: signer_utxo.amount.to_sat(),
-                    public_key: signers_public_key,
+                    key_set: SignerUtxoKeySet::V1(signers_public_key),
                 },
                 fee_rate: FEE_RATE,
-                public_key: signers_public_key,
                 last_fees: None,
                 magic_bytes: *b"T3",
             },

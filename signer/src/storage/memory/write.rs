@@ -16,6 +16,16 @@ use crate::{
 use super::{SharedStore, store::InMemoryTransaction};
 
 impl DbWrite for SharedStore {
+    async fn write_signer_key_set(&self, key_set: &model::SignerKeySet) -> Result<(), Error> {
+        let mut store = self.lock().await;
+        store.version += 1;
+        store
+            .signer_key_sets
+            .entry(key_set.key_set_id)
+            .or_insert_with(|| (time::OffsetDateTime::now_utc(), key_set.clone()));
+        Ok(())
+    }
+
     async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
         let mut store = self.lock().await;
         store.version += 1;
@@ -196,10 +206,25 @@ impl DbWrite for SharedStore {
         let mut store = self.lock().await;
         store.version += 1;
 
-        store.encrypted_dkg_shares.insert(
-            shares.aggregate_key.into(),
-            (time::OffsetDateTime::now_utc(), shares.clone()),
-        );
+        let created_at = time::OffsetDateTime::now_utc();
+        store
+            .encrypted_dkg_shares
+            .insert(shares.aggregate_key.into(), (created_at, shares.clone()));
+        let key_set = model::SignerKeySet {
+            key_set_id: PublicKeyXOnly::from(shares.aggregate_key).into(),
+            version: model::KeySetVersion::V1,
+            script_pubkey: shares.script_pubkey.clone(),
+            public_keys: shares
+                .signer_set_public_keys
+                .iter()
+                .map(|key| model::KeySetVersion::V1.member_key(key))
+                .collect(),
+            signatures_required: shares.signature_share_threshold,
+        };
+        store
+            .signer_key_sets
+            .entry(key_set.key_set_id)
+            .or_insert((created_at, key_set));
 
         Ok(())
     }
@@ -423,6 +448,10 @@ impl DbWrite for SharedStore {
 }
 
 impl DbWrite for InMemoryTransaction {
+    async fn write_signer_key_set(&self, key_set: &model::SignerKeySet) -> Result<(), Error> {
+        self.store.write_signer_key_set(key_set).await
+    }
+
     async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
         self.store.write_bitcoin_block(block).await
     }

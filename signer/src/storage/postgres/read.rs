@@ -6,10 +6,10 @@ use crate::{
     DEPOSIT_LOCKTIME_BLOCK_BUFFER, MAX_MEMPOOL_PACKAGE_TX_COUNT, MAX_REORG_BLOCK_COUNT,
     WITHDRAWAL_BLOCKS_EXPIRY,
     bitcoin::{
-        utxo::SignerUtxo,
+        utxo::{SignerUtxo, SignerUtxoKeySet},
         validation::{
-            DepositConfirmationStatus, DepositRequestReport, WithdrawalRequestReport,
-            WithdrawalRequestStatus,
+            DepositConfirmationStatus, DepositRequestReport, DepositRequestSigningData,
+            WithdrawalRequestReport, WithdrawalRequestStatus,
         },
     },
     error::Error,
@@ -53,8 +53,10 @@ struct DepositStatusSummary {
     deposit_script: model::ScriptPubKey,
     /// The hash of reclaim script for the deposit.
     reclaim_script_hash: model::TaprootScriptHash,
-    /// The public key used in the deposit script.
-    signers_public_key: PublicKeyXOnly,
+    /// The key set used in the deposit script.
+    key_set_id: model::KeySetId,
+    /// The recipient committed to by this deposit.
+    recipient: model::StacksPrincipal,
 }
 
 /// A convenience struct for retrieving a withdrawal request report
@@ -92,15 +94,31 @@ struct PgSignerUtxo {
     output_index: u32,
     #[sqlx(try_from = "i64")]
     amount: u64,
-    aggregate_key: PublicKey,
+    key_set_id: model::KeySetId,
+    signer_public_keys: Vec<PublicKeyXOnly>,
+    #[sqlx(try_from = "i32")]
+    signatures_required: u16,
 }
 
 impl From<PgSignerUtxo> for SignerUtxo {
     fn from(pg_txo: PgSignerUtxo) -> Self {
+        let key_set = match pg_txo.key_set_id {
+            model::KeySetId::V1(public_key) => SignerUtxoKeySet::V1(public_key.into()),
+            model::KeySetId::V2(_) => {
+                // These public keys were read from the signer_key_sets
+                // table, which stores derived public keys, so we build the
+                // key set from them as they are, whatever our current
+                // rules for new key sets are.
+                let public_keys = pg_txo.signer_public_keys.iter().map(Into::into);
+                let key_set =
+                    sbtc::SignerKeySet::new_unchecked(public_keys, pg_txo.signatures_required);
+                SignerUtxoKeySet::V2(key_set)
+            }
+        };
         SignerUtxo {
             outpoint: OutPoint::new(pg_txo.txid.into(), pg_txo.output_index),
             amount: pg_txo.amount,
-            public_key: pg_txo.aggregate_key.into(),
+            key_set,
         }
     }
 }
@@ -170,11 +188,13 @@ impl PgRead {
                 bo.txid
               , bo.output_index
               , bo.amount
-              , ds.aggregate_key
+              , sks.key_set_id
+              , sks.signer_public_keys
+              , sks.signatures_required
             FROM sbtc_signer.bitcoin_tx_outputs AS bo
             JOIN sbtc_signer.bitcoin_transactions AS bt USING (txid)
             JOIN bitcoin_blockchain AS bb USING (block_hash)
-            JOIN sbtc_signer.dkg_shares AS ds USING (script_pubkey)
+            JOIN sbtc_signer.signer_key_sets AS sks USING (script_pubkey)
             LEFT JOIN confirmed_sweeps AS cs
               ON cs.prevout_txid = bo.txid
               AND cs.prevout_output_index = bo.output_index
@@ -428,7 +448,8 @@ impl PgRead {
               , dr.lock_time
               , dr.spend_script AS deposit_script
               , dr.reclaim_script_hash
-              , dr.signers_public_key
+              , dr.key_set_id
+              , dr.recipient
               , bc.block_height
               , bc.block_hash
             FROM sbtc_signer.deposit_requests AS dr
@@ -875,7 +896,7 @@ impl PgRead {
               , deposit_requests.amount
               , deposit_requests.max_fee
               , deposit_requests.lock_time
-              , deposit_requests.signers_public_key
+              , deposit_requests.key_set_id
               , deposit_requests.sender_script_pub_keys
             FROM transactions_in_window transactions
             JOIN sbtc_signer.deposit_requests AS deposit_requests USING (txid)
@@ -933,7 +954,7 @@ impl PgRead {
                   , deposit_requests.amount
                   , deposit_requests.max_fee
                   , deposit_requests.lock_time
-                  , deposit_requests.signers_public_key
+                  , deposit_requests.key_set_id
                   , deposit_requests.sender_script_pub_keys
                 FROM transactions_in_window transactions
                 JOIN sbtc_signer.deposit_requests deposit_requests USING(txid)
@@ -962,7 +983,7 @@ impl PgRead {
               , accepted_deposits.amount
               , accepted_deposits.max_fee
               , accepted_deposits.lock_time
-              , accepted_deposits.signers_public_key
+              , accepted_deposits.key_set_id
               , accepted_deposits.sender_script_pub_keys
             HAVING
                 COUNT(transactions_in_window.txid) = 0
@@ -981,7 +1002,7 @@ impl PgRead {
         executor: &'e mut E,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -989,9 +1010,7 @@ impl PgRead {
         sqlx::query_as::<_, model::SignerVote>(
             r#"
             WITH signer_set_rows AS (
-                SELECT DISTINCT UNNEST(signer_set_public_keys) AS signer_public_key
-                FROM sbtc_signer.dkg_shares
-                WHERE aggregate_key = $1
+                SELECT DISTINCT UNNEST($1::BYTEA[]) AS signer_public_key
             ),
             deposit_votes AS (
                 SELECT
@@ -1009,7 +1028,7 @@ impl PgRead {
             LEFT JOIN deposit_votes AS ds USING(signer_public_key)
             "#,
         )
-        .bind(aggregate_key)
+        .bind(signer_set.iter().collect::<Vec<_>>())
         .bind(txid)
         .bind(i64::from(output_index))
         .fetch_all(executor)
@@ -1021,7 +1040,7 @@ impl PgRead {
     async fn get_withdrawal_request_signer_votes<'e, E>(
         executor: &'e mut E,
         id: &model::QualifiedRequestId,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -1029,9 +1048,7 @@ impl PgRead {
         sqlx::query_as::<_, model::SignerVote>(
             r#"
             WITH signer_set_rows AS (
-                SELECT DISTINCT UNNEST(signer_set_public_keys) AS signer_public_key
-                FROM sbtc_signer.dkg_shares
-                WHERE aggregate_key = $1
+                SELECT DISTINCT UNNEST($1::BYTEA[]) AS signer_public_key
             ),
             withdrawal_votes AS (
                 SELECT
@@ -1050,7 +1067,7 @@ impl PgRead {
             LEFT JOIN withdrawal_votes AS wv USING(signer_public_key)
             "#,
         )
-        .bind(aggregate_key)
+        .bind(signer_set.iter().collect::<Vec<_>>())
         .bind(id.txid)
         .bind(id.block_hash)
         .bind(i64::try_from(id.request_id).map_err(Error::ConversionDatabaseInt)?)
@@ -1114,8 +1131,27 @@ impl PgRead {
             None => DepositConfirmationStatus::Unconfirmed,
         };
 
-        let dkg_shares =
-            Self::get_encrypted_dkg_shares(executor, summary.signers_public_key).await?;
+        let signing_data = match summary.key_set_id {
+            model::KeySetId::V1(key) => {
+                let dkg_shares = Self::get_encrypted_dkg_shares(executor, key).await?;
+                DepositRequestSigningData::V1 {
+                    signers_public_key: key.into(),
+                    dkg_shares_status: dkg_shares.map(|shares| shares.dkg_shares_status),
+                }
+            }
+            model::KeySetId::V2(_) => {
+                let script: bitcoin::ScriptBuf = summary.deposit_script.clone().into();
+                let inputs = sbtc::deposits::DepositScriptInputs::parse_v2(
+                    &script,
+                    summary.recipient.clone().into(),
+                    u64::from_be_bytes(summary.max_fee),
+                )?;
+                DepositRequestSigningData::V2 {
+                    key_set: inputs.signer_key_set,
+                    recipient: summary.recipient.clone(),
+                }
+            }
+        };
 
         Ok(Some(DepositRequestReport {
             status,
@@ -1128,8 +1164,7 @@ impl PgRead {
             outpoint: bitcoin::OutPoint::new((*txid).into(), output_index),
             deposit_script: summary.deposit_script.into(),
             reclaim_script_hash: summary.reclaim_script_hash,
-            signers_public_key: summary.signers_public_key.into(),
-            dkg_shares_status: dkg_shares.map(|shares| shares.dkg_shares_status),
+            signing_data,
         }))
     }
 
@@ -1167,19 +1202,20 @@ impl PgRead {
     where
         &'e mut E: sqlx::PgExecutor<'e>,
     {
+        // For v1 deposits, the signer_public_keys column contains the
+        // signers' "raw" x-only public keys, while for v2 the
+        // signer_public_keys column contains x-only public keys derived
+        // from the signers' raw public keys. So we bind both, and select
+        // in the query.
         sqlx::query_scalar::<_, bool>(
             r#"
-            WITH x_only_public_keys AS (
-                -- These are the aggregate public keys that this signer is
-                -- a party on. We lop off the first byte because we want
-                -- x-only aggregate keys here.
-                SELECT substring(aggregate_key FROM 2) AS signers_public_key
-                FROM sbtc_signer.dkg_shares AS ds
-                WHERE $3 = ANY(signer_set_public_keys)
-            )
-            SELECT xo.signers_public_key IS NOT NULL
+            SELECT
+                CASE sks.script_version
+                    WHEN 'v1' THEN $3
+                    WHEN 'v2' THEN $4
+                END = ANY(sks.signer_public_keys)
             FROM sbtc_signer.deposit_requests AS dr
-            LEFT JOIN x_only_public_keys AS xo USING (signers_public_key)
+            JOIN sbtc_signer.signer_key_sets AS sks USING (key_set_id)
             WHERE dr.txid = $1
               AND dr.output_index = $2
             LIMIT 1
@@ -1187,7 +1223,8 @@ impl PgRead {
         )
         .bind(txid)
         .bind(i32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?)
-        .bind(signer_public_key)
+        .bind(model::KeySetVersion::V1.member_key(signer_public_key))
+        .bind(model::KeySetVersion::V2.member_key(signer_public_key))
         .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -1899,7 +1936,7 @@ impl PgRead {
         executor: &'e mut E,
         stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
-        aggregate_key: &PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> Result<bool, Error>
     where
@@ -1957,7 +1994,7 @@ impl PgRead {
             r#"
             WITH last_script_pubkey AS (
                 SELECT script_pubkey
-                FROM sbtc_signer.dkg_shares
+                FROM sbtc_signer.signer_key_sets
                 ORDER BY created_at DESC
                 LIMIT 1
             )
@@ -1967,7 +2004,7 @@ impl PgRead {
             UNION
 
             SELECT script_pubkey
-            FROM sbtc_signer.dkg_shares
+            FROM sbtc_signer.signer_key_sets
             WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS'
 
             UNION
@@ -2098,8 +2135,8 @@ impl PgRead {
             SELECT 
                 EXISTS (
                     SELECT TRUE
-                    FROM sbtc_signer.dkg_shares AS ds
-                    WHERE ds.script_pubkey = $1
+                    FROM sbtc_signer.signer_key_sets AS sks
+                    WHERE sks.script_pubkey = $1
                 )
                 
                 OR
@@ -2455,7 +2492,7 @@ impl PgRead {
                  , amount
                  , max_fee
                  , lock_time
-                 , signers_public_key
+                 , key_set_id
                  , sender_script_pub_keys
             FROM sbtc_signer.deposit_requests
             WHERE txid = $1
@@ -2472,15 +2509,15 @@ impl PgRead {
     async fn will_sign_bitcoin_tx_sighash<'e, E>(
         executor: &'e mut E,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error>
+    ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
     {
-        sqlx::query_as::<_, (bool, PublicKeyXOnly, model::TxPrevoutType)>(
+        sqlx::query_as::<_, model::BitcoinTxSigHashSigningInfo>(
             r#"
             SELECT
                 will_sign
-              , x_only_public_key
+              , key_set_id
               , prevout_type
             FROM sbtc_signer.bitcoin_tx_sighashes
             WHERE sighash = $1
@@ -2659,13 +2696,13 @@ impl DbRead for PgStore {
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         PgRead::get_deposit_request_signer_votes(
             self.get_connection().await?.as_mut(),
             txid,
             output_index,
-            aggregate_key,
+            signer_set,
         )
         .await
     }
@@ -2673,12 +2710,12 @@ impl DbRead for PgStore {
     async fn get_withdrawal_request_signer_votes(
         &self,
         id: &model::QualifiedRequestId,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         PgRead::get_withdrawal_request_signer_votes(
             self.get_connection().await?.as_mut(),
             id,
-            aggregate_key,
+            signer_set,
         )
         .await
     }
@@ -2880,7 +2917,7 @@ impl DbRead for PgStore {
         &self,
         stacks_chain_tip: &StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
-        aggregate_key: &PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> Result<bool, Error> {
         PgRead::key_rotation_exists(
@@ -2993,7 +3030,7 @@ impl DbRead for PgStore {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error> {
+    ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
         PgRead::will_sign_bitcoin_tx_sighash(self.get_connection().await?.as_mut(), sighash).await
     }
 
@@ -3326,7 +3363,7 @@ impl DbRead for PgTransaction<'_> {
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &std::collections::BTreeSet<crate::keys::PublicKey>,
-        aggregate_key: &crate::keys::PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> Result<bool, Error> {
         PgRead::key_rotation_exists(
@@ -3355,13 +3392,13 @@ impl DbRead for PgTransaction<'_> {
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &crate::keys::PublicKey,
+        signer_set: &BTreeSet<crate::keys::PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         PgRead::get_deposit_request_signer_votes(
             self.tx.lock().await.as_mut(),
             txid,
             output_index,
-            aggregate_key,
+            signer_set,
         )
         .await
     }
@@ -3369,14 +3406,10 @@ impl DbRead for PgTransaction<'_> {
     async fn get_withdrawal_request_signer_votes(
         &self,
         id: &model::QualifiedRequestId,
-        aggregate_key: &crate::keys::PublicKey,
+        signer_set: &BTreeSet<crate::keys::PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
-        PgRead::get_withdrawal_request_signer_votes(
-            self.tx.lock().await.as_mut(),
-            id,
-            aggregate_key,
-        )
-        .await
+        PgRead::get_withdrawal_request_signer_votes(self.tx.lock().await.as_mut(), id, signer_set)
+            .await
     }
 
     async fn is_known_bitcoin_block_hash(
@@ -3466,7 +3499,7 @@ impl DbRead for PgTransaction<'_> {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, crate::keys::PublicKeyXOnly, model::TxPrevoutType)>, Error> {
+    ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
     }

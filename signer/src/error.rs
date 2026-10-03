@@ -99,10 +99,6 @@ pub enum Error {
         expected: Box<PublicKeyXOnly>,
     },
 
-    /// The aggregate key for the given block hash could not be determined.
-    #[error("the signer set aggregate key could not be determined for bitcoin block {0}")]
-    MissingAggregateKey(bitcoin::BlockHash),
-
     /// Indicates an error when decoding a protobuf
     #[error("could not decode protobuf {0}")]
     DecodeProtobuf(#[source] prost::DecodeError),
@@ -423,6 +419,10 @@ pub enum Error {
     #[error("could not convert the given compact bytes into an ECDSA signature: {0}")]
     InvalidEcdsaSignatureBytes(#[source] secp256k1::Error),
 
+    /// The given BIP340 signature bytes were invalid.
+    #[error("could not convert the given bytes into a Schnorr signature: {0}")]
+    InvalidSchnorrSignatureBytes(#[source] secp256k1::Error),
+
     /// This happens when we attempt to convert a `[u8; 65]` into a
     /// recoverable ECDSA signature.
     #[error("could not recover the public key from the signature: {0}")]
@@ -642,9 +642,18 @@ pub enum Error {
     #[error("invalid signature")]
     InvalidSignature,
 
+    /// A signature was offered for a key outside the key set being signed
+    /// for.
+    #[error("public key {0} is not in the signing key set")]
+    SigningKeyNotInKeySet(secp256k1::XOnlyPublicKey),
+
     /// Invalid ECDSA signature
     #[error("invalid ECDSA signature")]
     InvalidEcdsaSignature(#[source] secp256k1::Error),
+
+    /// A Schnorr signature failed to verify against the expected message.
+    #[error("invalid Schnorr signature failed verification")]
+    SchnorrSignatureFailedVerification(#[source] secp256k1::Error),
 
     /// Codec error
     #[error("codec error: {0}")]
@@ -653,7 +662,6 @@ pub enum Error {
     /// Type conversion error
     #[error("type conversion error")]
     TypeConversion,
-
     /// An error thrown by `wsts::util::encrypt`, which encryptes the WSTS
     /// signer state machine's state before storing it in the database.
     #[error("could not encrypt the signer state for storage {0}; aggregate key {1}")]
@@ -765,7 +773,7 @@ pub enum Error {
     /// current signer is not a member of the signer set indicated by the
     /// aggregate key.
     #[error("current signer not part of signer set indicated by: {0}")]
-    ValidationSignerSet(crate::keys::PublicKey),
+    ValidationSignerSet(crate::storage::model::RegistryKey),
 
     /// Transaction coordinator timed out
     #[error("coordinator timed out after {0} seconds")]

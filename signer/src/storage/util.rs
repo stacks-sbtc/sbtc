@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 
 use crate::bitcoin::utxo::SignerUtxo;
+use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::SignerScriptPubKey as _;
@@ -19,7 +20,7 @@ pub fn get_utxo(
         .flat_map(|tx| tx.input.iter().map(|txin| txin.previous_output))
         .collect();
 
-    let utxos = sbtc_txs
+    let mut utxos = sbtc_txs
         .iter()
         .flat_map(|tx| {
             if let Some(tx_out) = tx.output.first() {
@@ -29,7 +30,7 @@ pub fn get_utxo(
                         outpoint,
                         amount: tx_out.value.to_sat(),
                         // Txs are filtered based on the `aggregate_key` script pubkey
-                        public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+                        key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
                     });
                 }
             }
@@ -38,9 +39,9 @@ pub fn get_utxo(
         })
         .collect::<Vec<_>>();
 
-    match utxos[..] {
-        [] => Ok(None),
-        [utxo] => Ok(Some(utxo)),
+    match utxos.len() {
+        0 => Ok(None),
+        1 => Ok(utxos.pop()),
         _ => Err(Error::TooManySignerUtxos),
     }
 }

@@ -10,6 +10,7 @@ use crate::bitcoin::utxo::BitcoinInputsOutputs;
 use crate::bitcoin::utxo::PrevoutRef;
 use crate::bitcoin::utxo::TxDeconstructor;
 use crate::keys::PublicKey;
+use crate::keys::PublicKeyXOnly;
 use crate::storage::DbWrite;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlock;
@@ -414,7 +415,7 @@ impl DepositData {
             let mut raw_transaction: model::BitcoinTxRef = fake::Faker.fake_with_rng(rng);
             raw_transaction.block_hash = bitcoin_block.block_hash;
             deposit_request.txid = raw_transaction.txid;
-            deposit_request.signers_public_key = aggregate_key.into();
+            deposit_request.key_set_id = PublicKeyXOnly::from(aggregate_key).into();
 
             let deposit_signers: Vec<_> = signer_keys
                 .iter()

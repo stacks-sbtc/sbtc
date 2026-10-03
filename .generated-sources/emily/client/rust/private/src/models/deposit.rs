@@ -60,6 +60,8 @@ pub struct Deposit {
     /// The status message of the deposit.
     #[serde(rename = "statusMessage")]
     pub status_message: String,
+    #[serde(rename = "version", skip_serializing_if = "Option::is_none")]
+    pub version: Option<models::DepositVersion>,
 }
 
 impl Deposit {
@@ -91,6 +93,7 @@ impl Deposit {
             replaced_by_tx: None,
             status,
             status_message,
+            version: None,
         }
     }
 }

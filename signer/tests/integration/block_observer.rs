@@ -33,6 +33,7 @@ use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
+use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::block_observer::get_signer_set_info;
 use signer::context::SbtcLimits;
 use signer::emily_client::EmilyInteract;
@@ -594,9 +595,9 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         deposits: vec![deposit_request.clone()],
         withdrawals: Vec::new(),
         signer_state: SignerBtcState {
+            output_key_set: SignerUtxoKeySet::V1(signers_public_key),
             utxo: db.get_signer_utxo(&chain_tip).await.unwrap().unwrap(),
             fee_rate: 10.0,
-            public_key: signers_public_key,
             last_fees: None,
             magic_bytes: *b"T3",
         },
@@ -625,6 +626,8 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         deposit_script: deposit_request.deposit_script.to_hex_string(),
         reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
     };
     deposit_api::create_deposit(emily_client.config(), body)
         .await
@@ -763,15 +766,15 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
         deposits: vec![deposit_request1, deposit_request2, deposit_request3],
         withdrawals: Vec::new(),
         signer_state: SignerBtcState {
+            output_key_set: SignerUtxoKeySet::V1(signers_public_key2),
             utxo: SignerUtxo {
                 outpoint: signer_outpoint,
                 amount: signers_amount,
-                public_key: signers_public_key1,
+                key_set: SignerUtxoKeySet::V1(signers_public_key1),
             },
             fee_rate: 2.0,
             // This ensures that the new signer UTXO is locked by the new
             // aggregate key.
-            public_key: signers_public_key2,
             last_fees: None,
             magic_bytes: *b"T3",
         },
@@ -1359,7 +1362,10 @@ async fn block_observer_updates_state_after_observing_bitcoin_block() {
     let signer_set = dkg_shares.signer_set_public_keys();
     let signer_set_info = state.registry_signer_set_info().unwrap();
     assert_eq!(state.get_current_limits(), SbtcLimits::unlimited());
-    assert_eq!(signer_set_info.aggregate_key, dkg_shares.aggregate_key);
+    assert_eq!(
+        signer_set_info.aggregate_key,
+        dkg_shares.aggregate_key.into()
+    );
     assert_eq!(
         signer_set_info.signatures_required,
         dkg_shares.signature_share_threshold
@@ -1736,6 +1742,8 @@ async fn block_observer_ignores_coinbase() {
         deposit_script: deposit_request.deposit_script.to_hex_string(),
         reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
     };
     deposit_api::create_deposit(emily_client.config(), body)
         .await
@@ -1774,6 +1782,8 @@ async fn block_observer_ignores_coinbase() {
         outpoint: deposit_request.outpoint,
         reclaim_script: deposit_info.reclaim_script,
         deposit_script: deposit_request.deposit_script.clone(),
+        recipient: None,
+        max_fee: None,
     };
     let bitcoin_client = ctx.get_bitcoin_client();
     let validate_result =
@@ -1828,7 +1838,7 @@ fn make_coinbase_deposit_request(
         amount: deposit_tx.output[0].value.to_sat(),
         deposit_script: deposit_script.clone(),
         reclaim_script_hash,
-        signers_public_key,
+        signers_public_key: signer::bitcoin::utxo::DepositSigningKey::V1(signers_public_key),
     };
     let info = sbtc::deposits::DepositInfo {
         outpoint: req.outpoint,
@@ -1836,7 +1846,7 @@ fn make_coinbase_deposit_request(
         amount: req.amount,
         deposit_script,
         reclaim_script,
-        signers_public_key,
+        signing_info: sbtc::deposits::DepositSigningInfo::V1 { public_key: signers_public_key },
         recipient: deposit_inputs.recipient,
         lock_time: bitcoin::relative::LockTime::Blocks((reclaim_inputs.lock_time() as u16).into()),
     };
@@ -1937,6 +1947,8 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
             outpoint: request.outpoint,
             reclaim_script: info.reclaim_script.clone(),
             deposit_script: info.deposit_script.clone(),
+            recipient: None,
+            max_fee: None,
         })
         .collect::<Vec<_>>();
 
@@ -1998,7 +2010,10 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
     let deposit = &deposits[0];
     assert_eq!(deposit.amount, amount_1);
     assert_eq!(deposit.max_fee, max_fee_1);
-    assert_eq!(deposit.signers_public_key, signers_public_key.into());
+    assert_eq!(
+        deposit.key_set_id,
+        model::KeySetId::V1(signers_public_key.into())
+    );
 
     let deposit = &deposits[1];
     assert_eq!(deposit.amount, amount_2);
@@ -2012,6 +2027,8 @@ async fn block_observer_handles_deposits_with_high_max_fee() {
         outpoint: deposit_request.outpoint,
         reclaim_script: deposit_info.reclaim_script.clone(),
         deposit_script: deposit_info.deposit_script.clone(),
+        recipient: None,
+        max_fee: None,
     };
     let bitcoin_client = ctx.get_bitcoin_client();
     signer::block_observer::DepositRequestValidator::validate(&request, &bitcoin_client, false)

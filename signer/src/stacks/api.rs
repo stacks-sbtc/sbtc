@@ -50,6 +50,7 @@ use crate::storage::TransactionHandle as _;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
+use crate::storage::model::RegistryKey;
 use crate::storage::model::StacksBlock;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksBlockHeight;
@@ -175,9 +176,8 @@ pub enum FeePriority {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct SignerSetInfo {
-    /// The aggregate key of the most recently confirmed key rotation
-    /// contract call on Stacks.
-    pub aggregate_key: PublicKey,
+    /// The v1 aggregate key or v2 key-set ID from the latest key rotation.
+    pub aggregate_key: RegistryKey,
     /// The set of sBTC signers public keys.
     pub signer_set: BTreeSet<PublicKey>,
     /// The number of signatures required to sign a transaction.
@@ -208,7 +208,7 @@ pub trait StacksInteract: Send + Sync {
     fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
-    ) -> impl Future<Output = Result<Option<PublicKey>, Error>> + Send;
+    ) -> impl Future<Output = Result<Option<RegistryKey>, Error>> + Send;
 
     /// Retrieve a boolean value from the stacks node indicating whether
     /// sBTC has been minted for the deposit request.
@@ -1313,14 +1313,16 @@ fn extract_public_key(value: Value) -> Result<PublicKey, Error> {
 /// byte, allowing use to distinguish between the initial value and an
 /// actual public key in that case. Ok(None) is returned if the value is
 /// the initial value.
-fn extract_aggregate_key(value: Value) -> Result<Option<PublicKey>, Error> {
+fn extract_aggregate_key(value: Value) -> Result<Option<RegistryKey>, Error> {
     match value {
         Value::Sequence(SequenceData::Buffer(BuffData { data })) => {
             // The initial value of the data var is all zeros
             if data.as_slice() == [0u8] {
                 Ok(None)
             } else {
-                PublicKey::from_slice(&data).map(Some)
+                RegistryKey::from_slice(&data)
+                    .map(Some)
+                    .map_err(Error::InvalidPublicKey)
             }
         }
         _ => Err(Error::InvalidStacksResponse(
@@ -1400,7 +1402,7 @@ impl StacksInteract for StacksClient {
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
-    ) -> Result<Option<PublicKey>, Error> {
+    ) -> Result<Option<RegistryKey>, Error> {
         let value = self
             .get_data_var(
                 contract_principal,
@@ -1657,7 +1659,7 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
-    ) -> Result<Option<PublicKey>, Error> {
+    ) -> Result<Option<RegistryKey>, Error> {
         self.exec(|client, retry| async move {
             let result = client
                 .get_current_signers_aggregate_key(contract_principal)
@@ -2149,7 +2151,7 @@ mod tests {
             .unwrap();
 
         let expected = aggregate_key.map(|aggregate_key| SignerSetInfo {
-            aggregate_key,
+            aggregate_key: aggregate_key.into(),
             signer_set: public_keys.into_iter().collect(),
             signatures_required: list_size,
         });
@@ -2211,7 +2213,7 @@ mod tests {
             .unwrap();
 
         // Assert that the response is what we expect
-        assert_eq!(resp, expected);
+        assert_eq!(resp, expected.map(Into::into));
         mock.assert();
     }
 
