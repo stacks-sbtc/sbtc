@@ -276,10 +276,7 @@ async fn dkg_runs_after_v2_signing_activation() {
 
     // Check that no shares have been written yet.
     for (_, db, _, _) in &signers {
-        let shares = db
-            .get_latest_encrypted_dkg_shares()
-            .await
-            .unwrap();
+        let shares = db.get_latest_encrypted_dkg_shares().await.unwrap();
 
         assert!(shares.is_none());
     }
