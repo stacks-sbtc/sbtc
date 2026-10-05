@@ -410,6 +410,7 @@ impl TestSweepSetup {
             &signer_set,
             self.signatures_required,
             NetworkKind::Regtest,
+            NetworkKind::Regtest.chain_id(),
             0,
         )
         .unwrap();
@@ -583,8 +584,14 @@ impl TestSignerSet {
     }
 
     pub fn address(&self, signatures_required: u16) -> StacksAddress {
-        let wallet =
-            SignerWallet::new(&self.keys, signatures_required, NetworkKind::Regtest, 0).unwrap();
+        let wallet = SignerWallet::new(
+            &self.keys,
+            signatures_required,
+            NetworkKind::Regtest,
+            NetworkKind::Regtest.chain_id(),
+            0,
+        )
+        .unwrap();
         wallet.address().clone()
     }
 }

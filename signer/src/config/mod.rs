@@ -1,4 +1,6 @@
 //! Configuration management for the signer
+use blockstack_lib::core::CHAIN_ID_MAINNET;
+use blockstack_lib::core::CHAIN_ID_TESTNET;
 use config::Config;
 use config::ConfigError;
 use config::Environment;
@@ -110,6 +112,13 @@ impl NetworkKind {
     /// Returns whether the network variant is Mainnet.
     pub fn is_mainnet(&self) -> bool {
         self == &NetworkKind::Mainnet
+    }
+    /// Return the default Stacks network chain id
+    pub fn chain_id(&self) -> u32 {
+        match self {
+            NetworkKind::Mainnet => CHAIN_ID_MAINNET,
+            _ => CHAIN_ID_TESTNET,
+        }
     }
 }
 
@@ -377,8 +386,10 @@ pub struct SignerConfig {
     pub private_key: PrivateKey,
     /// P2P network configuration
     pub p2p: P2PNetworkConfig,
-    /// P2P network configuration
+    /// Bitcoin and Stacks network type
     pub network: NetworkKind,
+    /// Custom chain ID for the Stacks network. If unset defaults to the `network` default one
+    pub network_chain_id: Option<u32>,
     /// Event observer server configuration
     pub event_observer: EventObserverConfig,
     /// The address of the deployer of the sBTC smart contracts.
@@ -540,6 +551,11 @@ impl SignerConfig {
     /// Return the public key of the signer.
     pub fn public_key(&self) -> PublicKey {
         PublicKey::from_private_key(&self.private_key)
+    }
+    /// Return the Stacks network chain id
+    pub fn network_chain_id(&self) -> u32 {
+        self.network_chain_id
+            .unwrap_or_else(|| self.network.chain_id())
     }
 }
 
@@ -1676,7 +1692,7 @@ mod tests {
         clear_env();
 
         let is_mainnet = network == NetworkKind::Mainnet;
-        // The deployer address always has the opposite network kind.
+        // The deployer address matches the network kind.
         let address = StacksAddress::burn_address(is_mainnet);
         set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
         // Let's set the network. maybe use strum for this in the future
@@ -1765,5 +1781,31 @@ mod tests {
             settings.unwrap_err(),
             ConfigError::Message(msg) if msg == SignerConfigError::UnsupportedDatabaseDriver(driver.to_string()).to_string()
         ));
+    }
+
+    #[test_case::test_case(NetworkKind::Mainnet, "", CHAIN_ID_MAINNET; "mainnet network, no override")]
+    #[test_case::test_case(NetworkKind::Testnet, "", CHAIN_ID_TESTNET; "testnet network, no override")]
+    #[test_case::test_case(NetworkKind::Regtest, "", CHAIN_ID_TESTNET; "regtest network, no override")]
+    #[test_case::test_case(NetworkKind::Mainnet, "42", 42; "mainnet network, with override")]
+    #[test_case::test_case(NetworkKind::Testnet, "42", 42; "testnet network, with override")]
+    #[test_case::test_case(NetworkKind::Regtest, "42", 42; "regtest network, with override")]
+    fn network_chain_id(network: NetworkKind, network_chain_id: &str, expected_chain_id: u32) {
+        clear_env();
+
+        // We need these to pass the validation
+        let is_mainnet = network == NetworkKind::Mainnet;
+        // The deployer address matches the network kind.
+        let address = StacksAddress::burn_address(is_mainnet);
+        set_var("SIGNER_SIGNER__DEPLOYER", address.to_string());
+        // We need to set at least one seed when deploying to mainnet.
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
+
+        set_var("SIGNER_SIGNER__NETWORK", network.to_string());
+        if !network_chain_id.is_empty() {
+            set_var("SIGNER_SIGNER__NETWORK_CHAIN_ID", network_chain_id);
+        }
+
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(settings.signer.network_chain_id(), expected_chain_id);
     }
 }
