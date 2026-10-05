@@ -1,0 +1,28 @@
+services:
+  spox:
+    image: ghcr.io/stx-labs/spox:v1.0.0@sha256:5759f86020461d1d11a244440ad3badc8c4fceee7743a0aa25d8c2b5025215d5
+    environment:
+      SPOX_EMILY_ENDPOINT: "http://emily-server:3031"
+      SPOX_BITCOIN_RPC_ENDPOINT: "http://devnet:devnet@bitcoin:18443"
+      SPOX_NODE_WALLET__NAME: "spox-watch"
+      SPOX_NODE_WALLET__RESCAN_TIMESTAMP: "-604800" # last week
+      SPOX_DEPOSIT__POX__SIGNERS_XONLY: "48157362b0654badffbb627ce91c7eb352181069db33832e18f035fb58764ecf" # assuming seeded DKG
+      # demo-cli default values
+      SPOX_DEPOSIT__POX__RECIPIENT: "ST3497E9JFQ7KB9VEHAZRWYKF3296WQZEXBPXG193"
+      SPOX_DEPOSIT__POX__MAX_FEE: "20000"
+      SPOX_DEPOSIT__POX__LOCK_TIME: "10"
+      SPOX_DEPOSIT__POX__RECLAIM_SCRIPT: "75206c44dfe47941b0271c642c549d9a763afce7c6b0495c72f1a32c2f09898ea3dfac" # OP_DROP OP_PUSHBYTES_32 <key> OP_CHECKSIG
+    restart: on-failure
+    depends_on:
+      - emily-server
+      - bitcoin
+
+# You can get the deposit address via (devenv-up-no-dkg-spox prefix + exec):
+# docker compose -f docker/docker-compose.yml -f devenv/deterministic-dkg/docker-compose.yml -f devenv/spox/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer exec spox spox get-deposit-address -n regtest
+# 
+# For the above values:
+# pox: bcrt1p9nvmwz749tn8v5w7af3ghnqv9dxq65snykemjk39fd24kfply25qyl8sgx
+#
+# Then you can send a payment there via:
+# cargo run -p signer --bin demo-cli donation # if not donated already
+# cargo run -p signer --bin demo-cli fund-btc --recipient bcrt1p9nvmwz749tn8v5w7af3ghnqv9dxq65snykemjk39fd24kfply25qyl8sgx
