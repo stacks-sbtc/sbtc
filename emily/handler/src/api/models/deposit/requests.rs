@@ -76,6 +76,9 @@ where
 }
 
 /// Parse a hex-encoded, consensus-serialized Stacks principal.
+///
+/// The error variant here is unimportant, since it is only used with
+/// parse_with_custom_error, where the error is ignored.
 fn parse_recipient(input: &str) -> Result<PrincipalData, ()> {
     let bytes = hex::decode(input).map_err(|_| ())?;
     PrincipalData::consensus_deserialize(&mut bytes.as_slice()).map_err(|_| ())

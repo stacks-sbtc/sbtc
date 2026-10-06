@@ -176,7 +176,8 @@ pub enum FeePriority {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub struct SignerSetInfo {
-    /// The v1 aggregate key or v2 key-set ID from the latest key rotation.
+    /// The v1 aggregate key or v2 the Bitcoin block hash ID from the
+    /// latest key rotation.
     pub aggregate_key: RegistryKey,
     /// The set of sBTC signers public keys.
     pub signer_set: BTreeSet<PublicKey>,

@@ -114,8 +114,7 @@ network = "regtest"
 v2_signing_block_height = 245
 
 # Bitcoin height at which DKG is disabled and rotate-keys calls switch to the
-# v2 registry-key encoding. This is configurable on all networks, must not be
-# lower than the effective v2 signing height, and defaults to u64::MAX.
+# v2 registry-key encoding.
 #
 # Required: false
 # Environment: SIGNER_SIGNER__DKG_DISABLE_BLOCK_HEIGHT
