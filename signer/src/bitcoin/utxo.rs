@@ -99,8 +99,8 @@ pub const BASE_WITHDRAWAL_TX_VSIZE: f64 = 137.0;
 /// transaction excluding withdrawals outputs and deposit inputs.
 ///
 /// The largest signers' input is a v2 script-path input for a 16-of-16
-/// key set, which has a weight of 1804 weight units, or 451 vBytes.
-pub const MAX_BASE_TX_VSIZE: f64 = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + 451.0;
+/// key set, which has a weight of 1788 weight units, or 447 vBytes.
+pub const MAX_BASE_TX_VSIZE: f64 = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + 447.0;
 
 /// The virtual size (in vBytes) of the parts of a sweep transaction that
 /// don't depend on its requests or its signers' input: the transaction
@@ -140,6 +140,12 @@ pub(super) const OP_RETURN_AVAILABLE_SIZE: usize = OP_RETURN_MAX_SIZE - OP_RETUR
 static DUMMY_SIGNATURE: LazyLock<Signature> = LazyLock::new(|| Signature {
     signature: secp256k1::schnorr::Signature::from_slice(&[0; 64]).unwrap(),
     sighash_type: TapSighashType::All,
+});
+
+/// A dummy Schnorr signature for v2 signing.
+static V2_DUMMY_SIGNATURE: LazyLock<Signature> = LazyLock::new(|| Signature {
+    signature: secp256k1::schnorr::Signature::from_slice(&[0; 64]).unwrap(),
+    sighash_type: TapSighashType::Default,
 });
 
 /// Describes the fees for a transaction package.
@@ -523,15 +529,15 @@ pub enum DepositSigningKey {
 impl DepositRequest {
     /// Create a transaction input with a correctly-sized witness for fee
     /// estimation. The v2 witness is intentionally not valid for broadcast.
-    fn as_tx_input(&self, signature: Signature) -> TxIn {
+    fn as_tx_input(&self) -> TxIn {
         TxIn {
             previous_output: self.outpoint,
             script_sig: ScriptBuf::new(),
             sequence: Sequence(0),
             witness: match &self.signers_public_key {
-                DepositSigningKey::V1(_) => self.construct_v1_witness_data(signature),
+                DepositSigningKey::V1(_) => self.construct_v1_witness_data(*DUMMY_SIGNATURE),
                 DepositSigningKey::V2 { key_set, recipient } => {
-                    let signatures = dummy_threshold_signatures(key_set, signature);
+                    let signatures = dummy_threshold_signatures(key_set, *V2_DUMMY_SIGNATURE);
                     self.construct_v2_witness_data(key_set, recipient, &signatures)
                 }
             },
@@ -679,9 +685,7 @@ impl Weighted for DepositRequest {
         self.signer_bitmap.load_le()
     }
     fn vsize(&self) -> u64 {
-        self.as_tx_input(*DUMMY_SIGNATURE)
-            .segwit_weight()
-            .to_vbytes_ceil()
+        self.as_tx_input().segwit_weight().to_vbytes_ceil()
     }
     fn presign_weight(&self) -> usize {
         proto::OutPoint::from(self.outpoint)
@@ -862,7 +866,7 @@ impl<'a> Requests<'a> {
     pub fn tx_ins(&'a self) -> impl Iterator<Item = TxIn> + 'a {
         self.request_refs
             .iter()
-            .filter_map(|req| Some(req.as_deposit()?.as_tx_input(*DUMMY_SIGNATURE)))
+            .filter_map(|req| Some(req.as_deposit()?.as_tx_input()))
     }
 
     /// Return an iterator for the transaction outputs for the withdrawal
@@ -1036,11 +1040,11 @@ impl SignerUtxo {
     ///
     /// The key-set variant determines whether the witness uses the v1 key
     /// path or the v2 script path.
-    fn as_tx_input(&self, signature: &Signature) -> TxIn {
+    fn as_tx_input(&self) -> TxIn {
         let witness = match &self.key_set {
-            SignerUtxoKeySet::V1(_) => Witness::p2tr_key_spend(signature),
+            SignerUtxoKeySet::V1(_) => Witness::p2tr_key_spend(&DUMMY_SIGNATURE),
             SignerUtxoKeySet::V2(key_set) => {
-                let signatures = dummy_threshold_signatures(key_set, *signature);
+                let signatures = dummy_threshold_signatures(key_set, *V2_DUMMY_SIGNATURE);
                 Self::construct_v2_witness(key_set, &signatures)
             }
         };
@@ -1055,9 +1059,7 @@ impl SignerUtxo {
     /// Return the virtual size of this UTXO's input in a sweep
     /// transaction.
     fn input_vsize(&self) -> u64 {
-        self.as_tx_input(&DUMMY_SIGNATURE)
-            .segwit_weight()
-            .to_vbytes_ceil()
+        self.as_tx_input().segwit_weight().to_vbytes_ceil()
     }
 
     /// Construct the UTXO associated with this outpoint.
@@ -1231,7 +1233,7 @@ impl<'a> SignatureCollector<'a> {
 
         let signature = Signature {
             signature,
-            sighash_type: TapSighashType::All,
+            sighash_type: TapSighashType::Default,
         };
 
         self.signatures.insert(public_key, signature);
@@ -1369,7 +1371,7 @@ impl UnsignedMockTransaction {
         let tx = Transaction {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
-            input: vec![utxo.as_tx_input(&DUMMY_SIGNATURE)],
+            input: vec![utxo.as_tx_input()],
             output: vec![TxOut {
                 value: Amount::from_sat(Self::AMOUNT),
                 script_pubkey: ScriptBuf::new_op_return([]),
@@ -1527,7 +1529,6 @@ impl<'a> UnsignedTransaction<'a> {
             .collect();
 
         let prevouts = Prevouts::All(input_utxos.as_slice());
-        let sighash_type = TapSighashType::All;
         let mut sighasher = SighashCache::new(&self.tx);
         // The signers' UTXO is always the first input in the transaction.
         // Its persisted key set selects the legacy key-spend sighash or the
@@ -1540,11 +1541,11 @@ impl<'a> UnsignedTransaction<'a> {
                     0,
                     &prevouts,
                     leaf_hash,
-                    sighash_type,
+                    TapSighashType::Default,
                 )?
             }
             SignerUtxoKeySet::V1(_) => {
-                sighasher.taproot_key_spend_signature_hash(0, &prevouts, sighash_type)?
+                sighasher.taproot_key_spend_signature_hash(0, &prevouts, TapSighashType::All)?
             }
         };
         // Each deposit UTXO is spendable by using the script path spend
@@ -1556,6 +1557,11 @@ impl<'a> UnsignedTransaction<'a> {
                 let index = input_index + 1;
                 let script = deposit.deposit_script.as_script();
                 let leaf_hash = TapLeafHash::from_script(script, LeafVersion::TapScript);
+
+                let sighash_type = match deposit.signers_public_key {
+                    DepositSigningKey::V1(_) => TapSighashType::All,
+                    DepositSigningKey::V2 { .. } => TapSighashType::Default,
+                };
 
                 sighasher
                     .taproot_script_spend_signature_hash(index, &prevouts, leaf_hash, sighash_type)
@@ -1599,9 +1605,7 @@ impl<'a> UnsignedTransaction<'a> {
     /// An Err is returned if the amounts withdrawn is greater than the sum
     /// of all the input amounts.
     fn new_transaction(reqs: &Requests, state: &SignerBtcState) -> Result<Transaction, Error> {
-        let signature = *DUMMY_SIGNATURE;
-
-        let signer_input = state.utxo.as_tx_input(&signature);
+        let signer_input = state.utxo.as_tx_input();
         let signer_output_sats = Self::compute_signer_amount(reqs, state)?;
         // Select the output independently of the input key set so that the
         // first sweep at the activation height spends v1 and creates v2.
@@ -2403,7 +2407,7 @@ mod tests {
                 0,
                 &Prevouts::All(std::slice::from_ref(prevout)),
                 leaf_hash,
-                TapSighashType::All,
+                TapSighashType::Default,
             )
             .unwrap()
     }
@@ -2762,7 +2766,7 @@ mod tests {
             key_set: SignerUtxoKeySet::V2(key_set),
         };
 
-        let input_weight = utxo.as_tx_input(&DUMMY_SIGNATURE).segwit_weight();
+        let input_weight = utxo.as_tx_input().segwit_weight();
         let base_tx_vsize = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + input_weight.to_wu() as f64 / 4.0;
         assert_eq!(base_tx_vsize, MAX_BASE_TX_VSIZE);
     }
@@ -2870,8 +2874,7 @@ mod tests {
         let witness = deposit.construct_v1_witness_data(sig);
         assert!(witness.tapscript().is_some());
 
-        let sig = *DUMMY_SIGNATURE;
-        let tx_in = deposit.as_tx_input(sig);
+        let tx_in = deposit.as_tx_input();
 
         // The deposits are taproot spend and do not have a script. The
         // actual spend script and input data gets put in the witness data
@@ -2891,14 +2894,8 @@ mod tests {
         let sighash = TapSighash::from_byte_array([1; 32]);
 
         let cases = [
-            (
-                deposit.as_tx_input(*DUMMY_SIGNATURE),
-                deposit_input(&deposit),
-            ),
-            (
-                utxo.as_tx_input(&DUMMY_SIGNATURE),
-                V2Input::SignerUtxo(&key_set),
-            ),
+            (deposit.as_tx_input(), deposit_input(&deposit)),
+            (utxo.as_tx_input(), V2Input::SignerUtxo(&key_set)),
         ];
         for (dummy_input, input) in cases {
             let mut collector = SignatureCollector::new(input, sighash);
