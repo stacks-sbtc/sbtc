@@ -1812,6 +1812,7 @@ async fn block_in_canonical_bitcoin_blockchain_in_other_block_chain() {
 #[tokio::test]
 async fn is_signer_script_pub_key_checks_signer_key_sets() {
     let db = testing::storage::new_test_database().await;
+    let mem = storage::memory::Store::new_shared();
     let mut rng = get_rng();
 
     let signer_set_public_keys = std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
@@ -1827,11 +1828,18 @@ async fn is_signer_script_pub_key_checks_signer_key_sets() {
     .unwrap();
     let script_pubkey: ScriptPubKey = key_set.script_pubkey().into();
     assert!(!db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+    assert!(!mem.is_signer_script_pub_key(&script_pubkey).await.unwrap());
 
-    db.write_signer_key_set(&model::SignerKeySet::from(key_set))
-        .await
-        .unwrap();
+    let stored_key_set = model::SignerKeySet::from(key_set);
+    db.write_signer_key_set(&stored_key_set).await.unwrap();
+    mem.write_signer_key_set(&stored_key_set).await.unwrap();
     assert!(db.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+    assert!(mem.is_signer_script_pub_key(&script_pubkey).await.unwrap());
+
+    let postgres_scripts = db.get_signers_script_pubkeys().await.unwrap();
+    let memory_scripts = mem.get_signers_script_pubkeys().await.unwrap();
+    assert!(postgres_scripts.contains(&script_pubkey.to_bytes()));
+    assert!(memory_scripts.contains(&script_pubkey.to_bytes()));
 
     signer::testing::storage::drop_db(db).await;
 }
@@ -3612,6 +3620,7 @@ async fn should_get_signer_utxo_unspent() {
 #[tokio::test]
 async fn should_get_signer_utxo_locked_by_a_v2_key_set() {
     let db = testing::storage::new_test_database().await;
+    let mem = storage::memory::Store::new_shared();
     let mut rng = get_rng();
 
     let signer_set_public_keys = std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
@@ -3625,14 +3634,15 @@ async fn should_get_signer_utxo_locked_by_a_v2_key_set() {
         2,
     )
     .unwrap();
-    db.write_signer_key_set(&model::SignerKeySet::from(key_set.clone()))
-        .await
-        .unwrap();
+    let stored_key_set = model::SignerKeySet::from(key_set.clone());
+    db.write_signer_key_set(&stored_key_set).await.unwrap();
+    mem.write_signer_key_set(&stored_key_set).await.unwrap();
 
     // A sweep transaction, confirmed in the chain tip, whose signer output
     // is locked by the v2 key set.
     let chain_tip: model::BitcoinBlock = fake::Faker.fake_with_rng(&mut rng);
     db.write_bitcoin_block(&chain_tip).await.unwrap();
+    mem.write_bitcoin_block(&chain_tip).await.unwrap();
 
     let mut prevout: model::TxPrevout = fake::Faker.fake_with_rng(&mut rng);
     prevout.prevout_type = model::TxPrevoutType::SignersInput;
@@ -3648,19 +3658,22 @@ async fn should_get_signer_utxo_locked_by_a_v2_key_set() {
         block_hash: chain_tip.block_hash,
     };
     db.write_bitcoin_transaction(&tx_ref).await.unwrap();
+    mem.write_bitcoin_transaction(&tx_ref).await.unwrap();
     db.write_tx_prevout(&prevout).await.unwrap();
+    mem.write_tx_prevout(&prevout).await.unwrap();
     db.write_tx_output(&output).await.unwrap();
+    mem.write_tx_output(&output).await.unwrap();
 
-    let utxo = db
-        .get_signer_utxo(&chain_tip.block_hash)
-        .await
-        .unwrap()
-        .expect("the v2 signer UTXO should be found");
+    let postgres_utxo = db.get_signer_utxo(&chain_tip.block_hash).await.unwrap();
+    let memory_utxo = mem.get_signer_utxo(&chain_tip.block_hash).await.unwrap();
 
-    assert_eq!(utxo.outpoint.txid, output.txid.into());
-    assert_eq!(utxo.outpoint.vout, 0);
-    assert_eq!(utxo.amount, output.amount);
-    assert_eq!(utxo.key_set, SignerUtxoKeySet::V2(key_set));
+    for utxo in [postgres_utxo, memory_utxo] {
+        let utxo = utxo.expect("the v2 signer UTXO should be found");
+        assert_eq!(utxo.outpoint.txid, output.txid.into());
+        assert_eq!(utxo.outpoint.vout, 0);
+        assert_eq!(utxo.amount, output.amount);
+        assert_eq!(utxo.key_set, SignerUtxoKeySet::V2(key_set.clone()));
+    }
 
     signer::testing::storage::drop_db(db).await;
 }

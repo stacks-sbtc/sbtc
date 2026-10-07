@@ -1,20 +1,18 @@
 //! General utilities for the storage.
 
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use crate::bitcoin::utxo::SignerUtxo;
 use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::error::Error;
-use crate::keys::PublicKey;
-use crate::keys::SignerScriptPubKey as _;
 
-/// Given the sbtc txs in a block, returns the `aggregate_key` utxo (if there's exactly one)
+/// Given the sBTC transactions in a block, return the signer UTXO locked by
+/// one of the known signer key sets, if there is exactly one.
 pub fn get_utxo(
-    aggregate_key: &PublicKey,
+    key_sets: &BTreeMap<bitcoin::ScriptBuf, SignerUtxoKeySet>,
     sbtc_txs: Vec<bitcoin::Transaction>,
 ) -> Result<Option<SignerUtxo>, Error> {
-    let script_pubkey = aggregate_key.signers_script_pubkey();
-
     let spent: HashSet<bitcoin::OutPoint> = sbtc_txs
         .iter()
         .flat_map(|tx| tx.input.iter().map(|txin| txin.previous_output))
@@ -25,12 +23,13 @@ pub fn get_utxo(
         .flat_map(|tx| {
             if let Some(tx_out) = tx.output.first() {
                 let outpoint = bitcoin::OutPoint::new(tx.compute_txid(), 0);
-                if tx_out.script_pubkey == *script_pubkey && !spent.contains(&outpoint) {
+                if let Some(key_set) = key_sets.get(&tx_out.script_pubkey)
+                    && !spent.contains(&outpoint)
+                {
                     return Some(SignerUtxo {
                         outpoint,
                         amount: tx_out.value.to_sat(),
-                        // Txs are filtered based on the `aggregate_key` script pubkey
-                        key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
+                        key_set: key_set.clone(),
                     });
                 }
             }
