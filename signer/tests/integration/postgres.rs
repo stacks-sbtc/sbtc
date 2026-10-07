@@ -3646,11 +3646,29 @@ async fn should_get_signer_utxo_locked_by_a_v2_key_set() {
 
     let mut prevout: model::TxPrevout = fake::Faker.fake_with_rng(&mut rng);
     prevout.prevout_type = model::TxPrevoutType::SignersInput;
+    let bitcoin_tx = bitcoin::Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: vec![bitcoin::TxIn {
+            previous_output: bitcoin::OutPoint {
+                txid: prevout.prevout_txid.into(),
+                vout: prevout.prevout_output_index,
+            },
+            script_sig: bitcoin::ScriptBuf::new(),
+            sequence: bitcoin::Sequence::ZERO,
+            witness: bitcoin::Witness::new(),
+        }],
+        output: vec![bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(100_000),
+            script_pubkey: key_set.script_pubkey(),
+        }],
+    };
+    prevout.txid = bitcoin_tx.compute_txid().into();
     let output = model::TxOutput {
         txid: prevout.txid,
         output_index: 0,
-        script_pubkey: key_set.script_pubkey().into(),
-        amount: 100_000,
+        script_pubkey: bitcoin_tx.output[0].script_pubkey.clone().into(),
+        amount: bitcoin_tx.output[0].value.to_sat(),
         output_type: model::TxOutputType::SignersOutput,
     };
     let tx_ref = model::BitcoinTxRef {
