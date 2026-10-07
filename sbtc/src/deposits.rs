@@ -540,7 +540,7 @@ impl DepositScriptInputsV2 {
 
     /// Return the hash embedded in the v2 deposit script.
     pub fn commitment(&self) -> [u8; 32] {
-        sha256::Hash::hash(&self.preimage()).to_byte_array()
+        deposit_data_commitment(self.max_fee, &self.recipient)
     }
 
     /// Return the stable identifier for this signing key set.
@@ -554,7 +554,7 @@ impl DepositScriptInputsV2 {
     /// signers' `multi_a` script, which is exactly
     /// [`SignerKeySet::signing_script`].
     pub fn deposit_script(&self) -> ScriptBuf {
-        let mut bytes = v2_deposit_prefix(self.commitment()).to_vec();
+        let mut bytes = v2_deposit_prefix(self.commitment()).into_bytes();
         bytes.extend_from_slice(self.signer_key_set.signing_script().as_bytes());
         ScriptBuf::from_bytes(bytes)
     }
@@ -571,18 +571,18 @@ impl DepositScriptInputsV2 {
         recipient: PrincipalData,
         max_fee: u64,
     ) -> Result<Self, Error> {
-        // The hash-lock prefix has exactly one minimal encoding, so an exact
-        // byte comparison also rejects non-minimal pushes.
-        let (prefix, signing_script) = deposit_script
+        let expected_prefix = v2_deposit_prefix(deposit_data_commitment(max_fee, &recipient));
+        let (actual_prefix, signing_script) = deposit_script
             .as_bytes()
-            .split_at_checked(V2_DEPOSIT_PREFIX_LENGTH)
-            .ok_or(Error::InvalidDepositScript)?;
-        let head = &prefix[..V2_DEPOSIT_PREFIX_HEAD.len()];
-        let commitment = &prefix[V2_DEPOSIT_PREFIX_HEAD.len()..V2_DEPOSIT_PREFIX_LENGTH - 1];
-        if head != V2_DEPOSIT_PREFIX_HEAD.as_slice()
-            || prefix[V2_DEPOSIT_PREFIX_LENGTH - 1] != opcodes::OP_EQUALVERIFY.to_u8()
-        {
-            return Err(Error::InvalidDepositScript);
+            .split_at_checked(expected_prefix.len())
+            .ok_or(Error::InvalidDepositScriptLength)?;
+
+        let actual_prefix = ScriptBuf::from_bytes(actual_prefix.to_vec());
+        if actual_prefix != expected_prefix {
+            return Err(Error::InvalidDepositPrefix {
+                actual: actual_prefix,
+                expected: expected_prefix,
+            });
         }
 
         let signing_script = Script::from_bytes(signing_script);
@@ -595,28 +595,9 @@ impl DepositScriptInputsV2 {
             recipient,
             max_fee,
         };
-
-        if commitment != parsed.commitment().as_slice() {
-            return Err(Error::InvalidDepositCommitment);
-        }
         Ok(parsed)
     }
 }
-
-/// The bytes before the commitment in a v2 deposit leaf:
-/// `OP_SIZE <32> OP_EQUALVERIFY OP_SHA256 OP_PUSHBYTES_32`.
-const V2_DEPOSIT_PREFIX_HEAD: [u8; 6] = [
-    opcodes::OP_SIZE.to_u8(),
-    opcodes::OP_PUSHBYTES_1.to_u8(),
-    32,
-    opcodes::OP_EQUALVERIFY.to_u8(),
-    opcodes::OP_SHA256.to_u8(),
-    opcodes::OP_PUSHBYTES_32.to_u8(),
-];
-
-/// The length of the hash-lock prefix of a v2 deposit leaf: the head, the
-/// 32-byte commitment, and a trailing `OP_EQUALVERIFY`.
-const V2_DEPOSIT_PREFIX_LENGTH: usize = V2_DEPOSIT_PREFIX_HEAD.len() + 32 + 1;
 
 /// Return the 32-byte preimage that a v2 deposit script commits to, and that
 /// the signers reveal when spending the deposit.
@@ -626,15 +607,24 @@ pub fn deposit_data_preimage(max_fee: u64, recipient: &PrincipalData) -> [u8; 32
     sha256::Hash::hash(&data).to_byte_array()
 }
 
+/// Return the hash committed to by a v2 deposit script.
+fn deposit_data_commitment(max_fee: u64, recipient: &PrincipalData) -> [u8; 32] {
+    sha256::Hash::hash(&deposit_data_preimage(max_fee, recipient)).to_byte_array()
+}
+
 /// Return the hash-lock prefix of a v2 deposit leaf, which is
 /// `OP_SIZE <32> OP_EQUALVERIFY OP_SHA256 <commitment> OP_EQUALVERIFY`.
-fn v2_deposit_prefix(commitment: [u8; 32]) -> [u8; V2_DEPOSIT_PREFIX_LENGTH] {
-    let mut prefix = [0; V2_DEPOSIT_PREFIX_LENGTH];
-    prefix[..V2_DEPOSIT_PREFIX_HEAD.len()].copy_from_slice(&V2_DEPOSIT_PREFIX_HEAD);
-    prefix[V2_DEPOSIT_PREFIX_HEAD.len()..V2_DEPOSIT_PREFIX_LENGTH - 1].copy_from_slice(&commitment);
-    prefix[V2_DEPOSIT_PREFIX_LENGTH - 1] = opcodes::OP_EQUALVERIFY.to_u8();
-    prefix
+fn v2_deposit_prefix(commitment: [u8; 32]) -> ScriptBuf {
+    ScriptBuf::builder()
+        .push_opcode(opcodes::OP_SIZE)
+        .push_int(32)
+        .push_opcode(opcodes::OP_EQUALVERIFY)
+        .push_opcode(opcodes::OP_SHA256)
+        .push_slice(commitment)
+        .push_opcode(opcodes::OP_EQUALVERIFY)
+        .into_script()
 }
+
 /// This struct contains the key variable inputs when constructing a
 /// deposit script address.
 ///
@@ -932,6 +922,15 @@ mod tests {
             .into_script()
     }
 
+    /// Construct representative v2 deposit inputs for parser tests.
+    fn v2_deposit_inputs() -> DepositScriptInputsV2 {
+        let recipient = PrincipalData::from(StacksAddress::burn_address(false));
+        let public_keys = (0..3)
+            .map(|_| SecretKey::new(&mut OsRng).x_only_public_key(SECP256K1).0)
+            .collect();
+        DepositScriptInputsV2::new(public_keys, 2, recipient, 25_000).unwrap()
+    }
+
     /// Check that manually creating the expected script can correctly be
     /// parsed.
     #[test_case(PrincipalData::from(StacksAddress::burn_address(false)) ; "standard address")]
@@ -985,9 +984,6 @@ mod tests {
             max_fee: Some(25_000),
         };
         assert_eq!(request.parse_v2_deposit_script().unwrap(), inputs);
-
-        let err = DepositScriptInputs::parse_v2(&script, recipient, 25_001).unwrap_err();
-        assert!(matches!(err, Error::InvalidDepositCommitment));
     }
 
     #[test]
@@ -1054,23 +1050,99 @@ mod tests {
     }
 
     #[test]
-    fn v2_parser_rejects_non_minimal_pushes() {
-        let recipient = PrincipalData::from(StacksAddress::burn_address(false));
-        let public_keys = (0..3)
-            .map(|_| SecretKey::new(&mut OsRng).x_only_public_key(SECP256K1).0)
-            .collect::<BTreeSet<_>>();
-        let deposit =
-            DepositScriptInputsV2::new(public_keys, 2, recipient.clone(), 25_000).unwrap();
-        let mut script = deposit.deposit_script().into_bytes();
-        // Replace the minimal 32-byte commitment push with OP_PUSHDATA1 32.
-        script[5] = opcodes::OP_PUSHDATA1.to_u8();
-        script.insert(6, 32);
+    fn v2_deposit_prefix_has_expected_wire_encoding() {
+        let commitment = [0x42; 32];
+        let mut expected = vec![
+            opcodes::OP_SIZE.to_u8(),
+            opcodes::OP_PUSHBYTES_1.to_u8(),
+            32,
+            opcodes::OP_EQUALVERIFY.to_u8(),
+            opcodes::OP_SHA256.to_u8(),
+            opcodes::OP_PUSHBYTES_32.to_u8(),
+        ];
+        expected.extend_from_slice(&commitment);
+        expected.push(opcodes::OP_EQUALVERIFY.to_u8());
+
+        assert_eq!(v2_deposit_prefix(commitment).as_bytes(), expected);
+    }
+
+    #[test_case(0..1, vec![opcodes::OP_DROP.to_u8()]; "OP_SIZE")]
+    #[test_case(1..2, vec![opcodes::OP_DROP.to_u8()]; "size push opcode")]
+    #[test_case(2..3, vec![31]; "wrong preimage size")]
+    #[test_case(3..4, vec![opcodes::OP_DROP.to_u8()]; "first OP_EQUALVERIFY")]
+    #[test_case(4..5, vec![opcodes::OP_DROP.to_u8()]; "OP_SHA256")]
+    #[test_case(5..6, vec![opcodes::OP_DROP.to_u8()]; "commitment push opcode")]
+    #[test_case(38..39, vec![opcodes::OP_DROP.to_u8()]; "second OP_EQUALVERIFY")]
+    #[test_case(1..3, vec![opcodes::OP_PUSHDATA1.to_u8(), 1, 32]; "non-minimal size push")]
+    #[test_case(5..6, vec![opcodes::OP_PUSHDATA1.to_u8(), 32]; "non-minimal commitment push")]
+    #[test_case(5..6, vec![opcodes::OP_PUSHBYTES_31.to_u8()]; "wrong commitment length")]
+    fn v2_parser_rejects_malformed_prefix(
+        replaced_range: std::ops::Range<usize>,
+        replacement: Vec<u8>,
+    ) {
+        let deposit = v2_deposit_inputs();
+        let mut malformed_script = deposit.deposit_script().into_bytes();
+        malformed_script.splice(replaced_range, replacement);
+
+        let error = DepositScriptInputs::parse_v2(
+            &ScriptBuf::from_bytes(malformed_script),
+            deposit.recipient,
+            deposit.max_fee,
+        )
+        .unwrap_err();
+
+        std::assert_matches!(error, Error::InvalidDepositPrefix { .. });
+    }
+
+    #[test]
+    fn v2_parser_rejects_truncated_prefixes() {
+        let deposit = v2_deposit_inputs();
+        let prefix = v2_deposit_prefix(deposit.commitment()).into_bytes();
+
+        for length in 0..prefix.len() {
+            let truncated = ScriptBuf::from_bytes(prefix[..length].to_vec());
+            let error = DepositScriptInputs::parse_v2(
+                &truncated,
+                deposit.recipient.clone(),
+                deposit.max_fee,
+            )
+            .unwrap_err();
+
+            std::assert_matches!(error, Error::InvalidDepositScriptLength);
+        }
+    }
+
+    #[test]
+    fn v2_parser_reports_actual_and_expected_prefixes() {
+        let deposit = v2_deposit_inputs();
+        let script = deposit.deposit_script();
+        let expected = v2_deposit_prefix(deposit_data_commitment(
+            deposit.max_fee + 1,
+            &deposit.recipient,
+        ));
+        let actual = v2_deposit_prefix(deposit.commitment());
 
         let error =
-            DepositScriptInputs::parse_v2(&ScriptBuf::from_bytes(script), recipient, 25_000)
+            DepositScriptInputs::parse_v2(&script, deposit.recipient.clone(), deposit.max_fee + 1)
                 .unwrap_err();
+        std::assert_matches!(
+            error,
+            Error::InvalidDepositPrefix {
+                actual: error_actual,
+                expected: error_expected,
+            } if error_actual == actual && error_expected == expected
+        );
+    }
 
-        assert!(matches!(error, Error::InvalidDepositScript));
+    #[test]
+    fn v2_parser_rejects_invalid_signer_script_remainder() {
+        let deposit = v2_deposit_inputs();
+        let script = v2_deposit_prefix(deposit.commitment());
+
+        let error =
+            DepositScriptInputs::parse_v2(&script, deposit.recipient, deposit.max_fee).unwrap_err();
+
+        std::assert_matches!(error, Error::InvalidDepositScript);
     }
 
     /// Construct a parsable deposit script that is non-standard and check

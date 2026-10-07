@@ -2,6 +2,7 @@
 //!
 
 use bitcoin::OutPoint;
+use bitcoin::ScriptBuf;
 use bitcoin::Txid;
 
 /// Errors
@@ -13,9 +14,14 @@ pub enum Error {
     /// A v2 deposit request did not include its maximum fee.
     #[error("v2 deposit request is missing the maximum fee")]
     MissingV2DepositMaxFee,
-    /// The supplied data does not match the commitment in a v2 script.
-    #[error("v2 deposit data does not match the script commitment")]
-    InvalidDepositCommitment,
+    /// A v2 deposit script did not start with the expected canonical prefix.
+    #[error("invalid v2 deposit prefix: expected {expected}, got {actual}")]
+    InvalidDepositPrefix {
+        /// The prefix supplied by the deposit script.
+        actual: ScriptBuf,
+        /// The canonical prefix implied by the recipient and maximum fee.
+        expected: ScriptBuf,
+    },
     /// The v2 signing threshold is invalid for the number of signers.
     #[error("invalid v2 deposit threshold {signatures_required} for {signer_count} signers")]
     InvalidDepositThreshold {
