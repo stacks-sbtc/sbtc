@@ -503,14 +503,12 @@ pub struct DepositRequest {
     pub deposit_script: ScriptBuf,
     /// The hash of the reclaim script for the deposit.
     pub reclaim_script_hash: TaprootScriptHash,
-    /// The public key used in the deposit script.
+    /// The signing scheme and key material needed to spend the deposit.
     ///
-    /// Note that taproot public keys for Schnorr signatures are slightly
-    /// different from the usual compressed public keys since they use only
-    /// the x-coordinate with the y-coordinate assumed to be even. This
-    /// means they use 32 bytes instead of the 33 byte public keys used
-    /// before where the additional byte indicated the y-coordinate's
-    /// parity.
+    /// V1 deposits contain the aggregate x-only public key used for WSTS
+    /// signing. V2 deposits contain the independent signer key set and the
+    /// recipient needed to construct the preimage committed to by the
+    /// deposit script.
     pub signers_public_key: DepositSigningKey,
 }
 
