@@ -31,6 +31,9 @@ use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::stacks::api::SignerSetInfo;
 
+/// The size of a registry key in bytes.
+const REGISTRY_KEY_SIZE: usize = 33;
+
 /// A P2P peer which the signer has successfully connected to.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
 pub struct P2PPeer {
@@ -412,7 +415,7 @@ pub enum RegistryKey {
 impl RegistryKey {
     /// Parse a registry key from its 33-byte wire encoding.
     pub fn from_slice(bytes: &[u8]) -> Result<Self, secp256k1::Error> {
-        if bytes.len() == 33 && bytes[0] == 0xff {
+        if bytes.len() == REGISTRY_KEY_SIZE && bytes[0] == KeySetId::V2_TAG {
             let mut block_hash = [0; 32];
             block_hash.copy_from_slice(&bytes[1..]);
             Ok(Self::V2(block_hash.into()))
@@ -424,11 +427,11 @@ impl RegistryKey {
     }
 
     /// Return the 33-byte registry encoding.
-    pub fn to_bytes(self) -> [u8; 33] {
+    pub fn to_bytes(self) -> [u8; REGISTRY_KEY_SIZE] {
         match self {
             Self::V1(public_key) => public_key.serialize(),
             Self::V2(block_hash) => {
-                let mut bytes = [0xff; 33];
+                let mut bytes = [KeySetId::V2_TAG; REGISTRY_KEY_SIZE];
                 bytes[1..].copy_from_slice(&block_hash.into_bytes());
                 bytes
             }
