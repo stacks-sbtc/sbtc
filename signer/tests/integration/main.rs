@@ -14,6 +14,7 @@ mod containers;
 mod contracts;
 mod e2e;
 mod emily;
+mod malicious;
 mod postgres;
 mod rbf;
 mod request_decider;

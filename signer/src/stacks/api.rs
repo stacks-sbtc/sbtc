@@ -716,10 +716,9 @@ impl StacksClient {
             "/v2/contracts/call-read/{contract_principal}/{contract_name}/{fn_name}?tip=latest"
         );
 
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+        let url = self.endpoint.join(&path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Owned(path))
+        })?;
 
         // Turns out that serializing clarity values to hex can panic. One
         // such case happens when the buff-data is too large, more than one
@@ -779,10 +778,9 @@ impl StacksClient {
     ) -> Result<Value, Error> {
         let path = format!("/v2/data_var/{contract_principal}/{contract_name}/{var_name}?proof=0");
 
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+        let url = self.endpoint.join(&path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Owned(path))
+        })?;
 
         tracing::debug!(
             %contract_principal,
@@ -830,10 +828,9 @@ impl StacksClient {
     ) -> Result<Option<Value>, Error> {
         let path = format!("/v2/map_entry/{contract_principal}/{contract_name}/{map_name}?proof=0");
 
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+        let url = self.endpoint.join(&path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Owned(path))
+        })?;
 
         tracing::debug!(
             %contract_principal,
@@ -882,10 +879,9 @@ impl StacksClient {
     #[tracing::instrument(skip_all)]
     pub async fn get_account(&self, address: &StacksAddress) -> Result<AccountInfo, Error> {
         let path = format!("/v2/accounts/{address}?proof=0");
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+        let url = self.endpoint.join(&path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Owned(path))
+        })?;
 
         tracing::debug!(%address, "fetching the latest account information");
 
@@ -922,10 +918,9 @@ impl StacksClient {
         contract_name: &str,
     ) -> Result<ContractSrcResponse, Error> {
         let path = format!("/v2/contracts/source/{address}/{contract_name}?proof=0");
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+        let url = self.endpoint.join(&path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Owned(path))
+        })?;
 
         let response = self
             .client
@@ -952,10 +947,9 @@ impl StacksClient {
     #[tracing::instrument(skip_all)]
     pub async fn submit_tx(&self, tx: &StacksTransaction) -> Result<SubmitTxResponse, Error> {
         let path = "/v2/transactions";
-        let url = self
-            .endpoint
-            .join(path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Borrowed(path)))?;
+        let url = self.endpoint.join(path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Borrowed(path))
+        })?;
 
         tracing::debug!(txid = %tx.txid(), "submitting transaction to the stacks node");
         let body = tx.serialize_to_vec();
@@ -998,10 +992,9 @@ impl StacksClient {
         T: AsTxPayload + Send,
     {
         let path = "/v2/fees/transaction";
-        let url = self
-            .endpoint
-            .join(path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Borrowed(path)))?;
+        let url = self.endpoint.join(path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Borrowed(path))
+        })?;
 
         let tx_payload = payload.tx_payload().serialize_to_vec();
         let request_body = FeeRateEstimateRequestBody {
@@ -1042,10 +1035,9 @@ impl StacksClient {
     #[tracing::instrument(skip(self))]
     async fn get_block(&self, block_id: &StacksBlockHash) -> Result<NakamotoBlock, Error> {
         let path = format!("/v3/blocks/{}", block_id.to_hex());
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+        let url = self.endpoint.join(&path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Owned(path))
+        })?;
 
         tracing::debug!("making request to the stacks node for the raw nakamoto block");
 
@@ -1074,10 +1066,9 @@ impl StacksClient {
         consensus_hash: &ConsensusHash,
     ) -> Result<TenureBlockHeaders, Error> {
         let path = format!("/v3/tenures/blocks/{consensus_hash}");
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+        let url = self.endpoint.join(&path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Owned(path))
+        })?;
 
         tracing::debug!("making request to the stacks node for the tenure headers");
 
@@ -1104,10 +1095,9 @@ impl StacksClient {
     #[tracing::instrument(skip(self))]
     pub async fn get_tenure_info(&self) -> Result<GetTenureInfoResponse, Error> {
         let path = "/v3/tenures/info";
-        let url = self
-            .endpoint
-            .join(path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Borrowed(path)))?;
+        let url = self.endpoint.join(path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Borrowed(path))
+        })?;
 
         tracing::debug!("making request to the stacks node for the current tenure info");
         let response = self
@@ -1136,10 +1126,9 @@ impl StacksClient {
         consensus_hash: &ConsensusHash,
     ) -> Result<SortitionInfo, Error> {
         let path = format!("/v3/sortitions/consensus/{consensus_hash}");
-        let url = self
-            .endpoint
-            .join(&path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Owned(path)))?;
+        let url = self.endpoint.join(&path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Owned(path))
+        })?;
 
         tracing::debug!("making request to the stacks node for sortition info");
         let response = self
@@ -1170,10 +1159,9 @@ impl StacksClient {
     #[tracing::instrument(skip(self))]
     pub async fn get_pox_info(&self) -> Result<PoxResponse, Error> {
         let path = "/v2/pox";
-        let url = self
-            .endpoint
-            .join(path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Borrowed(path)))?;
+        let url = self.endpoint.join(path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Borrowed(path))
+        })?;
 
         tracing::debug!("making request to the stacks node for the current PoX info");
         let response = self
@@ -1196,10 +1184,9 @@ impl StacksClient {
     #[tracing::instrument(skip(self))]
     pub async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         let path = "/v2/info";
-        let url = self
-            .endpoint
-            .join(path)
-            .map_err(|err| Error::PathJoin(err, self.endpoint.clone(), Cow::Borrowed(path)))?;
+        let url = self.endpoint.join(path).map_err(|err| {
+            Error::PathJoin(err, Box::new(self.endpoint.clone()), Cow::Borrowed(path))
+        })?;
 
         tracing::debug!("making request to the stacks node for the current node info");
         let response = self
@@ -2184,19 +2171,15 @@ mod tests {
     {
         let aggregate_key = generate_pubkeys(1)[0];
 
-        let data;
-        let expected;
-        if return_none {
+        let (data, expected) = if return_none {
             // 0x00 is the initial value of the signers' aggregate key in
             // the sbtc-registry contract, and
             // get_current_signers_aggregate_key should return None when we
             // receive it.
-            data = vec![0];
-            expected = None;
+            (vec![0], None)
         } else {
-            data = aggregate_key.serialize().to_vec();
-            expected = Some(aggregate_key);
-        }
+            (aggregate_key.serialize().to_vec(), Some(aggregate_key))
+        };
         let aggregate_key_clarity = Value::Sequence(SequenceData::Buffer(BuffData { data }));
 
         // The format of the response JSON is `{"data": "0x<serialized-value>"}` (excluding the proof).

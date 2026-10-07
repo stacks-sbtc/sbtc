@@ -59,10 +59,6 @@ criteria = "safe-to-deploy"
 version = "1.0.86"
 criteria = "safe-to-deploy"
 
-[[exemptions.aquamarine]]
-version = "0.6.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.asn1-rs]]
 version = "0.7.1"
 criteria = "safe-to-deploy"

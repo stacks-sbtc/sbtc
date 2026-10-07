@@ -47,7 +47,7 @@ pub enum Error {
 
     /// Unexpected [`StateMachineId`] in the given context.
     #[error("unexpected state machine id in the given context: {0:?}")]
-    UnexpectedStateMachineId(crate::wsts_state_machine::StateMachineId),
+    UnexpectedStateMachineId(Box<crate::wsts_state_machine::StateMachineId>),
 
     /// Common error from WSTS, usually raised when a polynomial is invalid.
     #[error("common WSTS error: {0}")]
@@ -245,6 +245,26 @@ pub enum Error {
     #[error("the given sighash is unknown: {0}")]
     UnknownSigHash(SigHash),
 
+    /// This happens when the coordinator requested a WSTS signature type
+    /// that does not match the prevout type this sighash was approved for.
+    #[error(
+        "signature type {signature_type:?} does not match prevout type {prevout_type} for sighash {sighash}"
+    )]
+    SignatureTypeMismatch {
+        /// The sighash the coordinator asked this signer to participate in.
+        sighash: SigHash,
+        /// The prevout type stored when this signer approved the sighash.
+        prevout_type: crate::storage::model::TxPrevoutType,
+        /// The signature type in the coordinator's WSTS request.
+        signature_type: wsts::net::SignatureType,
+    },
+
+    /// The coordinator requested a non-Taproot signature during DKG
+    /// verification. DKG verification always signs the known mock transaction
+    /// using the Taproot signature type.
+    #[error("signature type {0:?} is not valid for DKG verification; expected Taproot")]
+    InvalidDkgVerificationSignatureType(wsts::net::SignatureType),
+
     /// This should never happen
     #[error("observed a tenure identified by a StacksBlockId with with no blocks")]
     EmptyStacksTenure,
@@ -352,7 +372,7 @@ pub enum Error {
 
     /// Could not parse the path part of a URL
     #[error("failed to construct a valid URL from {1} and {2}: {0}")]
-    PathJoin(#[source] url::ParseError, url::Url, Cow<'static, str>),
+    PathJoin(#[source] url::ParseError, Box<url::Url>, Cow<'static, str>),
 
     /// This occurs when combining many public keys would result in a
     /// "public key" that is the point at infinity.
@@ -569,7 +589,7 @@ pub enum Error {
 
     /// Missing state machine
     #[error("missing state machine: {0}")]
-    MissingStateMachine(StateMachineId),
+    MissingStateMachine(Box<StateMachineId>),
 
     /// Missing key rotation
     #[error("missing key rotation")]

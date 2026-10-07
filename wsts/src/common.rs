@@ -213,7 +213,7 @@ impl PublicNonce {
 
 impl Display for PublicNonce {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(f, "{} {}", &self.D, &self.E)
+        write!(f, "{} {}", self.D, self.E)
     }
 }
 

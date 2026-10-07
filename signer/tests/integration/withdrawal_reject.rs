@@ -677,7 +677,7 @@ async fn reject_withdrawal_validation_request_still_active() {
     //
     // So we remove the withdrawals from the TestSweepSetup2 object so
     // that they do not get included in the sweep transaction.
-    let withdrawals = setup.withdrawals.drain(..).collect::<Vec<_>>();
+    let withdrawals = std::mem::take(&mut setup.withdrawals);
 
     setup.broadcast_sweep_tx();
     setup.submit_sweep_tx(faucet);

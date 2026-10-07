@@ -279,7 +279,7 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
             .unwrap_or_default();
 
         // Sort the peers by last successful dialed time, duration-descending.
-        db_peers.sort_unstable_by(|a, b| b.last_dialed_at.cmp(&a.last_dialed_at));
+        db_peers.sort_unstable_by_key(|a| std::cmp::Reverse(a.last_dialed_at));
 
         // Create a list of known peers, filtering out those that have not been
         // dialed within the KNOWN_PEER_WINDOW or are already included as seed

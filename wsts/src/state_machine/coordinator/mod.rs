@@ -627,13 +627,13 @@ pub mod test {
                 }
             }
             OperationResult::SignTaproot(sig) => {
-                if let SignatureType::Taproot(merkle_root) = signature_type {
+                if let SignatureType::Taproot = signature_type {
                     for coordinator in coordinators.iter() {
                         let tweaked_public_key = compute::tweaked_public_key(
                             &coordinator
                                 .get_aggregate_public_key()
                                 .expect("No aggregate public key set!"),
-                            merkle_root,
+                            None,
                         );
 
                         assert!(sig.verify(&tweaked_public_key.x(), msg));
@@ -667,13 +667,7 @@ pub mod test {
             &mut coordinators,
             &mut signers,
             &msg,
-            SignatureType::Taproot(None),
-        );
-        run_sign::<Coordinator>(
-            &mut coordinators,
-            &mut signers,
-            &msg,
-            SignatureType::Taproot(Some([128u8; 32])),
+            SignatureType::Taproot,
         );
     }
 
@@ -761,7 +755,7 @@ pub mod test {
         match &operation_results[0] {
             OperationResult::SignError(SignError::Coordinator(Error::Aggregator(AggregatorError::BadPartySigs(parties)))) => {
 		if parties != &bad_parties {
-		    panic!("Expected BadPartySigs from {:?}, got {:?}", &bad_parties, &operation_results[0]);
+		    panic!("Expected BadPartySigs from {:?}, got {:?}", bad_parties, operation_results[0]);
 		}
 	    }
             _ => panic!("Expected OperationResult::SignError(SignError::Coordinator(Error::Aggregator(AggregatorError::BadPartySigs(parties))))"),
@@ -782,6 +776,11 @@ pub mod test {
         let mut rng = OsRng;
 
         let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
+        // This test builds signature share requests without routing nonce
+        // responses to the signers, so it cannot use the cache.
+        for signer in &mut signers {
+            signer.disable_nonce_response_cache();
+        }
 
         let all_thresholds = coordinators
             .iter()
@@ -985,8 +984,84 @@ pub mod test {
         }
     }
 
+    /// A regression test that the signature shares use the key IDs from
+    /// the signer's configuration.
+    pub fn signature_share_uses_configured_key_ids<C>(num_signers: u32, keys_per_signer: u32)
+    where
+        C: CoordinatorTrait,
+    {
+        let mut rng = OsRng;
+        let (mut coordinators, mut signers) = run_dkg::<C>(num_signers, keys_per_signer);
+        // This test tampers with the nonce responses in the signature share
+        // request to exercise the checks used when the cache is disabled.
+        // With the cache, the tampered request is rejected earlier.
+        for signer in &mut signers {
+            signer.disable_nonce_response_cache();
+        }
+        let msg = b"configured key IDs";
+
+        let nonce_request = coordinators
+            .first_mut()
+            .unwrap()
+            .start_signing_round(msg, SignatureType::Taproot)
+            .unwrap();
+
+        let (signature_requests, operation_results) =
+            feedback_messages(&mut coordinators, &mut signers, &[nonce_request]);
+
+        assert!(operation_results.is_empty());
+        assert_eq!(signature_requests.len(), 1);
+
+        let valid_request = signature_requests[0].clone();
+        let Message::SignatureShareRequest(request) = &valid_request else {
+            panic!("expected SignatureShareRequest");
+        };
+        assert!(request
+            .nonce_responses
+            .iter()
+            .all(|response| !response.key_ids.is_empty()));
+
+        let mut request_with_different_key_ids = valid_request.clone();
+        let Message::SignatureShareRequest(request) = &mut request_with_different_key_ids else {
+            panic!("expected SignatureShareRequest");
+        };
+
+        for response in &mut request.nonce_responses {
+            response.key_ids = vec![1, num_signers - 1, num_signers, u32::MAX, u32::MAX];
+        }
+
+        // We want to check that the calling process with faulty/bogus key
+        // IDs always produces the same signature share, since the
+        // assumption being that the supplied key IDs are ignored.
+        let mut second_signer = signers[0].clone();
+        let valid_response = signers[0].process(&valid_request, &mut rng).unwrap();
+        let response_with_different_key_ids = second_signer
+            .process(&request_with_different_key_ids, &mut rng)
+            .unwrap();
+
+        let Message::SignatureShareResponse(valid_response) = &valid_response[0] else {
+            panic!("expected SignatureShareResponse");
+        };
+        let Message::SignatureShareResponse(response_with_different_key_ids) =
+            &response_with_different_key_ids[0]
+        else {
+            panic!("expected SignatureShareResponse");
+        };
+
+        assert_eq!(
+            valid_response.signature_shares[0].z_i,
+            response_with_different_key_ids.signature_shares[0].z_i,
+        );
+    }
+
     pub fn invalid_nonce<Coordinator: CoordinatorTrait>(num_signers: u32, keys_per_signer: u32) {
         let (mut coordinators, mut signers) = run_dkg::<Coordinator>(num_signers, keys_per_signer);
+        // This test tampers with the nonce responses in the signature share
+        // request to exercise the checks used when the cache is disabled.
+        // With the cache, the tampered request is rejected earlier.
+        for signer in &mut signers {
+            signer.disable_nonce_response_cache();
+        }
 
         let msg = "It was many and many a year ago, in a kingdom by the sea"
             .as_bytes()

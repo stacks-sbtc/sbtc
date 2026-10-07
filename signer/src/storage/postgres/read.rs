@@ -440,6 +440,8 @@ impl PgRead {
              AND ds.signer_pub_key = $5
             WHERE dr.txid = $3
               AND dr.output_index = $4
+            -- Always prefer a transaction's occurrence on the selected Bitcoin chain
+            ORDER BY (bc.block_hash IS NOT NULL) DESC
             LIMIT 1
             "#,
         )
@@ -783,6 +785,7 @@ impl PgRead {
         .map_err(Error::SqlxQuery)
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub async fn get_stacks_chain_tip<'e, E>(
         executor: &'e mut E,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
@@ -2469,15 +2472,16 @@ impl PgRead {
     async fn will_sign_bitcoin_tx_sighash<'e, E>(
         executor: &'e mut E,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly)>, Error>
+    ) -> Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
     {
-        sqlx::query_as::<_, (bool, PublicKeyXOnly)>(
+        sqlx::query_as::<_, (bool, PublicKeyXOnly, model::TxPrevoutType)>(
             r#"
             SELECT
                 will_sign
               , x_only_public_key
+              , prevout_type
             FROM sbtc_signer.bitcoin_tx_sighashes
             WHERE sighash = $1
             "#,
@@ -2613,6 +2617,7 @@ impl DbRead for PgStore {
         PgRead::get_bitcoin_canonical_chain_tip_ref(self.get_connection().await?.as_mut()).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_stacks_chain_tip(
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
@@ -2988,7 +2993,7 @@ impl DbRead for PgStore {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly)>, Error> {
+    ) -> Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error> {
         PgRead::will_sign_bitcoin_tx_sighash(self.get_connection().await?.as_mut(), sighash).await
     }
 
@@ -3059,6 +3064,7 @@ impl DbRead for PgTransaction<'_> {
         PgRead::get_bitcoin_canonical_chain_tip_ref(tx.as_mut()).await
     }
 
+    #[cfg(any(test, feature = "testing"))]
     async fn get_stacks_chain_tip(
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockHash,
@@ -3460,7 +3466,7 @@ impl DbRead for PgTransaction<'_> {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, crate::keys::PublicKeyXOnly)>, Error> {
+    ) -> Result<Option<(bool, crate::keys::PublicKeyXOnly, model::TxPrevoutType)>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
     }

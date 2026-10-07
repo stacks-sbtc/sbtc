@@ -32,7 +32,6 @@ stackslib = { git = "https://github.com/stacks-network/stacks-core", rev = "1cba
 # Crates.io
 aes-gcm = { version = "0.10.3", default-features = false, features = ["aes", "alloc", "getrandom"] }
 argon2 = { version = "0.5.3", default-features = false, features = ["alloc"] }
-aquamarine = { version = "0.6.0", default-features = false }
 assert_matches = { version = "1.5.0", default-features = false }
 aws-config = { version = "1.8.15", default-features = false, features = ["rustls", "rt-tokio"] }
 aws-sdk-dynamodb = { version = "1.110.0", default-features = false }

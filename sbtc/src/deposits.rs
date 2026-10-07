@@ -649,7 +649,6 @@ mod tests {
     use bitcoin::hashes::Hash as _;
     use rand::rngs::OsRng;
     use secp256k1::SecretKey;
-    use stacks_common::codec::StacksMessageCodec as _;
     use stacks_common::types::chainstate::StacksAddress;
 
     use super::*;

@@ -1,10 +1,13 @@
 //! Test utilities from the stacks module
 //!
 
+use std::sync::LazyLock;
+
 use blockstack_lib::chainstate::nakamoto::NakamotoBlockHeader;
 use blockstack_lib::net::api::getsortition::SortitionInfo;
 use stacks_common::types::chainstate::BurnchainHeaderHash;
 use stacks_common::types::chainstate::SortitionId;
+use stacks_common::types::chainstate::StacksBlockId;
 
 use crate::error::Error;
 use crate::stacks::api::GetTenureInfoResponse;
@@ -32,21 +35,22 @@ pub const DUMMY_SORTITION_INFO: SortitionInfo = SortitionInfo {
     vrf_seed: None,
 };
 
-/// Some dummy tenure info
-pub const DUMMY_TENURE_INFO: GetTenureInfoResponse = GetTenureInfoResponse {
-    consensus_hash: ConsensusHash::new([0; 20]),
-    tenure_start_block_id: StacksBlockHash::new([0; 32]),
-    parent_consensus_hash: ConsensusHash::new([0; 20]),
-    // The following bytes are the ones returned by StacksBlockId::first_mined()
-    parent_tenure_start_block_id: StacksBlockHash::new([
-        0x55, 0xc9, 0x86, 0x1b, 0xe5, 0xcf, 0xf9, 0x84, 0xa2, 0x0c, 0xe6, 0xd9, 0x9d, 0x4a, 0xa6,
-        0x59, 0x41, 0x41, 0x28, 0x89, 0xbd, 0xc6, 0x65, 0x09, 0x41, 0x36, 0x42, 0x9b, 0x84, 0xf8,
-        0xc2, 0xee,
-    ]),
-    tip_block_id: StacksBlockHash::new([0; 32]),
-    tip_height: StacksBlockHeight::new(0u64),
-    reward_cycle: 0,
-};
+/// Dummy tenure info whose tip matches [`NakamotoBlockHeader::empty`], which is
+/// what [`TenureBlockHeaders::nearly_empty`] / [`TenureBlockHeaders::from_anchor`]
+/// write into the database.
+pub static DUMMY_TENURE_INFO: LazyLock<GetTenureInfoResponse> = LazyLock::new(|| {
+    let header = NakamotoBlockHeader::empty();
+    let tip_block_id = StacksBlockHash::from(header.block_id());
+    GetTenureInfoResponse {
+        consensus_hash: ConsensusHash::from(header.consensus_hash.clone()),
+        tenure_start_block_id: tip_block_id,
+        parent_consensus_hash: ConsensusHash::new([0; 20]),
+        parent_tenure_start_block_id: StacksBlockHash::from(StacksBlockId::first_mined()),
+        tip_block_id,
+        tip_height: StacksBlockHeight::from(header.chain_length),
+        reward_cycle: 0,
+    }
+});
 
 impl TenureBlockHeaders {
     /// Create a TenureBlockHeaders struct that is basically empty.

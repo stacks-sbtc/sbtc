@@ -46,10 +46,10 @@ pub struct SignerContext<S, BC, ST, EM> {
 impl<S, BC, ST, EM> SignerContext<S, BC, ST, EM>
 where
     S: DbRead + DbWrite + Clone + Sync + Send + 'static,
-    BC: for<'a> TryFrom<Vec<BitcoinCoreClientParams>> + BitcoinInteract + Clone + 'static,
+    BC: TryFrom<Vec<BitcoinCoreClientParams>> + BitcoinInteract + Clone + 'static,
     ST: for<'a> TryFrom<&'a Settings> + StacksInteract + Clone + Sync + Send + 'static,
     EM: for<'a> TryFrom<&'a EmilyClientConfig> + EmilyInteract + Clone + Sync + Send + 'static,
-    Error: for<'a> From<<BC as TryFrom<Vec<BitcoinCoreClientParams>>>::Error>,
+    Error: From<<BC as TryFrom<Vec<BitcoinCoreClientParams>>>::Error>,
     Error: for<'a> From<<ST as TryFrom<&'a Settings>>::Error>,
     Error: for<'a> From<<EM as TryFrom<&'a EmilyClientConfig>>::Error>,
 {

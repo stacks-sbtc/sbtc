@@ -992,7 +992,7 @@ mod tests {
 
     use crate::storage::model;
     use crate::{
-        context::{Context as _, SignerEvent, SignerSignal},
+        context::{SignerEvent, SignerSignal},
         testing::context::*,
     };
 
