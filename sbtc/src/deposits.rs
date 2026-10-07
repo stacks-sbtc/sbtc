@@ -208,7 +208,7 @@ impl CreateDepositRequest {
             .clone()
             .ok_or(Error::MissingV2DepositRecipient)?;
         let max_fee = self.max_fee.ok_or(Error::MissingV2DepositMaxFee)?;
-        DepositScriptInputs::parse_v2(&self.deposit_script, recipient, max_fee)
+        DepositScriptInputsV2::parse(&self.deposit_script, recipient, max_fee)
     }
 
     /// Parse either supported deposit script format into its common fields.
@@ -566,7 +566,7 @@ impl DepositScriptInputsV2 {
 
     /// Parse and validate the canonical v2 deposit leaf against its
     /// off-chain recipient and maximum-fee fields.
-    fn parse(
+    pub fn parse(
         deposit_script: &ScriptBuf,
         recipient: PrincipalData,
         max_fee: u64,

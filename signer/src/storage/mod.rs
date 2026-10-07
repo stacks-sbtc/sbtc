@@ -478,9 +478,8 @@ pub trait DbWrite {
     fn write_signer_key_set(
         &self,
         _key_set: &model::SignerKeySet,
-    ) -> impl Future<Output = Result<(), Error>> + Send {
-        async { Ok(()) }
-    }
+    ) -> impl Future<Output = Result<(), Error>> + Send;
+
     /// Write a bitcoin block.
     fn write_bitcoin_block(
         &self,

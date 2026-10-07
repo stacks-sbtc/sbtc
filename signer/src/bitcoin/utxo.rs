@@ -216,11 +216,14 @@ pub struct RequestPreprocessor<'a> {
 
 impl<'a> RequestPreprocessor<'a> {
     /// Create a new [`DepositFilter`] instance.
+    #[cfg(any(test, feature = "testing"))]
     pub fn new(sbtc_limits: &'a SbtcLimits, fee_rate: f64, last_fees: Option<Fees>) -> Self {
         Self {
             sbtc_limits,
             fee_rate,
             last_fees,
+            // At this time, this function is only used to test v1
+            // functionality, so we assume a v1 signers' input.
             signer_input_vsize: BASE_WITHDRAWAL_TX_VSIZE - BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT,
         }
     }
