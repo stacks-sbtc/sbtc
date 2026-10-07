@@ -1940,7 +1940,6 @@ mod tests {
             block_height: activation_height,
         };
         let request = StacksTransactionSignRequest {
-            aggregate_key: None,
             contract_tx: StacksTx::SmartContract(SmartContract::SbtcRegistry),
             nonce: 0,
             tx_fee: 1,
