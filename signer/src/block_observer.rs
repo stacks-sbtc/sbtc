@@ -662,7 +662,7 @@ where
     // transactions and write them to the database.
     let extract_fut = || async {
         // We store all the scriptPubKeys associated with the signers'
-        // aggregate public key. Let's get the last years worth of them.
+        // aggregate public key.
         let signer_script_pubkeys: HashSet<ScriptBuf> = db
             .get_signers_script_pubkeys()
             .await?

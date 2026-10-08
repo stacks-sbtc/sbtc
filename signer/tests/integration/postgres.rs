@@ -5182,7 +5182,7 @@ async fn deposit_requests_max_fee_migration() {
                  , amount
                  , max_fee
                  , lock_time
-                 -- This table predates migration 0024, which renamed
+                 -- This table predates migration 0023, which renamed
                  -- signers_public_key.
                  , signers_public_key AS key_set_id
                  , sender_script_pub_keys
