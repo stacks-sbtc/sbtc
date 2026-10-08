@@ -126,15 +126,13 @@ message RotateKeys {
   // The new set of public keys for all known signers during this
   // PoX cycle.
   repeated crypto.PublicKey new_keys = 1;
-  // The value written to the registry's aggregate-key field.
-  oneof registry_key {
-    // The v1 aggregate key created during DKG.
-    crypto.PublicKey aggregate_key = 2;
-    // The Bitcoin block hash uniquely identifying a v2 rotation.
-    bitcoin.BitcoinBlockHash bitcoin_block_hash = 5;
-  }
+  // The v1 aggregate key created by combining the above public keys.
+  crypto.PublicKey aggregate_key = 2;
   // The address that deployed the contract.
   stacks.StacksAddress deployer = 3;
   // The number of signatures required for the multi-sig wallet.
   uint32 signatures_required = 4;
+  // The Bitcoin block hash uniquely identifying a v2 rotation. Exactly one
+  // of this field and aggregate_key is populated.
+  bitcoin.BitcoinBlockHash bitcoin_block_hash = 5;
 }

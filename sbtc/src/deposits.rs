@@ -28,7 +28,6 @@ use clarity::vm::types::QualifiedContractIdentifier;
 use secp256k1::SECP256K1;
 use stacks_common::types::chainstate::STACKS_ADDRESS_ENCODED_SIZE;
 
-use crate::KeySetId;
 use crate::MAX_RECLAIM_SCRIPT_LENGTH;
 use crate::SignerKeySet;
 use crate::error::Error;
@@ -140,15 +139,6 @@ impl DepositSigningInfo {
         match self {
             Self::V1 { .. } => DepositScriptVersion::V1,
             Self::V2 { .. } => DepositScriptVersion::V2,
-        }
-    }
-
-    /// Return the stable identifier for the key material locking the deposit.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn key_set_id(&self) -> KeySetId {
-        match self {
-            Self::V1 { public_key } => public_key.serialize().into(),
-            Self::V2 { key_set } => key_set.id(),
         }
     }
 }
@@ -1028,7 +1018,12 @@ mod tests {
             }
         );
         assert_eq!(info.version(), DepositScriptVersion::V2);
-        assert_eq!(info.signing_info.key_set_id(), deposit.signer_key_set.id());
+
+        let key_set_id = match info.signing_info {
+            DepositSigningInfo::V1 { public_key } => public_key.serialize().into(),
+            DepositSigningInfo::V2 { key_set } => key_set.id(),
+        };
+        assert_eq!(key_set_id, deposit.signer_key_set.id());
     }
 
     #[test]

@@ -465,19 +465,16 @@ impl TryFrom<proto::RejectWithdrawal> for RejectWithdrawalV1 {
 
 impl From<RotateKeysV1> for proto::RotateKeys {
     fn from(value: RotateKeysV1) -> Self {
-        let registry_key = match value.aggregate_key {
-            RegistryKey::V1(public_key) => {
-                proto::rotate_keys::RegistryKey::AggregateKey(public_key.into())
-            }
-            RegistryKey::V2(block_hash) => {
-                proto::rotate_keys::RegistryKey::BitcoinBlockHash(block_hash.into())
-            }
+        let (aggregate_key, bitcoin_block_hash) = match value.aggregate_key {
+            RegistryKey::V1(public_key) => (Some(public_key.into()), None),
+            RegistryKey::V2(block_hash) => (None, Some(block_hash.into())),
         };
         proto::RotateKeys {
             new_keys: value.new_keys.into_iter().map(|v| v.into()).collect(),
+            aggregate_key,
             deployer: Some(value.deployer.into()),
             signatures_required: value.signatures_required.into(),
-            registry_key: Some(registry_key),
+            bitcoin_block_hash,
         }
     }
 }
@@ -491,13 +488,10 @@ impl TryFrom<proto::RotateKeys> for RotateKeysV1 {
                 .into_iter()
                 .map(|v| v.try_into())
                 .collect::<Result<BTreeSet<_>, Error>>()?,
-            aggregate_key: match value.registry_key.required()? {
-                proto::rotate_keys::RegistryKey::AggregateKey(public_key) => {
-                    RegistryKey::V1(public_key.try_into()?)
-                }
-                proto::rotate_keys::RegistryKey::BitcoinBlockHash(block_hash) => {
-                    RegistryKey::V2(block_hash.try_into()?)
-                }
+            aggregate_key: match (value.aggregate_key, value.bitcoin_block_hash) {
+                (Some(public_key), None) => RegistryKey::V1(public_key.try_into()?),
+                (None, Some(block_hash)) => RegistryKey::V2(block_hash.try_into()?),
+                _ => return Err(Error::TypeConversion),
             },
             deployer: value.deployer.required()?.try_into()?,
             signatures_required: value
@@ -1780,24 +1774,6 @@ mod tests {
     use rand::rngs::OsRng;
     use test_case::test_case;
 
-    /// The `RotateKeys` protobuf schema used before `registry_key` became a
-    /// oneof. This is used to verify wire compatibility for the v1 field.
-    #[derive(Clone, PartialEq, prost::Message)]
-    struct LegacyRotateKeys {
-        /// The signer public keys in the rotation.
-        #[prost(message, repeated, tag = "1")]
-        new_keys: Vec<proto::PublicKey>,
-        /// The aggregate key produced by DKG.
-        #[prost(message, optional, tag = "2")]
-        aggregate_key: Option<proto::PublicKey>,
-        /// The address that deployed the contract.
-        #[prost(message, optional, tag = "3")]
-        deployer: Option<proto::StacksAddress>,
-        /// The number of signatures required by the signer wallet.
-        #[prost(uint32, tag = "4")]
-        signatures_required: u32,
-    }
-
     /// The relevant fields from `StacksTransactionSignRequest` before its
     /// aggregate key was removed.
     #[derive(Clone, PartialEq, prost::Message)]
@@ -1838,61 +1814,6 @@ mod tests {
         let legacy =
             LegacyStacksTransactionSignRequest::decode(current.encode_to_vec().as_slice()).unwrap();
         std::assert_matches!(legacy.aggregate_key, None);
-    }
-
-    #[test]
-    fn rotate_keys_v1_remains_wire_compatible() {
-        let mut original: RotateKeysV1 = Faker.fake_with_rng(&mut OsRng);
-        // We want to test the v1 wire compatibility so we fix the
-        // aggregate key field to a v1 key.
-        let aggregate_key: PublicKey = Faker.fake_with_rng(&mut OsRng);
-        original.aggregate_key = RegistryKey::V1(aggregate_key);
-
-        let current = proto::RotateKeys::from(original.clone());
-        let legacy = LegacyRotateKeys::decode(current.encode_to_vec().as_slice()).unwrap();
-        std::assert_matches!(
-            legacy.aggregate_key,
-            Some(value) if value == proto::PublicKey::from(aggregate_key)
-        );
-
-        let legacy = LegacyRotateKeys {
-            new_keys: current.new_keys,
-            aggregate_key: Some(aggregate_key.into()),
-            deployer: current.deployer,
-            signatures_required: current.signatures_required,
-        };
-        let current = proto::RotateKeys::decode(legacy.encode_to_vec().as_slice()).unwrap();
-        std::assert_matches!(
-            &current.registry_key,
-            Some(proto::rotate_keys::RegistryKey::AggregateKey(value))
-                if value == &proto::PublicKey::from(aggregate_key)
-        );
-        assert_eq!(RotateKeysV1::try_from(current).unwrap(), original);
-    }
-
-    #[test]
-    fn rotate_keys_v2_uses_bitcoin_block_hash_variant() {
-        let mut original: RotateKeysV1 = Faker.fake_with_rng(&mut OsRng);
-        let block_hash = BitcoinBlockHash::from([42; 32]);
-        original.aggregate_key = RegistryKey::V2(block_hash);
-
-        let protobuf = proto::RotateKeys::from(original.clone());
-        std::assert_matches!(
-            &protobuf.registry_key,
-            Some(proto::rotate_keys::RegistryKey::BitcoinBlockHash(value))
-                if value == &proto::BitcoinBlockHash::from(block_hash)
-        );
-        assert_eq!(RotateKeysV1::try_from(protobuf).unwrap(), original);
-    }
-
-    #[test]
-    fn rotate_keys_requires_a_registry_key() {
-        let mut protobuf =
-            proto::RotateKeys::from(Faker.fake_with_rng::<RotateKeysV1, _>(&mut OsRng));
-        protobuf.registry_key = None;
-
-        let error = RotateKeysV1::try_from(protobuf).unwrap_err();
-        std::assert_matches!(error, Error::RequiredProtobufFieldMissing);
     }
 
     #[test_case(PhantomData::<([u8; 32], proto::Uint256)>; "Uint256")]
