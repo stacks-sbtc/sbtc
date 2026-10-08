@@ -215,10 +215,10 @@ async fn rotate_key_validation_switches_to_v2_checks_at_activation() {
     // Immediately below activation validation still follows the v1 path and
     // therefore requires DKG shares.
     req_ctx.chain_tip.block_height = activation_height.saturating_sub(1_u64);
-    assert!(matches!(
+    std::assert_matches!(
         rotate_keys.validate(&ctx, &req_ctx).await,
         Err(Error::NoDkgShares)
-    ));
+    );
 
     // At the activation height, the configured signer set is authoritative
     // and no DKG row is needed.

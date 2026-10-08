@@ -1430,7 +1430,7 @@ mod tests {
         settings.signer.v2_signing_block_height = Some(300_u64.into());
         settings.signer.dkg_disable_block_height = Some(299_u64.into());
 
-        assert!(matches!(
+        std::assert_matches!(
             settings.validate().unwrap_err(),
             ConfigError::Message(msg)
                 if msg == SignerConfigError::DkgDisableHeightBeforeV2Signing {
@@ -1438,7 +1438,7 @@ mod tests {
                     v2_signing_block_height: 300,
                 }
                 .to_string()
-        ));
+        );
     }
 
     #[test]

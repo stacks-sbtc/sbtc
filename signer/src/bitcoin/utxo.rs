@@ -2962,15 +2962,12 @@ mod tests {
         let outsider = Keypair::new_global(&mut OsRng);
         let outsider_key = outsider.x_only_public_key().0;
         let result = collector.add_signature(outsider_key, sign_sighash(&outsider, sighash));
-        assert!(matches!(result, Err(Error::SigningKeyNotInKeySet(key)) if key == outsider_key));
+        std::assert_matches!(result, Err(Error::SigningKeyNotInKeySet(key)) if key == outsider_key);
 
         let (key, keypair) = keypairs.next().unwrap();
         let other_sighash = TapSighash::from_byte_array([2; 32]);
         let result = collector.add_signature(*key, sign_sighash(keypair, other_sighash));
-        assert!(matches!(
-            result,
-            Err(Error::SchnorrSignatureFailedVerification(_))
-        ));
+        std::assert_matches!(result, Err(Error::SchnorrSignatureFailedVerification(_)));
 
         let result = collector.add_signature(*key, sign_sighash(keypair, sighash));
         assert!(result.unwrap().is_none());

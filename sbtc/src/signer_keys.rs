@@ -404,13 +404,13 @@ mod tests {
         let keys = (0..17)
             .map(|_| SecretKey::new(&mut OsRng).x_only_public_key(SECP256K1).0)
             .collect::<Vec<_>>();
-        assert!(matches!(
+        std::assert_matches!(
             SignerKeySet::new(keys, 12),
             Err(Error::TooManySignerKeys {
                 signer_count: 17,
                 max_signers: MAX_SIGNERS,
             })
-        ));
+        );
     }
 
     /// The bootstrap signing set in the devenv signer config.

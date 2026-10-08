@@ -1843,10 +1843,10 @@ mod tests {
             btc_context.signer_public_key,
             context.config().signer.public_key()
         );
-        assert!(matches!(
+        std::assert_matches!(
             btc_context.signer_set.output_key_set(),
             SignerUtxoKeySet::V2(_)
-        ));
+        );
         let BitcoinSignerSet::V2 { signer_public_keys, .. } = btc_context.signer_set else {
             panic!("expected a v2 signer set");
         };
@@ -1966,14 +1966,14 @@ mod tests {
         let result = signer
             .assert_valid_stacks_tx_sign_request(&request, &chain_tip, &origin)
             .await;
-        assert!(matches!(result, Err(Error::ContractAlreadyDeployed(_))));
+        std::assert_matches!(result, Err(Error::ContractAlreadyDeployed(_)));
 
         // A signer outside the bootstrap set is rejected.
         let mut signer = new_signer(PrivateKey::new(&mut rand::rngs::OsRng));
         let result = signer
             .assert_valid_stacks_tx_sign_request(&request, &chain_tip, &origin)
             .await;
-        assert!(matches!(result, Err(Error::ValidationSignerSet(_))));
+        std::assert_matches!(result, Err(Error::ValidationSignerSet(_)));
     }
 
     #[allow(clippy::type_complexity)]

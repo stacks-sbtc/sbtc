@@ -1917,11 +1917,11 @@ mod tests {
                 signatures_required: config.bootstrap_signatures_required,
             });
         let error = rotate_keys.validate(&context, &req_ctx).await.unwrap_err();
-        assert!(matches!(
+        std::assert_matches!(
             error,
             Error::RotateKeysValidation(error)
                 if matches!(error.error, RotateKeysErrorMsg::RegistryUpToDate)
-        ));
+        );
     }
 
     #[test_case::test_case(SmartContract::SbtcBootstrapSigners; "sbtc-bootstrap")]
