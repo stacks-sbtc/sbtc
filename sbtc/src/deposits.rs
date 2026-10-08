@@ -144,6 +144,7 @@ impl DepositSigningInfo {
     }
 
     /// Return the stable identifier for the key material locking the deposit.
+    #[cfg(any(test, feature = "testing"))]
     pub fn key_set_id(&self) -> KeySetId {
         match self {
             Self::V1 { public_key } => public_key.serialize().into(),
@@ -179,11 +180,6 @@ impl DepositInfo {
     /// Return the deposit script version.
     pub fn version(&self) -> DepositScriptVersion {
         self.signing_info.version()
-    }
-
-    /// Return the identifier for the key material locking the deposit.
-    pub fn key_set_id(&self) -> KeySetId {
-        self.signing_info.key_set_id()
     }
 }
 
@@ -1032,7 +1028,7 @@ mod tests {
             }
         );
         assert_eq!(info.version(), DepositScriptVersion::V2);
-        assert_eq!(info.key_set_id(), deposit.signer_key_set.id());
+        assert_eq!(info.signing_info.key_set_id(), deposit.signer_key_set.id());
     }
 
     #[test]
