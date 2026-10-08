@@ -161,7 +161,7 @@ where
 
     let mut outputs = vec![TxOut {
         value: Amount::from_sat(amount),
-        script_pubkey: sbtc::deposits::to_script_pubkey(
+        script_pubkey: sbtc::deposits::to_v2_script_pubkey(
             deposit_script.clone(),
             reclaim_script.clone(),
         ),

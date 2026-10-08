@@ -283,7 +283,7 @@ impl SignerKeySet {
     pub fn taproot(&self) -> TaprootSpendInfo {
         let (script, leaf_version) = self.script_and_leaf_version();
         let node = NodeInfo::new_leaf_with_ver(script, leaf_version);
-        TaprootSpendInfo::from_node_info(SECP256K1, *crate::UNSPENDABLE_TAPROOT_KEY, node)
+        TaprootSpendInfo::from_node_info(SECP256K1, *crate::V2_UNSPENDABLE_TAPROOT_KEY, node)
     }
 
     /// Construct the signer UTXO scriptPubKey.
@@ -323,7 +323,7 @@ impl SignerKeySet {
             .collect::<Vec<_>>();
         format!(
             "tr({},multi_a({},{}))",
-            *crate::UNSPENDABLE_TAPROOT_KEY,
+            *crate::V2_UNSPENDABLE_TAPROOT_KEY,
             self.signatures_required,
             keys.join(",")
         )
@@ -361,7 +361,7 @@ where
         .collect::<Vec<_>>()
         .join(",");
 
-    let nums_keys = *crate::UNSPENDABLE_TAPROOT_KEY;
+    let nums_keys = *crate::V2_UNSPENDABLE_TAPROOT_KEY;
 
     format!("tr({nums_keys},sortedmulti_a({signatures_required},{keys}))")
 }
@@ -462,17 +462,17 @@ mod tests {
     /// scriptPubKey.
     #[test_case(
         DEVENV_SIGNER_KEYS, 2,
-        "51201c40c45615d773c9680fef824aefd07af28444931034f76d26ebe93486922121";
+        "512044d42c5fdc191818e50ec6591d2103f17ec2771c1a0ea5dc1db95ca56dd377b5";
         "devenv 2-of-3"
     )]
     #[test_case(
         TESTNET_SIGNER_KEYS, 11,
-        "512003a04e6a44b88d3fdc753bf32f70363b22cbd4ecdc789e773288bbaebbba53b7";
+        "512036beeeb78d2eff65baa60f8da199b5ecd06ee833dd3c8f6340f8b6d4102a595c";
         "testnet 11-of-15"
     )]
     #[test_case(
         RANDOM_SIGNER_KEYS, 1,
-        "5120761fe12a7ab01e8f523fca2ae13c66d9c6024605857821491af5b4cb837c9473";
+        "5120a014d46c5ec41d7d059755296e1d12566ca7416d3707a7789d2a3c88ee1eeca2";
         "random 1-of-1"
     )]
     fn key_set_script_pubkey_is_stable<const N: usize>(

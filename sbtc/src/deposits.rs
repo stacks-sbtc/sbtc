@@ -284,8 +284,11 @@ impl CreateDepositRequest {
             return Err(Error::InvalidReclaimScript);
         }
 
-        let expected_script_pubkey =
-            to_script_pubkey(deposit.deposit_script.clone(), reclaim_script.clone());
+        let deposit_script = deposit.deposit_script.clone();
+        let expected_script_pubkey = match deposit.signing_info.version() {
+            DepositScriptVersion::V1 => to_script_pubkey(deposit_script, reclaim_script.clone()),
+            DepositScriptVersion::V2 => to_v2_script_pubkey(deposit_script, reclaim_script.clone()),
+        };
         // Check that the expected scriptPubkey matches the actual public
         // key of our parsed UTXO.
         if expected_script_pubkey != tx_out.script_pubkey {
@@ -319,9 +322,25 @@ fn principal_is_mainnet(principal: PrincipalData) -> bool {
     StacksAddress::from(standard_address).is_mainnet()
 }
 
-/// Construct the expected taproot info for a deposit UTXO on the given
-/// the deposit and reclaim scripts.
+/// Construct the expected taproot info for a v1 deposit UTXO from its
+/// deposit and reclaim scripts.
 pub fn to_taproot(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) -> TaprootSpendInfo {
+    let internal_key = *crate::UNSPENDABLE_TAPROOT_KEY;
+    taproot_with_internal_key(deposit_script, reclaim_script, internal_key)
+}
+
+/// Construct the expected taproot info for a v2 deposit UTXO.
+pub fn to_v2_taproot(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) -> TaprootSpendInfo {
+    let internal_key = *crate::V2_UNSPENDABLE_TAPROOT_KEY;
+    taproot_with_internal_key(deposit_script, reclaim_script, internal_key)
+}
+
+/// Construct deposit spend information using the supplied internal key.
+fn taproot_with_internal_key(
+    deposit_script: ScriptBuf,
+    reclaim_script: ScriptBuf,
+    internal_key: XOnlyPublicKey,
+) -> TaprootSpendInfo {
     let ver = LeafVersion::TapScript;
     // For such a simple tree, we construct it by hand.
     let leaf1 = NodeInfo::new_leaf_with_ver(deposit_script, ver);
@@ -331,12 +350,11 @@ pub fn to_taproot(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) -> Tapro
     // which is 128. We have two nodes so the depth is 1 so this will
     // never panic.
     let node = NodeInfo::combine(leaf1, leaf2).expect("Tree depth is greater than the max of 128");
-    let internal_key = *crate::UNSPENDABLE_TAPROOT_KEY;
 
     TaprootSpendInfo::from_node_info(SECP256K1, internal_key, node)
 }
 
-/// Create the expected ScriptPubKey from the deposit and reclaim scripts.
+/// Create the expected ScriptPubKey for v1 deposit and reclaim scripts.
 pub fn to_script_pubkey(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) -> ScriptBuf {
     let merkle_root = to_taproot(deposit_script, reclaim_script).merkle_root();
     // Deposit transactions use a NUMS (nothing up my sleeve) public
@@ -344,13 +362,21 @@ pub fn to_script_pubkey(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) ->
     let internal_key = *crate::UNSPENDABLE_TAPROOT_KEY;
     ScriptBuf::new_p2tr(SECP256K1, internal_key, merkle_root)
 }
-
-/// Construct a bitcoin address for a deposit UTXO on the given
+/// Construct a bitcoin address for a v1 deposit UTXO on the given
 /// network.
 fn p2tr_address(deposit_script: ScriptBuf, reclaim_script: ScriptBuf, network: Network) -> Address {
     let internal_key = *crate::UNSPENDABLE_TAPROOT_KEY;
     let merkle_root = to_taproot(deposit_script, reclaim_script).merkle_root();
     Address::p2tr(SECP256K1, internal_key, merkle_root, network)
+}
+
+/// Create the expected ScriptPubKey for a v2 deposit output.
+pub fn to_v2_script_pubkey(deposit_script: ScriptBuf, reclaim_script: ScriptBuf) -> ScriptBuf {
+    let merkle_root = to_v2_taproot(deposit_script, reclaim_script).merkle_root();
+    // Deposit transactions use a NUMS (nothing up my sleeve) public
+    // key for the key-spend path of taproot scripts.
+    let internal_key = *crate::V2_UNSPENDABLE_TAPROOT_KEY;
+    ScriptBuf::new_p2tr(SECP256K1, internal_key, merkle_root)
 }
 
 /// This struct contains the key variable inputs when constructing a
@@ -493,16 +519,6 @@ impl DepositScriptInputs {
             recipient,
         })
     }
-
-    /// Parse and validate a v2 deposit script using the off-chain deposit
-    /// fields supplied to Emily.
-    pub fn parse_v2(
-        deposit_script: &ScriptBuf,
-        recipient: PrincipalData,
-        max_fee: u64,
-    ) -> Result<DepositScriptInputsV2, Error> {
-        DepositScriptInputsV2::parse(deposit_script, recipient, max_fee)
-    }
 }
 
 /// Inputs to a version 2 deposit script.
@@ -533,19 +549,10 @@ impl DepositScriptInputsV2 {
         })
     }
 
-    /// Return the 32-byte preimage revealed when spending this deposit.
-    pub fn preimage(&self) -> [u8; 32] {
-        deposit_data_preimage(self.max_fee, &self.recipient)
-    }
-
     /// Return the hash embedded in the v2 deposit script.
+    #[cfg(any(test, feature = "testing"))]
     pub fn commitment(&self) -> [u8; 32] {
         deposit_data_commitment(self.max_fee, &self.recipient)
-    }
-
-    /// Return the stable identifier for this signing key set.
-    pub fn key_set_id(&self) -> KeySetId {
-        self.signer_key_set.id()
     }
 
     /// Construct the descriptor-compatible v2 deposit leaf.
@@ -554,14 +561,10 @@ impl DepositScriptInputsV2 {
     /// signers' `multi_a` script, which is exactly
     /// [`SignerKeySet::signing_script`].
     pub fn deposit_script(&self) -> ScriptBuf {
-        let mut bytes = v2_deposit_prefix(self.commitment()).into_bytes();
+        let commitment = deposit_data_commitment(self.max_fee, &self.recipient);
+        let mut bytes = v2_deposit_prefix(commitment).into_bytes();
         bytes.extend_from_slice(self.signer_key_set.signing_script().as_bytes());
         ScriptBuf::from_bytes(bytes)
-    }
-
-    /// Construct a Bitcoin address for this deposit and reclaim script.
-    pub fn to_address(&self, reclaim_script: ScriptBuf, network: Network) -> Address {
-        p2tr_address(self.deposit_script(), reclaim_script, network)
     }
 
     /// Parse and validate the canonical v2 deposit leaf against its
@@ -898,8 +901,15 @@ fn scriptint_parse(v: &[u8]) -> i64 {
 #[cfg(test)]
 mod tests {
     use bitcoin::AddressType;
+    use bitcoin::NetworkKind;
     use bitcoin::Txid;
+    use bitcoin::bip32::ChainCode;
+    use bitcoin::bip32::ChildNumber;
+    use bitcoin::bip32::Fingerprint;
+    use bitcoin::bip32::Xpub;
     use rand::rngs::OsRng;
+    use secp256k1::Parity;
+    use secp256k1::PublicKey;
     use secp256k1::SecretKey;
     use stacks_common::types::chainstate::StacksAddress;
 
@@ -972,7 +982,7 @@ mod tests {
         let inputs = DepositScriptInputsV2::new(keys, 3, recipient.clone(), 25_000).unwrap();
         let script = inputs.deposit_script();
 
-        let parsed = DepositScriptInputs::parse_v2(&script, recipient.clone(), 25_000).unwrap();
+        let parsed = DepositScriptInputsV2::parse(&script, recipient.clone(), 25_000).unwrap();
         assert_eq!(parsed, inputs);
         assert_eq!(parsed.deposit_script(), script);
 
@@ -1002,7 +1012,7 @@ mod tests {
             input: Vec::new(),
             output: vec![bitcoin::TxOut {
                 value: bitcoin::Amount::from_sat(500_000),
-                script_pubkey: to_script_pubkey(deposit_script.clone(), reclaim_script.clone()),
+                script_pubkey: to_v2_script_pubkey(deposit_script.clone(), reclaim_script.clone()),
             }],
         };
         let request = CreateDepositRequest {
@@ -1022,7 +1032,7 @@ mod tests {
             }
         );
         assert_eq!(info.version(), DepositScriptVersion::V2);
-        assert_eq!(info.key_set_id(), deposit.key_set_id());
+        assert_eq!(info.key_set_id(), deposit.signer_key_set.id());
     }
 
     #[test]
@@ -1084,7 +1094,7 @@ mod tests {
         let mut malformed_script = deposit.deposit_script().into_bytes();
         malformed_script.splice(replaced_range, replacement);
 
-        let error = DepositScriptInputs::parse_v2(
+        let error = DepositScriptInputsV2::parse(
             &ScriptBuf::from_bytes(malformed_script),
             deposit.recipient,
             deposit.max_fee,
@@ -1101,7 +1111,7 @@ mod tests {
 
         for length in 0..prefix.len() {
             let truncated = ScriptBuf::from_bytes(prefix[..length].to_vec());
-            let error = DepositScriptInputs::parse_v2(
+            let error = DepositScriptInputsV2::parse(
                 &truncated,
                 deposit.recipient.clone(),
                 deposit.max_fee,
@@ -1123,7 +1133,7 @@ mod tests {
         let actual = v2_deposit_prefix(deposit.commitment());
 
         let error =
-            DepositScriptInputs::parse_v2(&script, deposit.recipient.clone(), deposit.max_fee + 1)
+            DepositScriptInputsV2::parse(&script, deposit.recipient.clone(), deposit.max_fee + 1)
                 .unwrap_err();
         std::assert_matches!(
             error,
@@ -1140,7 +1150,7 @@ mod tests {
         let script = v2_deposit_prefix(deposit.commitment());
 
         let error =
-            DepositScriptInputs::parse_v2(&script, deposit.recipient, deposit.max_fee).unwrap_err();
+            DepositScriptInputsV2::parse(&script, deposit.recipient, deposit.max_fee).unwrap_err();
 
         std::assert_matches!(error, Error::InvalidDepositScript);
     }
@@ -1630,6 +1640,38 @@ mod tests {
         let var1 = *crate::UNSPENDABLE_TAPROOT_KEY;
         let var2 = *crate::UNSPENDABLE_TAPROOT_KEY;
         assert_eq!(var1, var2);
+    }
+
+    #[test]
+    fn v2_unspendable_taproot_key_is_nums_xpub_child_at_zero_zero() {
+        let nums_xpub = Xpub {
+            network: NetworkKind::Test,
+            depth: 0,
+            parent_fingerprint: Fingerprint::default(),
+            child_number: ChildNumber::Normal { index: 0 },
+            public_key: PublicKey::from_x_only_public_key(
+                *crate::UNSPENDABLE_TAPROOT_KEY,
+                Parity::Even,
+            ),
+            chain_code: ChainCode::from([0; 32]),
+        };
+        // This is the NUMS tpub used by Ledger's Bitcoin application tests:
+        // https://github.com/LedgerHQ/app-bitcoin/blob/2.5.0/tests/test_register_wallet.py#L480-L492
+        assert_eq!(
+            nums_xpub.to_string(),
+            "tpubD6NzVbkrYhZ4WLczPJWReQycCJdd6YVWXubbVUFnJ5KgU5MDQrD998ZJLSmaB7GVcCnJSDWprxmrGkJ6SvgQC6QAffVpqSvonXmeizXcrkN"
+        );
+        let path = [
+            ChildNumber::Normal { index: 0 },
+            ChildNumber::Normal { index: 0 },
+        ];
+
+        let derived_key = nums_xpub
+            .derive_pub(SECP256K1, &path)
+            .unwrap()
+            .to_x_only_pub();
+
+        assert_eq!(derived_key, *crate::V2_UNSPENDABLE_TAPROOT_KEY);
     }
 
     #[test_case::test_matrix(1..=16)]

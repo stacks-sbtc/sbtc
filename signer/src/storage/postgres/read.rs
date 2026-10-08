@@ -1141,14 +1141,13 @@ impl PgRead {
             }
             model::KeySetId::V2(_) => {
                 let script: bitcoin::ScriptBuf = summary.deposit_script.clone().into();
-                let inputs = sbtc::deposits::DepositScriptInputs::parse_v2(
-                    &script,
-                    summary.recipient.clone().into(),
-                    u64::from_be_bytes(summary.max_fee),
-                )?;
+                let recipient = summary.recipient.clone().into();
+                let max_fee = u64::from_be_bytes(summary.max_fee);
+                let inputs =
+                    sbtc::deposits::DepositScriptInputsV2::parse(&script, recipient, max_fee)?;
                 DepositRequestSigningData::V2 {
                     key_set: inputs.signer_key_set,
-                    recipient: summary.recipient.clone(),
+                    recipient: summary.recipient,
                 }
             }
         };

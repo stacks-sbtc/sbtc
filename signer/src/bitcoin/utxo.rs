@@ -35,6 +35,7 @@ use bitvec::array::BitArray;
 use bitvec::field::BitField as _;
 use prost::Message as _;
 use sbtc::SignerKeySet;
+use sbtc::deposits::DepositScriptInputsV2;
 use sbtc::idpack::BitmapSegmenter;
 use sbtc::idpack::Decodable as _;
 use sbtc::idpack::Encodable as _;
@@ -528,6 +529,14 @@ pub enum DepositSigningKey {
 }
 
 impl DepositRequest {
+    /// Return the unspendable internal key used by this deposit version.
+    fn internal_key(&self) -> XOnlyPublicKey {
+        match &self.signers_public_key {
+            DepositSigningKey::V1(_) => *sbtc::UNSPENDABLE_TAPROOT_KEY,
+            DepositSigningKey::V2 { .. } => *sbtc::V2_UNSPENDABLE_TAPROOT_KEY,
+        }
+    }
+
     /// Create a transaction input with a correctly-sized witness for fee
     /// estimation. The v2 witness is intentionally not valid for broadcast.
     fn as_tx_input(&self) -> TxIn {
@@ -549,7 +558,7 @@ impl DepositRequest {
     fn as_tx_out(&self) -> TxOut {
         let ver = LeafVersion::TapScript;
         let merkle_root = self.construct_taproot_info(ver).merkle_root();
-        let internal_key = *sbtc::UNSPENDABLE_TAPROOT_KEY;
+        let internal_key = self.internal_key();
 
         TxOut {
             value: Amount::from_sat(self.amount),
@@ -643,7 +652,7 @@ impl DepositRequest {
         // never panic.
         let node =
             NodeInfo::combine(leaf1, leaf2).expect("This tree depth greater than max of 128");
-        let internal_key = *sbtc::UNSPENDABLE_TAPROOT_KEY;
+        let internal_key = self.internal_key();
 
         TaprootSpendInfo::from_node_info(SECP256K1, internal_key, node)
     }
@@ -654,11 +663,8 @@ impl DepositRequest {
             KeySetId::V1(public_key) => DepositSigningKey::V1(public_key.into()),
             KeySetId::V2(_) => {
                 let script = ScriptBuf::from_bytes(request.spend_script.clone());
-                let inputs = sbtc::deposits::DepositScriptInputs::parse_v2(
-                    &script,
-                    request.recipient.clone().into(),
-                    request.max_fee,
-                )?;
+                let recipient = request.recipient.clone().into();
+                let inputs = DepositScriptInputsV2::parse(&script, recipient, request.max_fee)?;
 
                 DepositSigningKey::V2 {
                     key_set: inputs.signer_key_set,
