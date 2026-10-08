@@ -199,22 +199,9 @@ impl CreateDepositRequest {
 
     /// Parse either supported deposit script format into its common fields.
     fn parse_deposit_script(&self) -> Result<ParsedDepositScript, Error> {
-        match DepositScriptInputs::parse(&self.deposit_script) {
-            Ok(deposit) => Ok(ParsedDepositScript {
-                deposit_script: deposit.deposit_script(),
-                recipient: deposit.recipient,
-                max_fee: deposit.max_fee,
-                signing_info: DepositSigningInfo::V1 {
-                    public_key: deposit.signers_public_key,
-                },
-            }),
-            Err(v1_error) => {
-                // The off-chain fields are the version discriminator. If
-                // neither is present, preserve the legacy parser's error so
-                // existing v1 callers continue to get the precise failure.
-                if self.recipient.is_none() && self.max_fee.is_none() {
-                    return Err(v1_error);
-                }
+        match self.deposit_script.first_opcode() {
+            // All v2 deposit scripts start with OP_SIZE.
+            Some(opcodes::OP_SIZE) => {
                 let deposit = self.parse_v2_deposit_script()?;
                 Ok(ParsedDepositScript {
                     deposit_script: deposit.deposit_script(),
@@ -225,6 +212,20 @@ impl CreateDepositRequest {
                     },
                 })
             }
+            // All v1 deposit scripts start with either OP_PUSHBYTES_N, or
+            // OP_PUSHDATA1.
+            Some(_) => {
+                let deposit = DepositScriptInputs::parse(&self.deposit_script)?;
+                Ok(ParsedDepositScript {
+                    deposit_script: deposit.deposit_script(),
+                    recipient: deposit.recipient,
+                    max_fee: deposit.max_fee,
+                    signing_info: DepositSigningInfo::V1 {
+                        public_key: deposit.signers_public_key,
+                    },
+                })
+            }
+            _ => Err(Error::InvalidDepositScriptLength),
         }
     }
 
