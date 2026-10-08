@@ -1,5 +1,6 @@
 //! Request structures for deposit api calls.
 
+use sbtc::deposits::DepositScriptVersion;
 use serde::{Deserialize, Serialize};
 use utoipa::{ToResponse, ToSchema};
 
@@ -18,11 +19,11 @@ pub enum DepositVersion {
     V2,
 }
 
-impl From<sbtc::deposits::DepositScriptVersion> for DepositVersion {
-    fn from(value: sbtc::deposits::DepositScriptVersion) -> Self {
+impl From<DepositScriptVersion> for DepositVersion {
+    fn from(value: DepositScriptVersion) -> Self {
         match value {
-            sbtc::deposits::DepositScriptVersion::V1 => Self::V1,
-            sbtc::deposits::DepositScriptVersion::V2 => Self::V2,
+            DepositScriptVersion::V1 => Self::V1,
+            DepositScriptVersion::V2 => Self::V2,
         }
     }
 }

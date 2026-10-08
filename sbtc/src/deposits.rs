@@ -507,7 +507,43 @@ impl DepositScriptInputs {
     }
 }
 
-/// Inputs to a version 2 deposit script.
+/// This struct contains the key variable inputs when constructing a v2
+/// deposit script.
+///
+/// # Accepted deposit script
+///
+/// An acceptable script has exactly the following form:
+///
+/// ```text
+/// OP_SIZE 32 OP_EQUALVERIFY
+/// OP_SHA256 <32-byte commitment> OP_EQUALVERIFY
+/// <key 1> OP_CHECKSIG
+/// <key 2> OP_CHECKSIGADD
+/// ...
+/// <key n> OP_CHECKSIGADD
+/// <signatures required> OP_NUMEQUAL
+/// ```
+///
+/// All values use their minimal Bitcoin Script encodings. The keys are
+/// distinct 32-byte x-only public keys in sorted order, n is between 1 and
+/// [`crate::MAX_SIGNERS`], and `signatures required` is between 1 and n.
+///
+/// # Deposit-data commitment
+///
+/// The recipient and maximum fee are supplied off chain. The script
+/// commits to them as follows, where `||` denotes concatenation and the
+/// recipient uses its Stacks consensus serialization:
+///
+/// ```text
+/// deposit data = max_fee.to_be_bytes() || recipient.consensus_serialize()
+/// preimage     = SHA256(deposit data)
+/// commitment   = SHA256(preimage)
+/// ```
+///
+/// So the deposit script embeds the commitment. When spending the deposit,
+/// the signers reveal the 32-byte preimage. Parsing a deposit script
+/// recomputes the commitment from the supplied recipient and maximum fee,
+/// so a script is rejected if either value does not match.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DepositScriptInputsV2 {
     /// The validated signer key set encoded by the deposit script.
@@ -541,7 +577,7 @@ impl DepositScriptInputsV2 {
         deposit_data_commitment(self.max_fee, &self.recipient)
     }
 
-    /// Construct the descriptor-compatible v2 deposit leaf.
+    /// Construct the v2 deposit leaf.
     ///
     /// The leaf is the fixed-length hash-lock prefix followed by the
     /// signers' `multi_a` script, which is exactly
@@ -553,8 +589,8 @@ impl DepositScriptInputsV2 {
         ScriptBuf::from_bytes(bytes)
     }
 
-    /// Parse and validate the canonical v2 deposit leaf against its
-    /// off-chain recipient and maximum-fee fields.
+    /// Parse and validate the v2 deposit script against recipient and
+    /// max-fee.
     pub fn parse(
         deposit_script: &ScriptBuf,
         recipient: PrincipalData,
@@ -575,16 +611,16 @@ impl DepositScriptInputsV2 {
         }
 
         let signing_script = Script::from_bytes(signing_script);
-        let key_set = SignerKeySet::parse(signing_script).map_err(|error| match error {
+        let signer_key_set = SignerKeySet::parse(signing_script).map_err(|error| match error {
             Error::InvalidSignerScript => Error::InvalidDepositScript,
             error => error,
         })?;
-        let parsed = Self {
-            signer_key_set: key_set,
+
+        Ok(Self {
+            signer_key_set,
             recipient,
             max_fee,
-        };
-        Ok(parsed)
+        })
     }
 }
 
@@ -601,8 +637,11 @@ fn deposit_data_commitment(max_fee: u64, recipient: &PrincipalData) -> [u8; 32] 
     sha256::Hash::hash(&deposit_data_preimage(max_fee, recipient)).to_byte_array()
 }
 
-/// Return the hash-lock prefix of a v2 deposit leaf, which is
-/// `OP_SIZE <32> OP_EQUALVERIFY OP_SHA256 <commitment> OP_EQUALVERIFY`.
+/// Return the hash-lock prefix of a v2 deposit script, which is
+///
+/// ```text
+/// OP_SIZE <32> OP_EQUALVERIFY OP_SHA256 <commitment> OP_EQUALVERIFY
+/// ```
 fn v2_deposit_prefix(commitment: [u8; 32]) -> ScriptBuf {
     ScriptBuf::builder()
         .push_opcode(opcodes::OP_SIZE)
