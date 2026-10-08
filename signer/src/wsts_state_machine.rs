@@ -533,16 +533,28 @@ impl SignerStateMachine {
         Ok(Self { inner, started_at, private_key })
     }
 
-    /// Create a random number generator seeded with the given bitcoin
-    /// block reference and a private key.
-    fn create_rng(started_at: &BitcoinBlockHash, private_key: PrivateKey) -> ChaCha20Rng {
-        let seed_bytes: [u8; 32] = sha2::Sha256::new_with_prefix("DKG_RNG")
-            .chain_update(started_at.into_bytes())
-            .chain_update(private_key.to_bytes())
-            .finalize()
-            .into();
+    /// Seeded by every DKG input so runs with different parameters never share randomness.
+    fn dkg_rng(&self, dkg_id: u64) -> ChaCha20Rng {
+        let wsts = &self.inner;
+        let mut hasher = Sha256::new_with_prefix("DKG_RNG_V2")
+            .chain_update(self.private_key.to_bytes())
+            .chain_update(self.started_at.block_hash.into_bytes())
+            .chain_update(self.started_at.block_height.to_be_bytes())
+            .chain_update(dkg_id.to_be_bytes())
+            .chain_update(wsts.threshold.to_be_bytes())
+            .chain_update(wsts.dkg_threshold.to_be_bytes())
+            .chain_update(wsts.total_signers.to_be_bytes())
+            .chain_update(wsts.total_keys.to_be_bytes())
+            .chain_update(wsts.signer_id.to_be_bytes());
 
-        ChaCha20Rng::from_seed(seed_bytes)
+        // Fixed-width fields with the set last keep the encoding injective.
+        let signers: BTreeMap<_, _> = wsts.public_keys.signers.iter().collect();
+        for (signer_id, public_key) in signers {
+            hasher.update(signer_id.to_be_bytes());
+            hasher.update(public_key.to_bytes());
+        }
+
+        ChaCha20Rng::from_seed(hasher.finalize().into())
     }
 
     /// Process the passed incoming message, and return any outgoing
@@ -551,24 +563,23 @@ impl SignerStateMachine {
     /// # Notes
     ///
     /// This function processes messages in such a way where the generated
-    /// secrets for DKG are deterministic given the bitcoin block ref and
-    /// private keys used to create this state machine. Here is how.
+    /// secrets for DKG are deterministic given the inputs used to create
+    /// this state machine and the DKG ID. Here is how.
     ///
     /// The underlying WSTS state machine generates a new polynomial when
     /// it receives a DKG begin message using the given random number
     /// generator. This polynomial is the same one generated in the FROST
     /// scheme, which is used for creating secret shares. So this function
     /// intercepts `DkgBegin` messages and uses a random number generator
-    /// that was seeded with a bitcoin block hash, the corresponding
-    /// bitcoin block height, and the signer's private key. This ensures
-    /// that secret shares are generated in a pseudo-random way.
+    /// seeded with every DKG input (see `dkg_rng`). This ensures that secret
+    /// shares are generated in a pseudo-random way.
     ///
     /// All other messages are processed with the OS random number
     /// generated.
     pub fn process(&mut self, message: &Message) -> Result<Vec<Message>, Error> {
         let response = match message {
-            Message::DkgBegin(_) => {
-                let mut rng = Self::create_rng(&self.started_at.block_hash, self.private_key);
+            Message::DkgBegin(request) => {
+                let mut rng = self.dkg_rng(request.dkg_id);
                 self.inner.process(message, &mut rng)
             }
             _ => self.inner.process(message, &mut OsRng),
@@ -693,5 +704,131 @@ impl SignerStateMachine {
             started_at_bitcoin_block_hash: self.started_at.block_hash,
             started_at_bitcoin_block_height: self.started_at.block_height,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::BTreeSet;
+
+    use wsts::curve::point::Point;
+    use wsts::net::DkgBegin;
+
+    /// The commitment a fresh signer sends in reply to `DkgBegin`.
+    fn dkg_commitment(
+        signers: &BTreeSet<PublicKey>,
+        threshold: u32,
+        started_at: BitcoinBlockRef,
+        private_key: PrivateKey,
+        dkg_id: u64,
+    ) -> PolyCommitment {
+        let signers = signers.iter().copied();
+        let mut state_machine =
+            SignerStateMachine::new(signers, threshold, started_at, private_key).unwrap();
+        let outbound = state_machine
+            .process(&Message::DkgBegin(DkgBegin { dkg_id }))
+            .unwrap();
+
+        let [Message::DkgPublicShares(shares)] = outbound.as_slice() else {
+            panic!("expected a single DkgPublicShares message");
+        };
+        let [(_, commitment)] = shares.comms.as_slice() else {
+            panic!("expected a single polynomial commitment");
+        };
+        commitment.clone()
+    }
+
+    /// Coefficient commitments, then the proof-of-knowledge nonce commitment.
+    fn public_points(commitment: &PolyCommitment) -> Vec<Point> {
+        let mut points = commitment.poly().to_vec();
+        points.push(commitment.id().kG);
+        points
+    }
+
+    #[test]
+    fn dkg_randomness_is_bound_to_dkg_parameters() {
+        let mut private_keys: Vec<PrivateKey> =
+            std::iter::repeat_with(|| PrivateKey::new(&mut OsRng))
+                .take(5)
+                .collect();
+        private_keys.sort_by_key(PublicKey::from_private_key);
+        let keys: Vec<PublicKey> = private_keys
+            .iter()
+            .map(PublicKey::from_private_key)
+            .collect();
+        let set = |idx: &[usize]| idx.iter().map(|&i| keys[i]).collect::<BTreeSet<_>>();
+
+        // keys[0] sorts below ours, so adding it shifts our rank.
+        let private_key = private_keys[1];
+        let started_at = BitcoinBlockRef {
+            block_hash: [1; 32].into(),
+            block_height: 100u64.into(),
+        };
+        let other_block = BitcoinBlockRef {
+            block_hash: [2; 32].into(),
+            block_height: 100u64.into(),
+        };
+        let dkg_id = *started_at.block_height;
+        let signers = set(&[1, 2, 3]);
+
+        let base = dkg_commitment(&signers, 2, started_at, private_key, dkg_id);
+        let again = dkg_commitment(&signers, 2, started_at, private_key, dkg_id);
+        assert_eq!(base, again);
+        let base = public_points(&base);
+
+        let variants = [
+            ("rank", set(&[0, 1, 2, 3]), 2, started_at, dkg_id),
+            ("signer set", set(&[1, 2, 4]), 2, started_at, dkg_id),
+            ("threshold", signers.clone(), 3, started_at, dkg_id),
+            ("dkg id", signers.clone(), 2, started_at, dkg_id + 1),
+            ("block", signers.clone(), 2, other_block, dkg_id),
+        ];
+        let reused: Vec<&str> = variants
+            .into_iter()
+            .filter(|(_, signers, threshold, started_at, dkg_id)| {
+                let commitment =
+                    dkg_commitment(signers, *threshold, *started_at, private_key, *dkg_id);
+                public_points(&commitment)
+                    .iter()
+                    .any(|point| base.contains(point))
+            })
+            .map(|(name, ..)| name)
+            .collect();
+        assert!(
+            reused.is_empty(),
+            "DKG randomness reused when changing: {reused:?}"
+        );
+    }
+
+    /// If the digest changes, bump the tag in `dkg_rng` too.
+    #[test]
+    fn dkg_begin_output_is_pinned() {
+        let private_keys: Vec<PrivateKey> = (1..=3u8)
+            .map(|byte| PrivateKey::from_slice(&[byte; 32]).unwrap())
+            .collect();
+        let signers: BTreeSet<PublicKey> = private_keys
+            .iter()
+            .map(PublicKey::from_private_key)
+            .collect();
+        let started_at = BitcoinBlockRef {
+            block_hash: [1; 32].into(),
+            block_height: 100u64.into(),
+        };
+
+        let commitment = dkg_commitment(&signers, 2, started_at, private_keys[0], 100);
+
+        let mut hasher = Sha256::new();
+        for point in public_points(&commitment) {
+            hasher.update(point.compress().as_bytes());
+        }
+        hasher.update(commitment.id().kca.to_bytes());
+        let digest: [u8; 32] = hasher.finalize().into();
+
+        assert_eq!(
+            hex::encode(digest),
+            "8c4a1226b03cce48c3fdfb4a4e9a9bbecf73d9d9c66e03f44a272aaa70cf448a"
+        );
     }
 }
