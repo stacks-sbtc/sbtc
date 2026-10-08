@@ -30,16 +30,17 @@ INSERT INTO sbtc_signer.signer_key_sets (
     signatures_required,
     created_at
 )
-SELECT substring(ds.aggregate_key FROM 2),
-       'v1',
-       ds.script_pubkey,
-       ARRAY(
+SELECT substring(ds.aggregate_key FROM 2)
+     , 'v1'
+     , ds.script_pubkey
+     , ARRAY(
            SELECT substring(signer_public_key FROM 2)
            FROM UNNEST(ds.signer_set_public_keys) AS signer_public_key
-       ),
-       ds.signature_share_threshold,
-       ds.created_at
-FROM sbtc_signer.dkg_shares AS ds;
+       )
+     , ds.signature_share_threshold
+     , ds.created_at
+FROM sbtc_signer.dkg_shares AS ds
+WHERE ds.dkg_shares_status = 'verified';
 
 -- Existing rows in these tables are v1, so their x-only public keys are
 -- already v1 key-set identifiers.

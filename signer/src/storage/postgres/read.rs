@@ -1991,27 +1991,14 @@ impl PgRead {
     {
         sqlx::query_scalar::<_, model::Bytes>(
             r#"
-            WITH last_script_pubkey AS (
-                SELECT script_pubkey
-                FROM sbtc_signer.signer_key_sets
-                ORDER BY created_at DESC
-                LIMIT 1
-            )
-            SELECT script_pubkey
-            FROM last_script_pubkey
-
-            UNION
-
             SELECT script_pubkey
             FROM sbtc_signer.signer_key_sets
-            WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS'
 
             UNION
 
             SELECT script_pubkey
             FROM sbtc_signer.bitcoin_tx_outputs
             WHERE output_type = 'signers_output'
-              AND created_at > CURRENT_TIMESTAMP - INTERVAL '365 DAYS'
             "#,
         )
         .fetch_all(executor)

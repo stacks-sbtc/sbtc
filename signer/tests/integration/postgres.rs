@@ -1930,51 +1930,57 @@ async fn is_signer_script_pub_key_checks_bitcoin_tx_outputs_for_script_pubkeys()
     signer::testing::storage::drop_db(db).await;
 }
 
-/// The [`DbRead::get_signers_script_pubkeys`] function is only supposed to
-/// fetch the last 365 days worth of scriptPubKeys, but if there are no new
-/// signer key sets in the database in a year, we should still return the
-/// most recent one.
+/// The [`DbRead::get_signers_script_pubkeys`] function returns every
+/// persisted signer key set, including multiple key sets older than 365
+/// days.
 #[tokio::test]
-async fn get_signers_script_pubkeys_returns_non_empty_vec_old_rows() {
+async fn get_signers_script_pubkeys_returns_all_old_key_sets() {
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
+    let mut expected = BTreeSet::new();
 
-    let shares: model::EncryptedDkgShares = fake::Faker.fake_with_rng(&mut rng);
-    let key_set_id =
-        model::KeySetId::from(signer::keys::PublicKeyXOnly::from(shares.aggregate_key));
-    let signer_public_keys: Vec<signer::keys::PublicKeyXOnly> = shares
-        .signer_set_public_keys
-        .iter()
-        .map(|key| model::KeySetVersion::V1.member_key(key))
-        .collect();
+    for _ in 0..2 {
+        let shares: model::EncryptedDkgShares = fake::Faker.fake_with_rng(&mut rng);
+        let key_set_id =
+            model::KeySetId::from(signer::keys::PublicKeyXOnly::from(shares.aggregate_key));
+        let signer_public_keys: Vec<signer::keys::PublicKeyXOnly> = shares
+            .signer_set_public_keys
+            .iter()
+            .map(|key| model::KeySetVersion::V1.member_key(key))
+            .collect();
 
-    sqlx::query(
-        r#"
-        INSERT INTO sbtc_signer.signer_key_sets (
-            key_set_id
-          , script_version
-          , script_pubkey
-          , signer_public_keys
-          , signatures_required
-          , created_at
+        sqlx::query(
+            r#"
+            INSERT INTO sbtc_signer.signer_key_sets (
+                key_set_id
+              , script_version
+              , script_pubkey
+              , signer_public_keys
+              , signatures_required
+              , created_at
+            )
+            VALUES ($1, 'v1', $2, $3, $4, CURRENT_TIMESTAMP - INTERVAL '366 DAYS')"#,
         )
-        VALUES ($1, 'v1', $2, $3, $4, CURRENT_TIMESTAMP - INTERVAL '366 DAYS')"#,
-    )
-    .bind(key_set_id)
-    .bind(&shares.script_pubkey)
-    .bind(&signer_public_keys)
-    .bind(i32::from(shares.signature_share_threshold))
-    .execute(db.pool())
-    .await
-    .unwrap();
+        .bind(key_set_id)
+        .bind(&shares.script_pubkey)
+        .bind(&signer_public_keys)
+        .bind(i32::from(shares.signature_share_threshold))
+        .execute(db.pool())
+        .await
+        .unwrap();
 
-    let keys = db.get_signers_script_pubkeys().await.unwrap();
-    assert_eq!(keys.len(), 1);
-    assert_eq!(
-        ScriptPubKey::from_bytes(keys[0].clone()),
-        shares.script_pubkey
-    );
+        expected.insert(shares.script_pubkey);
+    }
+
+    let keys = db
+        .get_signers_script_pubkeys()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(ScriptPubKey::from_bytes)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(keys, expected);
 
     signer::testing::storage::drop_db(db).await;
 }

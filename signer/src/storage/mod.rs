@@ -339,9 +339,8 @@ pub trait DbRead {
         signatures_required: u16,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Get the last 365 days worth of the signers' `scriptPubkey`s. If no
-    /// keys are available within the last 365, then return the most recent
-    /// key.
+    /// Get the `scriptPubKey` for every persisted signer key set and
+    /// signer output.
     fn get_signers_script_pubkeys(
         &self,
     ) -> impl Future<Output = Result<Vec<model::Bytes>, Error>> + Send;
