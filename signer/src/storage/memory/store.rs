@@ -11,10 +11,10 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 
 use crate::bitcoin::utxo::SignerUtxo;
+use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
-use crate::keys::SignerScriptPubKey as _;
 use crate::storage::Transactable;
 use crate::storage::model;
 use crate::storage::model::CompletedDepositEvent;
@@ -88,6 +88,9 @@ pub struct Store {
 
     /// Encrypted DKG shares
     pub encrypted_dkg_shares: BTreeMap<PublicKeyXOnly, (OffsetDateTime, model::EncryptedDkgShares)>,
+
+    /// Signer key sets, together with their insertion times.
+    pub signer_key_sets: BTreeMap<model::KeySetId, (OffsetDateTime, model::SignerKeySet)>,
 
     /// Rotate keys transactions
     pub rotate_keys_transactions: HashMap<model::StacksBlockHash, Vec<model::KeyRotationEvent>>,
@@ -197,10 +200,9 @@ impl Store {
     pub(super) async fn get_utxo_from_donation(
         &self,
         chain_tip: &model::BitcoinBlockHash,
-        aggregate_key: &PublicKey,
+        key_sets: &BTreeMap<bitcoin::ScriptBuf, SignerUtxoKeySet>,
         context_window: u16,
     ) -> Result<Option<SignerUtxo>, Error> {
-        let script_pubkey = aggregate_key.signers_script_pubkey();
         let bitcoin_blocks = &self.bitcoin_blocks;
         let first = bitcoin_blocks.get(chain_tip);
 
@@ -224,7 +226,7 @@ impl Store {
                     .filter(|tx| {
                         tx.output
                             .first()
-                            .is_some_and(|out| out.script_pubkey == script_pubkey)
+                            .is_some_and(|out| key_sets.contains_key(&out.script_pubkey))
                     })
                     .peekable();
 
@@ -242,7 +244,7 @@ impl Store {
             return Ok(None);
         };
 
-        get_utxo(aggregate_key, sbtc_txs)
+        get_utxo(key_sets, sbtc_txs)
     }
 
     /// Get all deposit requests that are on the blockchain identified by

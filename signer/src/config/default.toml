@@ -128,6 +128,22 @@ private_key = "41634762d89dfa09133a4a8e9c1378d0161d29cd0a9433b51f1e3d32947a73dc"
 # Environment: SIGNER_SIGNER__NETWORK
 network = "regtest"
 
+# Bitcoin height at which non-mainnet signer UTXOs switch to v2 script-path
+# multisig. Mainnet ignores this setting and uses the compiled-in height.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__V2_SIGNING_BLOCK_HEIGHT
+# v2_signing_block_height = 245
+
+# Bitcoin height at which non-mainnet signers disable DKG and switch rotate-keys
+# calls to the v2 registry-key encoding. Mainnet ignores this setting and uses
+# the compiled-in height. The height must not be lower than the effective v2
+# signing height and defaults to u64::MAX.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__DKG_DISABLE_BLOCK_HEIGHT
+# dkg_disable_block_height = 245
+
 # The address that deployed the sbtc smart contracts.
 #
 # Required: true

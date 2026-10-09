@@ -1,5 +1,7 @@
 #![doc = include_str!("../README.md")]
 
+use crate::storage::model::BitcoinBlockHeight;
+
 pub mod api;
 pub mod bitcoin;
 pub mod block_observer;
@@ -225,6 +227,22 @@ pub const GOSSIPSUB_MAX_TRANSMIT_SIZE: usize = 65536;
 /// [2]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/nakamoto/miner.rs#L924>
 /// [3]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/stacks/db/blocks.rs#L4512>
 pub const NEW_BLOCK_BODY_LIMIT: usize = 256 * 1024 * 1024;
+
+/// Mainnet activation height for v2 signer UTXOs.
+///
+/// The intended activation height is 974,150. Until the coordinated mainnet
+/// rollout is approved, use an unreachable height so this release remains a
+/// no-op on mainnet while other networks can exercise v2 through configuration.
+pub const MAINNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(u64::MAX);
+
+/// Testnet activation height for v2 signer UTXOs.
+pub const TESTNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(245);
+
+/// Mainnet Bitcoin height at which DKG is disabled.
+pub const MAINNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(u64::MAX);
+
+/// Default testnet Bitcoin height at which DKG is disabled.
+pub const TESTNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(u64::MAX);
 
 // These are all build info variables. Many of them are set in build.rs.
 

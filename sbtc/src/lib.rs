@@ -10,12 +10,34 @@ pub mod error;
 pub mod events;
 pub mod idpack;
 pub mod leb128;
+pub mod signer_keys;
+
+pub use signer_keys::KeySetId;
+pub use signer_keys::SignerKeySet;
+pub use signer_keys::derive_signing_public_key;
+pub use signer_keys::derive_signing_secret_key;
 
 #[cfg(any(test, feature = "webhooks"))]
 pub mod webhooks;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+
+/// Maximum number of signing keys in a v2 key set.
+///
+/// The Ledger Bitcoin app has two relevant, distinct limits:
+///
+/// - `multi_a` and `sortedmulti_a` expressions support at most 16 public keys.
+///   The parser applies the app's
+///   [`MAX_PUBKEYS_PER_MULTISIG`](https://github.com/LedgerHQ/app-bitcoin/blob/58ab28b388c659afd47fa361b93c6117b883c941/src/common/wallet.h#L17-L19)
+///   limit to these expressions
+///   [here](https://github.com/LedgerHQ/app-bitcoin/blob/58ab28b388c659afd47fa361b93c6117b883c941/src/common/wallet.c#L1782-L1796).
+/// - A wallet policy may contain at most 15 public keys, as defined by
+///   [`MAX_N_KEYS_IN_WALLET_POLICY`](https://github.com/LedgerHQ/app-bitcoin/blob/58ab28b388c659afd47fa361b93c6117b883c941/src/common/wallet.h#L46-L48).
+///
+/// This protocol-level cap follows the 16-key `multi_a` limit.
+/// Also, see <https://github.com/stacks-sbtc/sbtc/issues/1694>.
+pub const MAX_SIGNERS: usize = 16;
 
 /// The x-coordinate public key with no known discrete logarithm.
 ///
@@ -41,12 +63,33 @@ pub const NUMS_X_COORDINATE: [u8; 32] = [
 ///
 /// # Notes
 ///
-/// This function returns the public key to used in the key-spend path of
-/// the taproot `scriptPubKey`. Since we do not want a key-spend path for
-/// sBTC deposit transactions, this public key is such that it does not
-/// have a known private key.
+/// This function returns the public key used in the key-spend path of legacy
+/// sBTC taproot outputs. Since we do not want a key-spend path for these
+/// outputs, this public key has no known private key.
 pub static UNSPENDABLE_TAPROOT_KEY: LazyLock<XOnlyPublicKey> =
     LazyLock::new(|| XOnlyPublicKey::from_slice(&NUMS_X_COORDINATE).unwrap());
+
+/// The unspendable internal key used by version 2 Taproot outputs.
+///
+/// This is the `/0/0` child of the BIP-0341 NUMS public key when
+/// represented as an extended public key with an all-zero chain code. This
+/// construction lets hardware wallets express the internal key as `@0/**`
+/// in a BIP-0388 wallet policy. Ledger uses the same NUMS extended key in
+/// its [wallet-registration tests][ledger-nums-test]. No private key is
+/// known: knowing this private key would also reveal the NUMS private key.
+///
+/// [ledger-nums-test]: https://github.com/LedgerHQ/app-bitcoin/blob/2.5.0/tests/test_register_wallet.py#L480-L492
+#[rustfmt::skip]
+pub const V2_NUMS_X_COORDINATE: [u8; 32] = [
+    0x4a, 0x30, 0xb2, 0xe4, 0x61, 0xb2, 0x80, 0xc0,
+    0xb1, 0x3a, 0x03, 0x79, 0x90, 0x96, 0xab, 0x12,
+    0x56, 0x58, 0x91, 0x53, 0xfc, 0x4b, 0x9c, 0x8c,
+    0xea, 0xd1, 0x6d, 0xc0, 0xb6, 0x42, 0x06, 0x97,
+];
+
+/// Returns the unspendable internal key used by version 2 Taproot outputs.
+pub static V2_UNSPENDABLE_TAPROOT_KEY: LazyLock<XOnlyPublicKey> =
+    LazyLock::new(|| XOnlyPublicKey::from_slice(&V2_NUMS_X_COORDINATE).unwrap());
 
 /// This is the number of bitcoin blocks that the signers will wait before
 /// acting on a withdrawal request. We do this to ensure that the

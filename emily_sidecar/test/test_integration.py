@@ -118,6 +118,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(
             deposit.json(),
             {
+                "version": "v1",
                 "bitcoinTxid": "672f77ce3c16b36ec6c443f5b8a0a9684d0203482a3068567e792fe2559d54cf",
                 "bitcoinTxOutputIndex": 0,
                 "recipient": "051a0000000000000000000000000000000000000000",

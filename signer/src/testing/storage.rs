@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::keys::PublicKey;
 use crate::storage::model::{
     BitcoinBlock, BitcoinBlockHash, BitcoinBlockRef, DkgSharesStatus, EncryptedDkgShares,
-    KeyRotationEvent, StacksBlock, StacksBlockHash,
+    KeyRotationEvent, RegistryKeyBytes, StacksBlock, StacksBlockHash,
 };
 use crate::storage::postgres::PgStore;
 use crate::storage::{DbRead, DbWrite};
@@ -207,7 +207,7 @@ pub async fn wait_for_key_rotation_event(
     let polling_fut = async {
         loop {
             if let Some(event) = db.get_last_key_rotation(chain_tip).await?
-                && event.aggregate_key == *aggregate_key
+                && event.aggregate_key == RegistryKeyBytes::from(*aggregate_key)
             {
                 return Ok(event); // Successfully found the key rotation event
             }

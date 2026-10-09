@@ -2,11 +2,45 @@
 //!
 
 use bitcoin::OutPoint;
+use bitcoin::ScriptBuf;
 use bitcoin::Txid;
 
 /// Errors
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// A v2 deposit request did not include its recipient.
+    #[error("v2 deposit request is missing the recipient")]
+    MissingV2DepositRecipient,
+    /// A v2 deposit request did not include its maximum fee.
+    #[error("v2 deposit request is missing the maximum fee")]
+    MissingV2DepositMaxFee,
+    /// A v2 deposit script did not start with the expected canonical prefix.
+    #[error("invalid v2 deposit prefix: expected {expected}, got {actual}")]
+    InvalidDepositPrefix {
+        /// The prefix supplied by the deposit script.
+        actual: ScriptBuf,
+        /// The canonical prefix implied by the recipient and maximum fee.
+        expected: ScriptBuf,
+    },
+    /// The v2 signing threshold is invalid for the number of signers.
+    #[error("invalid v2 deposit threshold {signatures_required} for {signer_count} signers")]
+    InvalidDepositThreshold {
+        /// The requested signing threshold.
+        signatures_required: u16,
+        /// The number of distinct signing keys.
+        signer_count: usize,
+    },
+    /// A v2 signer key set contains more keys than the protocol supports.
+    #[error("v2 signer key set contains {signer_count} keys; the maximum is {max_signers}")]
+    TooManySignerKeys {
+        /// The number of distinct signing keys supplied.
+        signer_count: usize,
+        /// The maximum supported number of signing keys.
+        max_signers: usize,
+    },
+    /// A v2 signer UTXO script did not have the canonical `multi_a` form.
+    #[error("invalid v2 signer script")]
+    InvalidSignerScript,
     /// This happens when we realize that the lock-time in the reclaim
     /// script disables the OP_CSV check.
     #[error("invalid lock-time: {0}")]
