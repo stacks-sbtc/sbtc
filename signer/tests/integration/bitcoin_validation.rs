@@ -139,7 +139,7 @@ async fn one_tx_per_request_set() {
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
     ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
-    let aggregate_key: signer::keys::PublicKey = setup.signers.signer.keypair.public_key().into();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let request = BitcoinPreSignRequest {
         request_package: vec![TxRequestIds {
@@ -255,7 +255,7 @@ async fn one_invalid_deposit_invalidates_tx() {
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
     ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
-    let aggregate_key: signer::keys::PublicKey = setup.signers.signer.keypair.public_key().into();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let request = BitcoinPreSignRequest {
         request_package: vec![TxRequestIds {
@@ -436,7 +436,7 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
         .unwrap();
     ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
-    let aggregate_key: signer::keys::PublicKey = setup.signers.signer.keypair.public_key().into();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let request = BitcoinPreSignRequest {
         request_package: vec![TxRequestIds {
@@ -558,7 +558,7 @@ async fn swept_withdrawals_fail_validation() {
         .unwrap();
     ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
-    let aggregate_key: signer::keys::PublicKey = setup.signers.signer.keypair.public_key().into();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let request = BitcoinPreSignRequest {
         request_package: vec![TxRequestIds {
@@ -691,7 +691,7 @@ async fn cannot_sign_deposit_is_ok() {
     ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
     // Now we construct the validation data, including the sighashes.
-    let aggregate_key: signer::keys::PublicKey = setup.signers.signer.keypair.public_key().into();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let request = BitcoinPreSignRequest {
         request_package: vec![TxRequestIds {
@@ -840,7 +840,7 @@ async fn sighashes_match_from_sbtc_requests_object() {
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
     ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
-    let aggregate_key: signer::keys::PublicKey = setup.signers.signer.keypair.public_key().into();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let request = BitcoinPreSignRequest {
         request_package: vec![TxRequestIds {
@@ -995,7 +995,7 @@ async fn outcome_is_independent_of_input_order() {
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
     ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
 
-    let aggregate_key: signer::keys::PublicKey = setup.signers.signer.keypair.public_key().into();
+    let aggregate_key = setup.signers.signer.keypair.public_key().into();
 
     let mut request = BitcoinPreSignRequest {
         request_package: vec![TxRequestIds {

@@ -28,6 +28,7 @@ use sbtc::deposits::ReclaimScriptInputs;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::DepositRequest;
+use signer::bitcoin::utxo::DepositSigningKey;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
@@ -41,6 +42,7 @@ use signer::storage::model::TaprootScriptHash;
 use stacks_common::types::chainstate::StacksAddress;
 
 use regtest::Recipient;
+use sbtc::deposits::DepositSigningInfo;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::AsUtxo;
 
@@ -156,9 +158,9 @@ where
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script_hash: TaprootScriptHash::from(&dep.reclaim_script),
-        signers_public_key: signer::bitcoin::utxo::DepositSigningKey::V1(match &dep.signing_info {
-            sbtc::deposits::DepositSigningInfo::V1 { public_key } => *public_key,
-            sbtc::deposits::DepositSigningInfo::V2 { .. } => unreachable!("v1 test deposit"),
+        signers_public_key: DepositSigningKey::V1(match &dep.signing_info {
+            DepositSigningInfo::V1 { public_key } => *public_key,
+            DepositSigningInfo::V2 { .. } => unreachable!("v1 test deposit"),
         }),
     };
 

@@ -662,6 +662,7 @@ pub enum Error {
     /// Type conversion error
     #[error("type conversion error")]
     TypeConversion,
+
     /// An error thrown by `wsts::util::encrypt`, which encryptes the WSTS
     /// signer state machine's state before storing it in the database.
     #[error("could not encrypt the signer state for storage {0}; aggregate key {1}")]
