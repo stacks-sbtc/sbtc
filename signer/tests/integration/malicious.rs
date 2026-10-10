@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::num::NonZero;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use std::time::Duration;
 use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
+use bitcoin::Txid;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoincore_rpc::RpcApi;
 use bitcoincore_rpc_json::Utxo;
@@ -22,6 +24,7 @@ use lru::LruCache;
 use rand::rngs::OsRng;
 use sbtc::testing::containers::TestContainersBuilder;
 use sbtc::testing::regtest::BITCOIN_CORE_FALLBACK_FEE;
+use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
 use secp256k1::Keypair;
 use signer::bitcoin::BitcoinBlockHashStreamProvider as _;
@@ -43,10 +46,14 @@ use signer::network::in_memory2::WanNetwork;
 use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::StacksInteract as _;
+use signer::stacks::contracts::ContractCall;
+use signer::stacks::contracts::StacksTx;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead as _;
+use signer::storage::model::BitcoinBlockHash;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::DkgSharesStatus;
+use signer::storage::model::StacksTxId;
 use signer::testing;
 use signer::testing::context::*;
 use signer::transaction_coordinator::TxCoordinatorEventLoop;
@@ -68,7 +75,7 @@ use crate::transaction_coordinator::IntegrationTestContext;
 use crate::transaction_coordinator::wait_for_tenure_completed;
 use crate::utxo_construction::make_deposit_request_to;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct MaliciousDkgControl {
     /// Enables the malicious behavior once the test has completed the honest
     /// first DKG and first deposit sweep.
@@ -80,11 +87,19 @@ struct MaliciousDkgControl {
     /// Count of DKG verification response messages intentionally dropped by
     /// the selected malicious signer.
     dropped_dkg_verification_responses: Arc<AtomicUsize>,
+    /// Makes the selected signer drop every DKG and DKG verification message
+    /// it sends, as if it were offline for both.
+    withhold_dkg: Arc<AtomicBool>,
+    /// Makes the selected signer withhold its signature on rotate-keys calls.
+    withhold_rotate_keys_signature: Arc<AtomicBool>,
+    /// Txids of the rotate-keys calls that coordinators asked to sign.
+    rotate_keys_txids: Arc<Mutex<HashSet<StacksTxId>>>,
+    /// Count of rotate-keys signatures dropped by the selected signer.
+    dropped_rotate_keys_signatures: Arc<AtomicUsize>,
 }
 
-/// A network wrapper that makes one signer stop participating in DKG
-/// verification rounds while leaving DKG itself and ordinary sweep signing
-/// untouched.
+/// A network wrapper that makes one signer withhold the messages that
+/// [`MaliciousDkgControl`] selects, leaving ordinary sweep signing untouched.
 #[derive(Clone)]
 struct MaliciousNetwork {
     /// The honest in-memory network instance that actually sends and receives
@@ -117,6 +132,49 @@ impl MessageTransfer for MaliciousNetwork {
         {
             self.malicious_dkg
                 .dropped_dkg_verification_responses
+                .fetch_add(1, Ordering::SeqCst);
+            return Ok(());
+        }
+
+        if is_malicious_signer
+            && self.malicious_dkg.withhold_dkg.load(Ordering::SeqCst)
+            && let Payload::WstsMessage(wsts_msg) = &msg.inner.payload
+            && matches!(
+                wsts_msg.id,
+                WstsMessageId::Dkg(_) | WstsMessageId::DkgVerification(_)
+            )
+        {
+            return Ok(());
+        }
+
+        if let Payload::StacksTransactionSignRequest(request) = &msg.inner.payload
+            && matches!(
+                request.contract_tx,
+                StacksTx::ContractCall(ContractCall::RotateKeysV1(_))
+            )
+        {
+            self.malicious_dkg
+                .rotate_keys_txids
+                .lock()
+                .expect("rotate-keys txids mutex poisoned")
+                .insert(request.txid);
+        }
+
+        if is_malicious_signer
+            && self
+                .malicious_dkg
+                .withhold_rotate_keys_signature
+                .load(Ordering::SeqCst)
+            && let Payload::StacksTransactionSignature(signature) = &msg.inner.payload
+            && self
+                .malicious_dkg
+                .rotate_keys_txids
+                .lock()
+                .expect("rotate-keys txids mutex poisoned")
+                .contains(&signature.txid)
+        {
+            self.malicious_dkg
+                .dropped_rotate_keys_signatures
                 .fetch_add(1, Ordering::SeqCst);
             return Ok(());
         }
@@ -379,65 +437,41 @@ where
     deposit_request.outpoint
 }
 
-/// After the first DKG has been verified and rotated on-chain, a later
-/// `dkg_min_bitcoin_block_height` forces a second DKG. If one signer stops
-/// participating in the second DKG's verification round, the coordinator should
-/// skip rotate-key submission but still complete the rest of the tenure, which
-/// includes sweeping Emily's pending deposit.
-#[test_log::test(tokio::test)]
-async fn dkg_verification_failure_does_not_block_deposit_sweep() {
-    let stack = TestContainersBuilder::start_stacks().await;
-    let bitcoin = stack.bitcoin().await;
-    let stacks = stack.stacks().await;
+/// What the honest first phase leaves for a test's attack phase.
+struct HonestPhase {
+    /// The first DKG's aggregate key, which the registry now holds.
+    first_aggregate_key: PublicKey,
+    /// The wallet that makes deposits.
+    depositor: Recipient,
+    /// Parameters for more deposits to the first aggregate key.
+    deposit_parameters: DepositParameters,
+    /// A depositor UTXO that funds one more deposit.
+    fund_outpoint: OutPoint,
+    /// The value, in sats, of `fund_outpoint`.
+    fund_amount: u64,
+}
 
-    let rpc = bitcoin.rpc();
-    let faucet = &bitcoin.get_faucet();
-    let stacks_client = stacks.get_client();
-
-    let (emily_client, emily_tables) = new_emily_setup().await;
-    let network = WanNetwork::default();
-
-    faucet.generate_fee_data();
-    let initial_tip = rpc.get_blockchain_info().unwrap();
-    let dkg_min_bitcoin_block_height = BitcoinBlockHeight::from(initial_tip.blocks + 5);
-
-    let malicious_dkg = MaliciousDkgControl {
-        attack_active: Arc::new(AtomicBool::new(false)),
-        malicious_signer: Arc::new(Mutex::new(None)),
-        dropped_dkg_verification_responses: Arc::new(AtomicUsize::new(0)),
-    };
-    let signer_set = SignerSetConfig {
-        num_signers: 3,
-        signatures_required: 3,
-        dkg_min_bitcoin_block_height,
-    };
-    let bitcoin_client = bitcoin.get_client();
-    let bitcoin_chain_tip_poller = bitcoin.start_chain_tip_poller().await;
-
-    let signers = start_signers(
-        SignerClients {
-            bitcoin_client: &bitcoin_client,
-            bitcoin_chain_tip_poller: &bitcoin_chain_tip_poller,
-            stacks_client: &stacks_client,
-            emily_client: &emily_client,
-            network: &network,
-        },
-        signer_set,
-        malicious_dkg.clone(),
-    )
-    .await;
-
+/// With every signer honest, deploy the contracts, run and rotate to the
+/// first DKG, fund the signers and a depositor, and sweep one deposit. This
+/// mines four blocks.
+async fn run_honest_phase(
+    signers: &[IntegrationTestContext<StacksClient>],
+    rpc: &bitcoincore_rpc::Client,
+    faucet: &Faucet<'_>,
+    stacks_client: &StacksClient,
+    emily_client: &EmilyClient,
+) -> HonestPhase {
     let deployer = signers[0].config().signer.deployer.clone();
 
     let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
-    wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
+    wait_for_tenure_completed(signers, chain_tip).await;
+    wait_for_new_nonce(stacks_client, &deployer, old_nonce).await;
 
     let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
-    wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
+    wait_for_tenure_completed(signers, chain_tip).await;
+    wait_for_new_nonce(stacks_client, &deployer, old_nonce).await;
 
     let first_aggregate_key = stacks_client
         .get_current_signers_aggregate_key(&deployer)
@@ -470,11 +504,11 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
     let second_depositor_fund_outpoint = faucet.send_to(depositor_fund_amount, &depositor.address);
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed(signers, chain_tip).await;
 
     let first_deposit_outpoint = submit_deposit(
         rpc,
-        &emily_client,
+        emily_client,
         DepositSubmission {
             depositor: &depositor,
             fund_outpoint: first_depositor_fund_outpoint,
@@ -485,7 +519,7 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
     .await;
 
     let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    wait_for_tenure_completed(signers, chain_tip).await;
 
     let ctx = signers.first().unwrap();
     let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
@@ -500,33 +534,115 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
         "coordinator should sweep the first deposit before the malicious second DKG"
     );
 
+    HonestPhase {
+        first_aggregate_key,
+        depositor,
+        deposit_parameters,
+        fund_outpoint: second_depositor_fund_outpoint,
+        fund_amount: depositor_fund_amount,
+    }
+}
+
+/// Wait for a mempool transaction that spends `outpoint`.
+async fn wait_for_sweep(ctx: &IntegrationTestContext<StacksClient>, outpoint: OutPoint) -> Txid {
+    let poll = async {
+        loop {
+            let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
+            let sweep = txids.into_iter().find(|txid| {
+                let tx = ctx.bitcoin_client.get_tx(txid).unwrap().unwrap();
+                tx.tx
+                    .input
+                    .iter()
+                    .any(|input| input.previous_output == outpoint)
+            });
+            if let Some(txid) = sweep {
+                return txid;
+            }
+            Sleep::for_millis(500).await;
+        }
+    };
+    poll.with_timeout(Duration::from_secs(60))
+        .await
+        .expect("no transaction sweeping the deposit reached the mempool")
+}
+
+/// Pick a signer that is not the coordinator for `chain_tip`.
+fn non_coordinator(
+    signers: &[IntegrationTestContext<StacksClient>],
+    chain_tip: &BitcoinBlockHash,
+) -> PublicKey {
+    let signing_set = &signers[0].config().signer.bootstrap_signing_set;
+    let coordinator = coordinator_public_key(chain_tip, signing_set)
+        .expect("could not determine the coordinator");
+    signing_set
+        .iter()
+        .copied()
+        .find(|public_key| *public_key != coordinator)
+        .expect("there should be a non-coordinator signer to target")
+}
+
+/// After the first DKG has been verified and rotated on-chain, a later
+/// `dkg_min_bitcoin_block_height` forces a second DKG. If one signer stops
+/// participating in the second DKG's verification round, the coordinator should
+/// skip rotate-key submission but still complete the rest of the tenure, which
+/// includes sweeping Emily's pending deposit.
+#[test_log::test(tokio::test)]
+async fn dkg_verification_failure_does_not_block_deposit_sweep() {
+    let stack = TestContainersBuilder::start_stacks().await;
+    let bitcoin = stack.bitcoin().await;
+    let stacks = stack.stacks().await;
+
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+    let stacks_client = stacks.get_client();
+
+    let (emily_client, emily_tables) = new_emily_setup().await;
+    let network = WanNetwork::default();
+
+    faucet.generate_fee_data();
+    let initial_tip = rpc.get_blockchain_info().unwrap();
+    let dkg_min_bitcoin_block_height = BitcoinBlockHeight::from(initial_tip.blocks + 5);
+
+    let malicious_dkg = MaliciousDkgControl::default();
+    let signer_set = SignerSetConfig {
+        num_signers: 3,
+        signatures_required: 3,
+        dkg_min_bitcoin_block_height,
+    };
+    let bitcoin_client = bitcoin.get_client();
+    let bitcoin_chain_tip_poller = bitcoin.start_chain_tip_poller().await;
+
+    let signers = start_signers(
+        SignerClients {
+            bitcoin_client: &bitcoin_client,
+            bitcoin_chain_tip_poller: &bitcoin_chain_tip_poller,
+            stacks_client: &stacks_client,
+            emily_client: &emily_client,
+            network: &network,
+        },
+        signer_set,
+        malicious_dkg.clone(),
+    )
+    .await;
+
+    let deployer = signers[0].config().signer.deployer.clone();
+    let honest = run_honest_phase(&signers, rpc, faucet, &stacks_client, &emily_client).await;
+
     malicious_dkg.attack_active.store(true, Ordering::SeqCst);
     let second_deposit_outpoint = submit_deposit(
         rpc,
         &emily_client,
         DepositSubmission {
-            depositor: &depositor,
-            fund_outpoint: second_depositor_fund_outpoint,
-            fund_amount: depositor_fund_amount,
-            parameters: deposit_parameters,
+            depositor: &honest.depositor,
+            fund_outpoint: honest.fund_outpoint,
+            fund_amount: honest.fund_amount,
+            parameters: honest.deposit_parameters,
         },
     )
     .await;
 
     let chain_tip = faucet.generate_block().into();
-    let coordinator = coordinator_public_key(
-        &chain_tip,
-        &signers[0].config().signer.bootstrap_signing_set,
-    )
-    .expect("could not determine coordinator for second-DKG block");
-    let target = signers[0]
-        .config()
-        .signer
-        .bootstrap_signing_set
-        .iter()
-        .copied()
-        .find(|public_key| *public_key != coordinator)
-        .expect("there should be a non-coordinator signer to target");
+    let target = non_coordinator(&signers, &chain_tip);
     *malicious_dkg
         .malicious_signer
         .lock()
@@ -553,13 +669,13 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
         dkg_min_bitcoin_block_height
     );
     assert_eq!(latest_dkg.dkg_shares_status, DkgSharesStatus::Unverified);
-    assert_ne!(latest_dkg.aggregate_key, first_aggregate_key);
+    assert_ne!(latest_dkg.aggregate_key, honest.first_aggregate_key);
     assert_eq!(
         stacks_client
             .get_current_signers_aggregate_key(&deployer)
             .await
             .unwrap(),
-        Some(first_aggregate_key),
+        Some(honest.first_aggregate_key),
         "failed DKG verification should not rotate the registry key"
     );
 
@@ -577,6 +693,222 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
         .expect("coordinator should still broadcast a sweep for the pending deposit");
 
     tracing::info!(%sweep_txid, "found deposit sweep after failed DKG verification");
+
+    for ctx in signers {
+        testing::storage::drop_db(ctx.storage).await;
+    }
+    clean_emily_setup(emily_tables).await;
+}
+
+/// One signer takes part in the second DKG, then drops out of DKG and its
+/// verification. Once the verification window passes, every signer's latest
+/// shares are `Failed` and each DKG re-run fails without that signer. The
+/// coordinator should still sweep Emily's pending deposit under the registry
+/// key.
+#[test_log::test(tokio::test)]
+async fn failed_dkg_shares_do_not_block_deposit_sweep() {
+    let stack = TestContainersBuilder::start_stacks().await;
+    let bitcoin = stack.bitcoin().await;
+    let stacks = stack.stacks().await;
+
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+    let stacks_client = stacks.get_client();
+
+    let (emily_client, emily_tables) = new_emily_setup().await;
+    let network = WanNetwork::default();
+
+    faucet.generate_fee_data();
+    let initial_tip = rpc.get_blockchain_info().unwrap();
+    let dkg_min_bitcoin_block_height = BitcoinBlockHeight::from(initial_tip.blocks + 5);
+
+    let malicious_dkg = MaliciousDkgControl::default();
+    let signer_set = SignerSetConfig {
+        num_signers: 3,
+        signatures_required: 3,
+        dkg_min_bitcoin_block_height,
+    };
+    let bitcoin_client = bitcoin.get_client();
+    let bitcoin_chain_tip_poller = bitcoin.start_chain_tip_poller().await;
+
+    let signers = start_signers(
+        SignerClients {
+            bitcoin_client: &bitcoin_client,
+            bitcoin_chain_tip_poller: &bitcoin_chain_tip_poller,
+            stacks_client: &stacks_client,
+            emily_client: &emily_client,
+            network: &network,
+        },
+        signer_set,
+        malicious_dkg.clone(),
+    )
+    .await;
+
+    let deployer = signers[0].config().signer.deployer.clone();
+    let honest = run_honest_phase(&signers, rpc, faucet, &stacks_client, &emily_client).await;
+
+    // The second DKG succeeds, but its verification fails.
+    malicious_dkg.attack_active.store(true, Ordering::SeqCst);
+    let chain_tip = faucet.generate_block().into();
+    *malicious_dkg
+        .malicious_signer
+        .lock()
+        .expect("malicious signer mutex poisoned") = Some(non_coordinator(&signers, &chain_tip));
+    wait_for_tenure_completed(&signers, chain_tip).await;
+
+    malicious_dkg.withhold_dkg.store(true, Ordering::SeqCst);
+    let verification_window = signers[0].config().signer.dkg_verification_window;
+    for _ in 0..verification_window {
+        let chain_tip = faucet.generate_block().into();
+        wait_for_tenure_completed(&signers, chain_tip).await;
+    }
+
+    // This block takes the second DKG's shares past the verification
+    // window, so the block observer marks them `Failed` before the tenure.
+    let deposit_outpoint = submit_deposit(
+        rpc,
+        &emily_client,
+        DepositSubmission {
+            depositor: &honest.depositor,
+            fund_outpoint: honest.fund_outpoint,
+            fund_amount: honest.fund_amount,
+            parameters: honest.deposit_parameters,
+        },
+    )
+    .await;
+    faucet.generate_block();
+
+    let sweep_txid = wait_for_sweep(&signers[0], deposit_outpoint).await;
+
+    for ctx in &signers {
+        let latest_dkg = ctx
+            .storage
+            .get_latest_encrypted_dkg_shares()
+            .await
+            .unwrap()
+            .expect("second DKG should have written shares");
+        assert_eq!(
+            latest_dkg.started_at_bitcoin_block_height,
+            dkg_min_bitcoin_block_height
+        );
+        assert_eq!(latest_dkg.dkg_shares_status, DkgSharesStatus::Failed);
+    }
+    assert_eq!(
+        stacks_client
+            .get_current_signers_aggregate_key(&deployer)
+            .await
+            .unwrap(),
+        Some(honest.first_aggregate_key)
+    );
+
+    tracing::info!(%sweep_txid, "found deposit sweep with failed latest DKG shares");
+
+    for ctx in signers {
+        testing::storage::drop_db(ctx.storage).await;
+    }
+    clean_emily_setup(emily_tables).await;
+}
+
+/// The second DKG is verified, but one signer withholds its signature on the
+/// rotate-keys call. The coordinator should still finish its tenure: sweep
+/// Emily's pending deposit and get the first deposit's complete-deposit call
+/// mined, which needs the nonce taken by the failed rotate-keys call back.
+#[test_log::test(tokio::test)]
+async fn rotate_keys_failure_does_not_block_tenure() {
+    let stack = TestContainersBuilder::start_stacks().await;
+    let bitcoin = stack.bitcoin().await;
+    let stacks = stack.stacks().await;
+
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+    let stacks_client = stacks.get_client();
+
+    let (emily_client, emily_tables) = new_emily_setup().await;
+    let network = WanNetwork::default();
+
+    faucet.generate_fee_data();
+    let initial_tip = rpc.get_blockchain_info().unwrap();
+    let dkg_min_bitcoin_block_height = BitcoinBlockHeight::from(initial_tip.blocks + 5);
+
+    let malicious_dkg = MaliciousDkgControl::default();
+    let signer_set = SignerSetConfig {
+        num_signers: 3,
+        signatures_required: 3,
+        dkg_min_bitcoin_block_height,
+    };
+    let bitcoin_client = bitcoin.get_client();
+    let bitcoin_chain_tip_poller = bitcoin.start_chain_tip_poller().await;
+
+    let signers = start_signers(
+        SignerClients {
+            bitcoin_client: &bitcoin_client,
+            bitcoin_chain_tip_poller: &bitcoin_chain_tip_poller,
+            stacks_client: &stacks_client,
+            emily_client: &emily_client,
+            network: &network,
+        },
+        signer_set,
+        malicious_dkg.clone(),
+    )
+    .await;
+
+    let deployer = signers[0].config().signer.deployer.clone();
+    let honest = run_honest_phase(&signers, rpc, faucet, &stacks_client, &emily_client).await;
+
+    malicious_dkg
+        .withhold_rotate_keys_signature
+        .store(true, Ordering::SeqCst);
+    let deposit_outpoint = submit_deposit(
+        rpc,
+        &emily_client,
+        DepositSubmission {
+            depositor: &honest.depositor,
+            fund_outpoint: honest.fund_outpoint,
+            fund_amount: honest.fund_amount,
+            parameters: honest.deposit_parameters,
+        },
+    )
+    .await;
+
+    // The first deposit's sweep confirms in this block, so after the failed
+    // rotate-keys call the tenure also submits its complete-deposit call.
+    let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
+    let chain_tip = faucet.generate_block().into();
+    *malicious_dkg
+        .malicious_signer
+        .lock()
+        .expect("malicious signer mutex poisoned") = Some(non_coordinator(&signers, &chain_tip));
+    wait_for_tenure_completed(&signers, chain_tip).await;
+
+    assert!(
+        malicious_dkg
+            .dropped_rotate_keys_signatures
+            .load(Ordering::SeqCst)
+            > 0,
+        "malicious signer should have withheld its rotate-keys signature"
+    );
+
+    let latest_dkg = signers[0]
+        .storage
+        .get_latest_encrypted_dkg_shares()
+        .await
+        .unwrap()
+        .expect("second DKG should have written shares");
+    assert_eq!(latest_dkg.dkg_shares_status, DkgSharesStatus::Verified);
+    assert_ne!(latest_dkg.aggregate_key, honest.first_aggregate_key);
+    assert_eq!(
+        stacks_client
+            .get_current_signers_aggregate_key(&deployer)
+            .await
+            .unwrap(),
+        Some(honest.first_aggregate_key),
+        "the rotate-keys call should not have gone through"
+    );
+
+    let sweep_txid = wait_for_sweep(&signers[0], deposit_outpoint).await;
+    wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
+
+    tracing::info!(%sweep_txid, "found deposit sweep after a failed rotate-keys call");
 
     for ctx in signers {
         testing::storage::drop_db(ctx.storage).await;

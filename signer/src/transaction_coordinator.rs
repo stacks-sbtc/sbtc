@@ -464,6 +464,9 @@ where
 
     /// Submit the rotate key tx for the latest DKG shares, if the aggregate key
     /// differs from the one in the smart contract registry
+    ///
+    /// Failed shares, failed verification and a failed rotate-keys call are
+    /// logged and return `Ok(None)`, so the tenure goes on under the registry key.
     #[tracing::instrument(skip_all)]
     async fn check_and_submit_rotate_key_transaction(
         &mut self,
@@ -488,12 +491,20 @@ where
             .registry_signer_set_info()
             .map(|info| info.aggregate_key);
 
-        let (needs_verification, needs_rotate_key) = assert_rotate_key_action(
+        let action = assert_rotate_key_action(
             &self.context,
             &last_dkg,
             current_aggregate_key,
             bitcoin_chain_tip,
-        )?;
+        );
+        let (needs_verification, needs_rotate_key) = match action {
+            Ok(action) => action,
+            Err(error @ Error::DkgVerificationFailed(_)) => {
+                tracing::warn!(%error, "latest DKG shares failed verification; skipping key rotation");
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
         if !needs_verification && !needs_rotate_key {
             tracing::debug!(
                 "stacks node is up to date with the current aggregate key and no DKG verification required"
@@ -535,17 +546,22 @@ where
 
             // Construct, sign and submit the rotate key transaction.
             tracing::info!("preparing to submit a rotate-key transaction");
-            let txid = self
+            let result = self
                 .construct_and_sign_rotate_key_transaction(
                     &bitcoin_chain_tip.block_hash,
                     signing_key,
                     &last_dkg.aggregate_key,
                     wallet,
                 )
-                .await
-                .inspect_err(
-                    |error| tracing::error!(%error, "failed to sign or submit rotate-key transaction"),
-                )?;
+                .await;
+
+            let txid = match result {
+                Ok(txid) => txid,
+                Err(error) => {
+                    tracing::error!(%error, "failed to sign or submit rotate-key transaction; continuing with our tenure");
+                    return Ok(None);
+                }
+            };
 
             tracing::info!(%txid, "rotate-key transaction submitted successfully");
             return Ok(Some(txid));
@@ -1296,8 +1312,11 @@ where
             txid: tx.txid().into(),
         };
 
+        // The tenure continues after a failure, so give back the nonce
+        // `new_tx` took.
         self.process_sign_request(sign_request, bitcoin_chain_tip, multi_tx, wallet)
             .await
+            .inspect_err(|error| adjust_nonce(wallet, error))
     }
 
     /// Sign and broadcast the stacks transaction
