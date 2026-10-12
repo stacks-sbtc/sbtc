@@ -380,7 +380,7 @@ pub struct SignerConfig {
     pub v2_signing_block_height: Option<BitcoinBlockHeight>,
     /// Bitcoin height at which DKG is disabled and rotate-keys calls
     /// switch to the v2 registry-key encoding. This must be greater than
-    ///or equal to the effective v2 signing block height.
+    /// or equal to the effective v2 signing block height.
     #[serde(default)]
     pub dkg_disable_block_height: Option<BitcoinBlockHeight>,
     /// The private key of the signer
