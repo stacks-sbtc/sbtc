@@ -652,7 +652,7 @@ mod tests {
         let event = KeyRotationEvent {
             block_id: block_id.clone(),
             txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut rng)),
-            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1,
+            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1.into(),
             new_keys: (0..3)
                 .map(|_| SECP256K1.generate_keypair(&mut rng).1)
                 .collect(),

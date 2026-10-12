@@ -45,7 +45,10 @@ use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
+use crate::storage::model::SignerKeySet;
 use crate::storage::model::StacksBlockRef;
+use crate::storage::model::TxPrevout;
+use crate::storage::model::TxPrevoutType;
 use crate::util::FutureExt as _;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
@@ -659,7 +662,7 @@ where
     // transactions and write them to the database.
     let extract_fut = || async {
         // We store all the scriptPubKeys associated with the signers'
-        // aggregate public key. Let's get the last years worth of them.
+        // aggregate public key.
         let signer_script_pubkeys: HashSet<ScriptBuf> = db
             .get_signers_script_pubkeys()
             .await?
@@ -714,12 +717,19 @@ where
 
             for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
                 db.write_tx_prevout(&prevout).await?;
-                if prevout.prevout_type == model::TxPrevoutType::Deposit {
-                    metrics::counter!(
-                        Metrics::DepositsSweptTotal,
-                        "blockchain" => BITCOIN_BLOCKCHAIN,
-                    )
-                    .increment(1);
+                match prevout.prevout_type {
+                    TxPrevoutType::Deposit => {
+                        metrics::counter!(
+                            Metrics::DepositsSweptTotal,
+                            "blockchain" => BITCOIN_BLOCKCHAIN,
+                        )
+                        .increment(1);
+                    }
+                    TxPrevoutType::SignersInput => {
+                        if let Some(key_set) = signer_key_set_from_signer_input(tx_info, &prevout) {
+                            db.write_signer_key_set(&key_set).await?;
+                        }
+                    }
                 }
             }
 
@@ -750,14 +760,31 @@ where
     extract_fut().await
 }
 
-/// Return the signing set that can make sBTC related contract calls along
-/// with the current aggregate key to use for locking UTXOs on bitcoin.
+/// Recover a v2 signer key set from a known signer input's witness.
 ///
-/// The aggregate key fetched here is the one confirmed on the canonical
-/// Stacks blockchain as part of a `rotate-keys` contract call. It will be
-/// the public key that is the result of a DKG run. If there are no
-/// rotate-keys transactions on the canonical stacks blockchain, then we
-/// return None.
+/// The signers' input is always the first input in a signer-created sweep.
+/// The reconstructed single-leaf scriptPubKey must match the classified
+/// prevout before the key set is returned.
+fn signer_key_set_from_signer_input(
+    tx_info: &BitcoinTxInfo,
+    prevout: &TxPrevout,
+) -> Option<SignerKeySet> {
+    if prevout.prevout_type != TxPrevoutType::SignersInput {
+        return None;
+    }
+    let script = tx_info.tx.input.first()?.witness.tapscript()?;
+    let key_set = sbtc::SignerKeySet::parse(script).ok()?;
+    let script_pubkey = key_set.script_pubkey();
+    (model::ScriptPubKey::from(script_pubkey) == prevout.script_pubkey).then_some(key_set.into())
+}
+
+/// Return the signing set that can make sBTC-related contract calls along
+/// with the registry's current versioned key field.
+///
+/// Before v2 activation this field is the aggregate public key from DKG. A
+/// v2 rotation stores an opaque Bitcoin block hash instead. If there are no
+/// rotate-keys transactions on the canonical Stacks blockchain, this returns
+/// `None`.
 #[tracing::instrument(skip_all)]
 pub async fn get_signer_set_info<C>(ctx: &C) -> Result<Option<SignerSetInfo>, Error>
 where
@@ -806,10 +833,20 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use bitcoin::Amount;
     use bitcoin::BlockHash;
+    use bitcoin::OutPoint;
+    use bitcoin::Sequence;
+    use bitcoin::Transaction;
+    use bitcoin::TxIn;
     use bitcoin::TxOut;
+    use bitcoin::Witness;
+    use bitcoin::absolute;
     use bitcoin::hashes::Hash as _;
+    use bitcoin::taproot::LeafVersion;
+    use bitcoin::transaction;
     use fake::Dummy as _;
     use fake::Fake as _;
     use model::BitcoinTxId;
@@ -826,6 +863,69 @@ mod tests {
     use crate::testing::get_rng;
 
     use super::*;
+
+    #[test]
+    fn recovers_v2_key_set_only_from_a_known_signer_input() {
+        let mut rng = get_rng();
+        let public_keys = (0..3)
+            .map(|_| {
+                secp256k1::SECP256K1
+                    .generate_keypair(&mut rng)
+                    .1
+                    .x_only_public_key()
+                    .0
+            })
+            .collect::<BTreeSet<_>>();
+        let key_set = sbtc::SignerKeySet::new(public_keys, 2).unwrap();
+        let signing_script = key_set.signing_script();
+        let control_block = key_set
+            .taproot()
+            .control_block(&(signing_script.clone(), LeafVersion::TapScript))
+            .unwrap();
+        let witness = Witness::from_slice(&[signing_script.to_bytes(), control_block.serialize()]);
+        let tx_info = BitcoinTxInfo {
+            fee: None,
+            tx: Transaction {
+                version: transaction::Version::TWO,
+                lock_time: absolute::LockTime::ZERO,
+                input: vec![TxIn {
+                    previous_output: OutPoint::null(),
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence::MAX,
+                    witness,
+                }],
+                output: Vec::new(),
+            },
+            vin: vec![crate::bitcoin::rpc::BitcoinTxVin {
+                txid: Some(bitcoin::Txid::all_zeros()),
+                vout: Some(u32::MAX),
+                prevout: Some(crate::bitcoin::rpc::BitcoinTxVinPrevout {
+                    value: Amount::from_sat(1_000),
+                    script_pubkey: crate::bitcoin::rpc::OutputScriptPubKey {
+                        script: key_set.script_pubkey(),
+                    },
+                }),
+            }],
+        };
+
+        let signer_input = tx_info
+            .to_inputs(&HashSet::from([key_set.script_pubkey()]))
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            signer_key_set_from_signer_input(&tx_info, &signer_input),
+            Some(key_set.into())
+        );
+
+        let mut deposit_input = signer_input.clone();
+        deposit_input.prevout_type = TxPrevoutType::Deposit;
+        assert!(signer_key_set_from_signer_input(&tx_info, &deposit_input).is_none());
+
+        let mut mismatched_input = signer_input;
+        mismatched_input.script_pubkey = ScriptBuf::new().into();
+        assert!(signer_key_set_from_signer_input(&tx_info, &mismatched_input).is_none());
+    }
 
     #[test_log::test(tokio::test)]
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
@@ -924,6 +1024,8 @@ mod tests {
             },
             deposit_script: tx_setup0.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup0.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
         let req0 = deposit_request0.clone();
         // When we validate the deposit request, we fetch the transaction
@@ -945,6 +1047,8 @@ mod tests {
             },
             deposit_script: bitcoin::ScriptBuf::new(),
             reclaim_script: tx_setup1.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
         // The transaction is also in the mempool, even though it is an
         // invalid deposit.
@@ -972,6 +1076,8 @@ mod tests {
             },
             deposit_script: tx_setup2.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup2.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
 
         // This deposit transaction is a fine deposit, it just hasn't been
@@ -992,6 +1098,8 @@ mod tests {
             },
             deposit_script: tx_setup3.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup3.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
         let req3 = deposit_request3.clone();
 
@@ -1087,6 +1195,8 @@ mod tests {
             },
             deposit_script: tx_setup0.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup0.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
         // When we validate the deposit request, we fetch the transaction
         // from bitcoin-core's blockchain. The stubs out that

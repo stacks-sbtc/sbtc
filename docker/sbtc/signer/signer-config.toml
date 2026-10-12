@@ -106,6 +106,20 @@ private_key = ""
 # Environment: SIGNER_SIGNER__NETWORK
 network = "regtest"
 
+# Bitcoin height at which non-mainnet signer UTXOs switch to v2 script-path
+# multisig. Mainnet ignores this setting and uses the compiled-in height.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__V2_SIGNING_BLOCK_HEIGHT
+v2_signing_block_height = 245
+
+# Bitcoin height at which DKG is disabled and rotate-keys calls switch to the
+# v2 registry-key encoding.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__DKG_DISABLE_BLOCK_HEIGHT
+dkg_disable_block_height = 245
+
 # Seconds to wait before processing a new Bitcoin block.
 # Required: true
 # Environment: SIGNER_SIGNER__BITCOIN_PROCESSING_DELAY

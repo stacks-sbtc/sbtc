@@ -277,6 +277,29 @@ pub struct WithdrawalRejectEvent {
     pub signer_bitmap: u128,
 }
 
+/// The opaque 33-byte value in a registry key-rotation event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RegistryKeyBytes([u8; 33]);
+
+impl RegistryKeyBytes {
+    /// Return the raw registry representation.
+    pub fn to_bytes(self) -> [u8; 33] {
+        self.0
+    }
+}
+
+impl From<[u8; 33]> for RegistryKeyBytes {
+    fn from(value: [u8; 33]) -> Self {
+        Self(value)
+    }
+}
+
+impl From<PublicKey> for RegistryKeyBytes {
+    fn from(value: PublicKey) -> Self {
+        Self(value.serialize())
+    }
+}
+
 /// This is the event that is emitted from the `rotate-keys`
 /// public function in the sbtc-registry smart contract.
 #[derive(Debug, Clone)]
@@ -292,8 +315,8 @@ pub struct KeyRotationEvent {
     /// The principal that can make contract calls into the protected
     /// public functions in the sbtc smart contracts.
     pub new_address: PrincipalData,
-    /// The new aggregate key created by combining the above public keys.
-    pub new_aggregate_pubkey: PublicKey,
+    /// The opaque aggregate-key field installed by the rotation.
+    pub new_aggregate_pubkey: RegistryKeyBytes,
     /// The number of signatures required for the multi-sig wallet.
     pub new_signature_threshold: u16,
 }
@@ -746,8 +769,9 @@ impl RawTupleData {
             block_id: self.tx_info.block_id,
             new_keys,
             new_address,
-            new_aggregate_pubkey: PublicKey::from_slice(&new_aggregate_pubkey)
-                .map_err(EventError::ClarityPublicKeyConversion)?,
+            new_aggregate_pubkey: <[u8; 33]>::try_from(new_aggregate_pubkey.as_slice())
+                .map(RegistryKeyBytes::from)
+                .map_err(EventError::ClaritySliceConversion)?,
             new_signature_threshold: u16::try_from(new_signature_threshold)
                 .map_err(EventError::ClarityIntConversion)?,
         }))
@@ -987,7 +1011,7 @@ mod tests {
             .collect();
         let new_address =
             PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y").unwrap();
-        let new_aggregate_pubkey = SECP256K1.generate_keypair(&mut OsRng).1;
+        let new_aggregate_pubkey = [0xff; 33];
         let new_signature_threshold = 2;
 
         let event = [
@@ -1008,7 +1032,7 @@ mod tests {
             ),
             (
                 ClarityName::from("new-aggregate-pubkey"),
-                ClarityValue::buff_from(new_aggregate_pubkey.serialize().into()).unwrap(),
+                ClarityValue::buff_from(new_aggregate_pubkey.into()).unwrap(),
             ),
             (
                 ClarityName::from("new-signature-threshold"),
@@ -1026,7 +1050,7 @@ mod tests {
             RegistryEvent::KeyRotation(event) => {
                 assert_eq!(event.new_keys, new_keys);
                 assert_eq!(event.new_address, new_address);
-                assert_eq!(event.new_aggregate_pubkey, new_aggregate_pubkey);
+                assert_eq!(event.new_aggregate_pubkey, new_aggregate_pubkey.into());
                 assert_eq!(event.new_signature_threshold, new_signature_threshold);
             }
             e => panic!("Got the wrong event variant: {e:?}"),

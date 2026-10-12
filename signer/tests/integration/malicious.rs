@@ -370,6 +370,8 @@ where
         deposit_script: deposit_request.deposit_script.to_hex_string(),
         reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
     };
 
     deposit_api::create_deposit(emily.config(), emily_request)
@@ -443,7 +445,9 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
         .get_current_signers_aggregate_key(&deployer)
         .await
         .unwrap()
-        .expect("no aggregate key in contract after first rotate-key");
+        .expect("no aggregate key in contract after first rotate-key")
+        .v1_public_key()
+        .expect("test requires a v1 signer key");
 
     let verified_dkg = signers[0]
         .storage
@@ -559,7 +563,7 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
             .get_current_signers_aggregate_key(&deployer)
             .await
             .unwrap(),
-        Some(first_aggregate_key),
+        Some(first_aggregate_key.into()),
         "failed DKG verification should not rotate the registry key"
     );
 

@@ -77,6 +77,8 @@ async fn test_new_blocks_sends_update_deposits_to_emily() {
         deposit_script: request.deposit_script,
         reclaim_script: request.reclaim_script,
         transaction_hex: request.transaction_hex,
+        recipient: None,
+        max_fee: None,
     };
     deposit_api::create_deposit(&configuration, create_deposity_req)
         .await

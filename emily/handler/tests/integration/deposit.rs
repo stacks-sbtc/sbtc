@@ -163,9 +163,12 @@ async fn create_and_get_deposit_happy_path() {
         reclaim_script: reclaim_script.clone(),
         deposit_script: deposit_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     let expected_deposit = Deposit {
+        version: Some(testing_emily_client::models::DepositVersion::V1),
         amount: DEPOSIT_AMOUNT_SATS,
         bitcoin_tx_output_index,
         bitcoin_txid: bitcoin_txid.clone(),
@@ -234,6 +237,8 @@ async fn create_deposit_normalization() {
         reclaim_script: reclaim_script.clone(),
         deposit_script: deposit_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     // Try to create another one non-normalzied
@@ -243,9 +248,12 @@ async fn create_deposit_normalization() {
         reclaim_script: reclaim_script.to_uppercase(),
         deposit_script: deposit_script.to_uppercase(),
         transaction_hex: transaction_hex.to_uppercase(),
+        recipient: None,
+        max_fee: None,
     };
 
     let expected_deposit = Deposit {
+        version: Some(testing_emily_client::models::DepositVersion::V1),
         amount: DEPOSIT_AMOUNT_SATS,
         bitcoin_tx_output_index,
         bitcoin_txid: bitcoin_txid.clone(),
@@ -321,6 +329,8 @@ async fn wipe_databases_test() {
         reclaim_script,
         deposit_script,
         bitcoin_txid: bitcoin_txid.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     // Act.
@@ -382,10 +392,13 @@ async fn get_deposits_for_transaction() {
             deposit_script: deposit_script.clone(),
             reclaim_script: reclaim_script.clone(),
             transaction_hex: transaction_hex.clone(),
+            recipient: None,
+            max_fee: None,
         };
         create_requests.push(request);
 
         let expected_deposit = Deposit {
+            version: Some(testing_emily_client::models::DepositVersion::V1),
             amount: DEPOSIT_AMOUNT_SATS,
             bitcoin_tx_output_index,
             bitcoin_txid: bitcoin_txid.clone(),
@@ -467,10 +480,14 @@ async fn get_deposits() {
                 deposit_script: deposit_script.clone(),
                 reclaim_script: reclaim_script.clone(),
                 transaction_hex: transaction_hex.clone(),
+                recipient: None,
+                max_fee: None,
             };
             create_requests.push(request);
 
             let expected_deposit_info = DepositInfo {
+                version: Some(testing_emily_client::models::DepositVersion::V1),
+                max_fee: Some(DEPOSIT_MAX_FEE),
                 amount: DEPOSIT_AMOUNT_SATS,
                 bitcoin_tx_output_index,
                 bitcoin_txid: bitcoin_txid.clone(),
@@ -558,6 +575,8 @@ async fn get_deposits_large_max_fee() {
                 deposit_script: deposit_tx.deposit_scripts[0].clone(),
                 reclaim_script: deposit_tx.reclaim_scripts[0].clone(),
                 transaction_hex: deposit_tx.transaction_hex.clone(),
+                recipient: None,
+                max_fee: None,
             }
         })
         .collect();
@@ -634,10 +653,14 @@ async fn get_deposits_for_recipient() {
                 deposit_script: deposit_script.clone(),
                 reclaim_script: reclaim_script.clone(),
                 transaction_hex: transaction_hex.clone(),
+                recipient: None,
+                max_fee: None,
             };
             create_requests.push(request);
             // Store the expected deposit info that should come from it.
             let expected_deposit_info = DepositInfo {
+                version: Some(testing_emily_client::models::DepositVersion::V1),
+                max_fee: Some(DEPOSIT_MAX_FEE),
                 amount: DEPOSIT_AMOUNT_SATS,
                 bitcoin_tx_output_index,
                 bitcoin_txid: bitcoin_txid.clone(),
@@ -777,10 +800,14 @@ async fn get_deposits_for_reclaim_pubkeys() {
                     deposit_script: deposit_script.clone(),
                     reclaim_script: reclaim_script.clone(),
                     transaction_hex: transaction_hex.clone(),
+                    recipient: None,
+                    max_fee: None,
                 };
                 create_requests.push(request);
                 // Store the expected deposit info that should come from it.
                 let expected_deposit_info = DepositInfo {
+                    version: Some(testing_emily_client::models::DepositVersion::V1),
+                    max_fee: Some(DEPOSIT_MAX_FEE),
                     amount: DEPOSIT_AMOUNT_SATS,
                     bitcoin_tx_output_index,
                     bitcoin_txid: bitcoin_txid.clone(),
@@ -902,6 +929,8 @@ async fn update_deposits() {
                 deposit_script: deposit_script.clone(),
                 reclaim_script: reclaim_script.clone(),
                 transaction_hex: transaction_hex.clone(),
+                recipient: None,
+                max_fee: None,
             };
             create_requests.push(create_request);
 
@@ -916,6 +945,7 @@ async fn update_deposits() {
             deposit_updates.push(deposit_update);
 
             let expected_deposit = Deposit {
+                version: Some(testing_emily_client::models::DepositVersion::V1),
                 amount: DEPOSIT_AMOUNT_SATS,
                 bitcoin_tx_output_index: i as u32,
                 bitcoin_txid: bitcoin_txid.clone(),
@@ -997,6 +1027,8 @@ async fn create_deposit_handles_duplicates(status: DepositStatus) {
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     apis::deposit_api::create_deposit(&configuration, create_deposit_body.clone())
@@ -1128,6 +1160,8 @@ async fn update_deposits_is_forbidden_for_signer(
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     // Update the deposit status with the privileged configuration.
@@ -1289,6 +1323,8 @@ async fn update_deposits_is_not_forbidden_for_sidecar(
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     // Update the deposit status with the privileged configuration.
@@ -1413,6 +1449,8 @@ async fn rbf_status_saved_successfully() {
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     // Update the deposit status with the privileged configuration.
@@ -1497,6 +1535,8 @@ async fn replaced_by_tx_for_not_rbf_transactions_is_bad_request(status: DepositS
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     // Update the deposit status with the privileged configuration.
@@ -1578,6 +1618,8 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     let DepositTxnData {
@@ -1595,6 +1637,8 @@ async fn emily_process_deposit_updates_when_some_of_them_already_accepted() {
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     // Sanity check that the two deposits are different.
@@ -1737,6 +1781,8 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     let DepositTxnData {
@@ -1754,6 +1800,8 @@ async fn emily_process_deposit_updates_when_some_of_them_are_unknown() {
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     // Sanity check that the two deposits are different.
@@ -1879,6 +1927,8 @@ async fn only_completed_deposit_can_have_fulfillment(status: DepositStatus, is_s
         deposit_script: deposit_script.clone(),
         reclaim_script: reclaim_script.clone(),
         transaction_hex: transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     // Update the deposit status with the privileged configuration.

@@ -369,6 +369,7 @@ pub async fn create_deposit(
         }
         // Make table entry.
         let deposit_entry: DepositEntry = DepositEntry {
+            deposit_version: deposit_info.version().into(),
             key: DepositEntryKey {
                 bitcoin_txid,
                 bitcoin_tx_output_index,
