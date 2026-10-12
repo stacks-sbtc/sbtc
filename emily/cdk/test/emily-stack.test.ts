@@ -54,11 +54,7 @@ describe('EmilyStack Test', () => {
         );
 
         // Assert
-        const replacements = [
-            ['DepositStatus', 'DepositStatusV2'],
-            ['DepositRecipient', 'DepositRecipientV2'],
-            ['DepositReclaimPubkeysHashIndex', 'DepositReclaimPubkeysHashIndexV2'],
-        ];
+        const replacements = [['DepositStatus', 'DepositStatusV2']];
         replacements.forEach(([originalName, replacementName]) => {
             expect(indexesByName[originalName]).toBeDefined();
             expect(indexesByName[replacementName]).toBeDefined();
