@@ -241,6 +241,8 @@ where
             Payload::StacksTransactionSignRequest(_)
             | Payload::BitcoinPreSignRequest(_)
             | Payload::BitcoinPreSignAck(_)
+            | Payload::BitcoinSignatureRequest(_)
+            | Payload::BitcoinSignatureResponse(_)
             | Payload::WstsMessage(_)
             | Payload::StacksTransactionSignature(_) => (),
         };

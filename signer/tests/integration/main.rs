@@ -21,6 +21,7 @@ mod request_decider;
 mod rotate_keys;
 mod setup;
 mod stacks;
+mod taproot_multisig;
 mod tls_checking;
 mod transaction_coordinator;
 mod transaction_signer;

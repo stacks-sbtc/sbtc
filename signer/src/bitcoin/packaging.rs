@@ -107,9 +107,11 @@ pub const MAX_PRESIGN_REQUEST_SIZE: usize = GOSSIPSUB_MAX_TRANSMIT_SIZE - SIGNED
 /// This constant is derived from bitcoin core, and has the property that
 /// if the packager ensure that the total vsize of the items in the package
 /// are under this limit, then the transaction package will be under the
-/// bitcoin vsize limit.
-const PACKAGE_MAX_VSIZE: u64 =
-    ((MAX_MEMPOOL_PACKAGE_SIZE - MAX_MEMPOOL_PACKAGE_TX_COUNT * MAX_BASE_TX_VSIZE) / 5000) * 5000;
+/// bitcoin vsize limit, whatever the signers' key set.
+const PACKAGE_MAX_VSIZE: u64 = ((MAX_MEMPOOL_PACKAGE_SIZE as f64
+    - MAX_MEMPOOL_PACKAGE_TX_COUNT as f64 * MAX_BASE_TX_VSIZE)
+    / 5000.0) as u64
+    * 5000;
 
 /// Package a list of items into optimal bags according to specified
 /// constraints.
@@ -888,8 +890,8 @@ mod tests {
         items: vec![RequestItem::no_votes().vsize(4000); 25],
         max_needs_signature: 10,
         max_votes_against: 1,
-        expected_bag_sizes: [23],
-        expected_bag_vsizes: [92000],
+        expected_bag_sizes: [21],
+        expected_bag_vsizes: [84000],
     } ; "ignores-when-vsize-exceeds-max")]
     #[test_case(VotesTestCase {
         items: vec![
@@ -1405,7 +1407,7 @@ mod tests {
                 amount: 100_000,
                 deposit_script: bitcoin::ScriptBuf::new(),
                 reclaim_script_hash: TaprootScriptHash::zeros(),
-                signers_public_key,
+                signers_public_key: crate::bitcoin::utxo::DepositSigningKey::V1(signers_public_key),
             };
 
             let proto_outpoint = proto::OutPoint::from(deposit.outpoint);
@@ -1557,7 +1559,7 @@ mod tests {
                 amount: 100_000,
                 deposit_script: bitcoin::ScriptBuf::new(),
                 reclaim_script_hash: TaprootScriptHash::zeros(),
-                signers_public_key,
+                signers_public_key: crate::bitcoin::utxo::DepositSigningKey::V1(signers_public_key),
             })
             .collect();
 

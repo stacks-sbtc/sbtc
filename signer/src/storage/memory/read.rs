@@ -1,13 +1,13 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::{
     DEPOSIT_LOCKTIME_BLOCK_BUFFER,
     bitcoin::{
-        utxo::SignerUtxo,
+        utxo::{SignerUtxo, SignerUtxoKeySet},
         validation::{DepositRequestReport, WithdrawalRequestReport},
     },
     error::Error,
-    keys::{PublicKey, PublicKeyXOnly, SignerScriptPubKey as _},
+    keys::{PublicKey, PublicKeyXOnly},
     storage::{
         DbRead,
         model::{self, BitcoinBlockHeight, DkgSharesStatus, StacksBlockHash},
@@ -15,7 +15,28 @@ use crate::{
     },
 };
 
-use super::{SharedStore, store::InMemoryTransaction};
+use super::{SharedStore, store::InMemoryTransaction, store::Store};
+
+/// Return the signer key material indexed by the scriptPubKey that it controls.
+fn signer_utxo_key_sets(store: &Store) -> BTreeMap<bitcoin::ScriptBuf, SignerUtxoKeySet> {
+    store
+        .signer_key_sets
+        .values()
+        .map(|(_, stored_key_set)| {
+            let key_set = match stored_key_set.key_set_id {
+                model::KeySetId::V1(public_key) => SignerUtxoKeySet::V1(public_key.into()),
+                model::KeySetId::V2(_) => {
+                    let public_keys = stored_key_set.public_keys.iter().map(Into::into);
+                    SignerUtxoKeySet::V2(sbtc::SignerKeySet::new_unchecked(
+                        public_keys,
+                        stored_key_set.signatures_required,
+                    ))
+                }
+            };
+            (stored_key_set.script_pubkey.clone().into(), key_set)
+        })
+        .collect()
+}
 
 impl DbRead for SharedStore {
     async fn get_bitcoin_block(
@@ -184,19 +205,15 @@ impl DbRead for SharedStore {
         signer_public_key: &PublicKey,
     ) -> Result<Option<bool>, Error> {
         let store = self.lock().await;
-        let deposit_request = store.deposit_requests.get(&(*txid, output_index)).cloned();
-        let Some(deposit_request) = deposit_request else {
+        let Some(deposit_request) = store.deposit_requests.get(&(*txid, output_index)) else {
+            return Ok(None);
+        };
+        let Some((_, key_set)) = store.signer_key_sets.get(&deposit_request.key_set_id) else {
             return Ok(None);
         };
 
-        let can_sign = store
-            .encrypted_dkg_shares
-            .values()
-            .filter(|(_, shares)| shares.signer_set_public_keys.contains(signer_public_key))
-            .map(|(_, shares)| PublicKeyXOnly::from(shares.aggregate_key))
-            .any(|x_only_key| x_only_key == deposit_request.signers_public_key);
-
-        Ok(Some(can_sign))
+        let member_key = key_set.version.member_key(signer_public_key);
+        Ok(Some(key_set.public_keys.contains(&member_key)))
     }
 
     async fn deposit_request_exists(
@@ -389,32 +406,40 @@ impl DbRead for SharedStore {
         &self,
         _stacks_chain_tip: &model::StacksBlockHash,
         _signer_set: &BTreeSet<PublicKey>,
-        _aggregate_key: &PublicKey,
+        _aggregate_key: &model::RegistryKey,
         _signatures_required: u16,
     ) -> Result<bool, Error> {
         unimplemented!()
     }
 
     async fn get_signers_script_pubkeys(&self) -> Result<Vec<model::Bytes>, Error> {
-        Ok(self
-            .lock()
-            .await
-            .encrypted_dkg_shares
+        let store = self.lock().await;
+        let script_pubkeys = store
+            .signer_key_sets
             .values()
-            .map(|(_, share)| share.script_pubkey.to_bytes())
-            .collect())
+            .map(|(_, key_set)| key_set.script_pubkey.to_bytes())
+            .chain(
+                store
+                    .bitcoin_outputs
+                    .values()
+                    .flatten()
+                    .filter(|output| output.output_type == model::TxOutputType::SignersOutput)
+                    .map(|output| output.script_pubkey.to_bytes()),
+            )
+            .collect::<BTreeSet<_>>();
+
+        Ok(script_pubkeys.into_iter().collect())
     }
 
     async fn get_signer_utxo(
         &self,
         chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<SignerUtxo>, Error> {
-        let Some(dkg_shares) = self.get_latest_encrypted_dkg_shares().await? else {
-            return Ok(None);
-        };
-        let aggregate_key = dkg_shares.aggregate_key;
-        let script_pubkey = aggregate_key.signers_script_pubkey();
         let store = self.lock().await;
+        let key_sets = signer_utxo_key_sets(&store);
+        if key_sets.is_empty() {
+            return Ok(None);
+        }
         let bitcoin_blocks = &store.bitcoin_blocks;
         let first = bitcoin_blocks.get(chain_tip);
 
@@ -439,7 +464,7 @@ impl DbRead for SharedStore {
                     .filter(|tx| {
                         tx.output
                             .first()
-                            .is_some_and(|out| out.script_pubkey == script_pubkey)
+                            .is_some_and(|out| key_sets.contains_key(&out.script_pubkey))
                     })
                     .peekable();
 
@@ -456,18 +481,18 @@ impl DbRead for SharedStore {
         let Some(sbtc_txs) = sbtc_txs else {
             // if no sbtc tx exists, consider donations
             return store
-                .get_utxo_from_donation(chain_tip, &aggregate_key, context_window)
+                .get_utxo_from_donation(chain_tip, &key_sets, context_window)
                 .await;
         };
 
-        get_utxo(&aggregate_key, sbtc_txs)
+        get_utxo(&key_sets, sbtc_txs)
     }
 
     async fn get_deposit_request_signer_votes(
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         // Let's fetch the votes for the outpoint
         let signers = self.get_deposit_signers(txid, output_index).await?;
@@ -476,35 +501,20 @@ impl DbRead for SharedStore {
             .map(|vote| (vote.signer_pub_key, vote.can_accept))
             .collect();
 
-        // Now we might not have votes from every signer, so lets get the
-        // full signer set.
-        let store = self.lock().await;
-        let ans = store
-            .rotate_keys_transactions
-            .values()
-            .flatten()
-            .find(|tx| &tx.aggregate_key == aggregate_key);
-
-        // Let's merge the signer set with the actual votes.
-        if let Some(rotate_keys_tx) = ans {
-            let votes: Vec<model::SignerVote> = rotate_keys_tx
-                .signer_set
-                .iter()
-                .map(|public_key| model::SignerVote {
-                    signer_public_key: *public_key,
-                    is_accepted: signer_votes.remove(public_key),
-                })
-                .collect();
-            Ok(model::SignerVotes::from(votes))
-        } else {
-            Ok(model::SignerVotes::from(Vec::new()))
-        }
+        let votes: Vec<_> = signer_set
+            .iter()
+            .map(|public_key| model::SignerVote {
+                signer_public_key: *public_key,
+                is_accepted: signer_votes.remove(public_key),
+            })
+            .collect();
+        Ok(model::SignerVotes::from(votes))
     }
 
     async fn get_withdrawal_request_signer_votes(
         &self,
         id: &model::QualifiedRequestId,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         // Let's fetch the votes for the outpoint
         let signers = self
@@ -515,29 +525,14 @@ impl DbRead for SharedStore {
             .map(|vote| (vote.signer_pub_key, vote.is_accepted))
             .collect();
 
-        // Now we might not have votes from every signer, so lets get the
-        // full signer set.
-        let store = self.lock().await;
-        let ans = store
-            .rotate_keys_transactions
-            .values()
-            .flatten()
-            .find(|tx| &tx.aggregate_key == aggregate_key);
-
-        // Let's merge the signer set with the actual votes.
-        if let Some(rotate_keys_tx) = ans {
-            let votes: Vec<model::SignerVote> = rotate_keys_tx
-                .signer_set
-                .iter()
-                .map(|public_key| model::SignerVote {
-                    signer_public_key: *public_key,
-                    is_accepted: signer_votes.get(public_key).copied(),
-                })
-                .collect();
-            Ok(model::SignerVotes::from(votes))
-        } else {
-            Ok(model::SignerVotes::from(Vec::new()))
-        }
+        let votes: Vec<_> = signer_set
+            .iter()
+            .map(|public_key| model::SignerVote {
+                signer_public_key: *public_key,
+                is_accepted: signer_votes.get(public_key).copied(),
+            })
+            .collect();
+        Ok(model::SignerVotes::from(votes))
     }
 
     async fn is_known_bitcoin_block_hash(
@@ -572,6 +567,11 @@ impl DbRead for SharedStore {
             .values()
             .any(|(_, share)| &share.script_pubkey == script);
 
+        let is_known_key_set = store
+            .signer_key_sets
+            .values()
+            .any(|(_, key_set)| &key_set.script_pubkey == script);
+
         let is_known_signer_output = store
             .bitcoin_outputs
             .values()
@@ -579,7 +579,7 @@ impl DbRead for SharedStore {
             .filter(|output| output.output_type == model::TxOutputType::SignersOutput)
             .any(|output| &output.script_pubkey == script);
 
-        Ok(is_known_dkg_shares || is_known_signer_output)
+        Ok(is_known_dkg_shares || is_known_key_set || is_known_signer_output)
     }
 
     async fn is_withdrawal_inflight(
@@ -674,13 +674,14 @@ impl DbRead for SharedStore {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error> {
-        Ok(self
-            .lock()
-            .await
-            .bitcoin_sighashes
-            .get(sighash)
-            .map(|s| (s.will_sign, s.aggregate_key, s.prevout_type)))
+    ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
+        Ok(self.lock().await.bitcoin_sighashes.get(sighash).map(|s| {
+            model::BitcoinTxSigHashSigningInfo {
+                will_sign: s.will_sign,
+                key_set_id: s.key_set_id,
+                prevout_type: s.prevout_type,
+            }
+        }))
     }
 
     // The postgres implementation uses a timestamp to figure out when a
@@ -1047,7 +1048,7 @@ impl DbRead for InMemoryTransaction {
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
-        aggregate_key: &PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> Result<bool, Error> {
         self.store
@@ -1075,20 +1076,20 @@ impl DbRead for InMemoryTransaction {
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         self.store
-            .get_deposit_request_signer_votes(txid, output_index, aggregate_key)
+            .get_deposit_request_signer_votes(txid, output_index, signer_set)
             .await
     }
 
     async fn get_withdrawal_request_signer_votes(
         &self,
         id: &model::QualifiedRequestId,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> Result<model::SignerVotes, Error> {
         self.store
-            .get_withdrawal_request_signer_votes(id, aggregate_key)
+            .get_withdrawal_request_signer_votes(id, signer_set)
             .await
     }
 
@@ -1167,7 +1168,7 @@ impl DbRead for InMemoryTransaction {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error> {
+    ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
         self.store.will_sign_bitcoin_tx_sighash(sighash).await
     }
 

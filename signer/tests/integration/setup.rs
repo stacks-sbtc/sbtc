@@ -32,6 +32,7 @@ use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
+use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::bitcoin::utxo::TxDeconstructor as _;
 use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::block_observer;
@@ -43,6 +44,7 @@ use signer::context::SbtcLimits;
 use signer::emily_client::EmilyClient;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
+use signer::keys::PublicKeyXOnly;
 use signer::keys::SignerScriptPubKey as _;
 use signer::stacks::api::MockStacksInteract;
 use signer::stacks::wallet::SignerWallet;
@@ -207,13 +209,13 @@ impl TestSweepSetup {
             deposits: vec![deposit_request],
             withdrawals: vec![withdrawal_request],
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(signers_public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::new(signer_utxo.txid, signer_utxo.vout),
                     amount: signer_utxo.amount.to_sat(),
-                    public_key: signers_public_key,
+                    key_set: SignerUtxoKeySet::V1(signers_public_key),
                 },
                 fee_rate: 10.0,
-                public_key: signers_public_key,
                 last_fees: None,
                 magic_bytes: *b"T3",
             },
@@ -419,7 +421,7 @@ impl TestSweepSetup {
         let event = KeyRotationEvent {
             txid: fake::Faker.fake(),
             block_hash: self.stacks_genesis_block.block_hash,
-            aggregate_key: self.aggregated_signer.keypair.public_key().into(),
+            aggregate_key: PublicKey::from(self.aggregated_signer.keypair.public_key()).into(),
             signer_set,
             signatures_required: self.signatures_required,
             address: PrincipalData::from(address).into(),
@@ -826,6 +828,8 @@ impl TestSweepSetup2 {
                 outpoint: info.outpoint,
                 reclaim_script: info.reclaim_script.clone(),
                 deposit_script: info.deposit_script.clone(),
+                recipient: None,
+                max_fee: None,
             })
             .collect()
     }
@@ -926,13 +930,15 @@ impl TestSweepSetup2 {
                 .collect(),
             withdrawals,
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(
+                    aggregated_signer.keypair.x_only_public_key().0,
+                ),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::new(signer_utxo.txid, signer_utxo.vout),
                     amount: signer_utxo.amount.to_sat(),
-                    public_key: aggregated_signer.keypair.x_only_public_key().0,
+                    key_set: SignerUtxoKeySet::V1(aggregated_signer.keypair.x_only_public_key().0),
                 },
                 fee_rate: 10.0,
-                public_key: aggregated_signer.keypair.x_only_public_key().0,
                 last_fees,
                 magic_bytes: *b"T3",
             },
@@ -1020,7 +1026,7 @@ impl TestSweepSetup2 {
             chain_tip: sweep.block_hash.into(),
             prevout_txid: self.donation.txid.into(),
             prevout_output_index: self.donation.vout,
-            aggregate_key: self.signers.aggregate_key().into(),
+            key_set_id: PublicKeyXOnly::from(self.signers.aggregate_key()).into(),
             will_sign: true,
             is_valid_tx: true,
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
@@ -1035,7 +1041,10 @@ impl TestSweepSetup2 {
                 chain_tip: sweep.block_hash.into(),
                 prevout_txid: request.outpoint.txid.into(),
                 prevout_output_index: request.outpoint.vout,
-                aggregate_key: request.signers_public_key.into(),
+                key_set_id: match &request.signers_public_key {
+                    utxo::DepositSigningKey::V1(key) => model::KeySetId::V1(key.into()),
+                    utxo::DepositSigningKey::V2 { key_set, .. } => key_set.id().into(),
+                },
                 will_sign: true,
                 is_valid_tx: true,
                 validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
@@ -1246,7 +1255,7 @@ impl TestSweepSetup2 {
         let event = KeyRotationEvent {
             txid: fake::Faker.fake(),
             block_hash: self.stacks_blocks.first().unwrap().block_hash,
-            aggregate_key: self.signers.signer.keypair.public_key().into(),
+            aggregate_key: PublicKey::from(self.signers.signer.keypair.public_key()).into(),
             signer_set: self.signers.keys.clone(),
             signatures_required: self.signatures_required,
             address: PrincipalData::from(address).into(),

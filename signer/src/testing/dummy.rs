@@ -58,6 +58,7 @@ use crate::bitcoin::rpc::OutputScriptPubKey;
 use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::bitcoin::utxo::SignerUtxo;
+use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::bitcoin::validation::TxRequestIds;
 use crate::codec::Encode as _;
 use crate::ecdsa::Signed;
@@ -67,6 +68,8 @@ use crate::keys::PublicKeyXOnly;
 use crate::keys::SignerScriptPubKey as _;
 use crate::message::BitcoinPreSignAck;
 use crate::message::BitcoinPreSignRequest;
+use crate::message::BitcoinSignatureRequest;
+use crate::message::BitcoinSignatureResponse;
 use crate::message::SignerMessage;
 use crate::stacks::contracts::AcceptWithdrawalV1;
 use crate::stacks::contracts::CompleteDepositV1;
@@ -413,6 +416,41 @@ impl fake::Dummy<fake::Faker> for PublicKeyXOnly {
     }
 }
 
+impl fake::Dummy<fake::Faker> for BitcoinSignatureRequest {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
+        let bytes: [u8; 32] = rng.r#gen();
+        Self {
+            sighash: TapSighash::from_byte_array(bytes).into(),
+        }
+    }
+}
+
+impl fake::Dummy<fake::Faker> for BitcoinSignatureResponse {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
+        let request: BitcoinSignatureRequest = fake::Faker.fake_with_rng(rng);
+        let secret_key = secp256k1::SecretKey::new(rng);
+        let keypair = secp256k1::Keypair::from_secret_key(secp256k1::SECP256K1, &secret_key);
+        let message = secp256k1::Message::from_digest(request.sighash.to_byte_array());
+        Self {
+            sighash: request.sighash,
+            signature: secp256k1::SECP256K1.sign_schnorr_no_aux_rand(&message, &keypair),
+        }
+    }
+}
+
+impl fake::Dummy<fake::Faker> for model::KeySetVersion {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &fake::Faker, _: &mut R) -> Self {
+        Self::V1
+    }
+}
+
+impl fake::Dummy<fake::Faker> for model::KeySetId {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &fake::Faker, rng: &mut R) -> Self {
+        let key: PublicKeyXOnly = fake::Faker.fake_with_rng(rng);
+        key.into()
+    }
+}
+
 /// Used to for fine-grained control of generating fake testing addresses.
 #[derive(Debug)]
 pub struct BitcoinAddresses(pub Range<usize>);
@@ -546,14 +584,14 @@ impl fake::Dummy<&[PublicKey]> for SignerBtcState {
             fee_rate: Faker.fake_with_rng(rng),
             last_fees: Faker.fake_with_rng(rng),
             magic_bytes: [1, 2],
-            public_key: aggregate_key_x_only,
+            output_key_set: SignerUtxoKeySet::V1(aggregate_key_x_only),
             utxo: SignerUtxo {
                 amount: Faker.fake_with_rng(rng),
                 outpoint: OutPoint {
                     txid: txid(&Faker, rng),
                     vout: Faker.fake_with_rng(rng),
                 },
-                public_key: aggregate_key_x_only,
+                key_set: SignerUtxoKeySet::V1(aggregate_key_x_only),
             },
         }
     }
