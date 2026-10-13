@@ -631,6 +631,7 @@ mod tests {
     use test_case::test_case;
 
     use crate::bitcoin::utxo::DepositRequest;
+    use crate::bitcoin::utxo::DepositSigningKey;
     use crate::bitcoin::utxo::PROTOBUF_ENCODED_SIZE_OVERHEAD;
     use crate::bitcoin::utxo::RequestRef;
     use crate::bitcoin::utxo::WithdrawalRequest;
@@ -1407,7 +1408,7 @@ mod tests {
                 amount: 100_000,
                 deposit_script: bitcoin::ScriptBuf::new(),
                 reclaim_script_hash: TaprootScriptHash::zeros(),
-                signers_public_key: crate::bitcoin::utxo::DepositSigningKey::V1(signers_public_key),
+                signers_public_key: DepositSigningKey::V1(signers_public_key),
             };
 
             let proto_outpoint = proto::OutPoint::from(deposit.outpoint);
@@ -1559,7 +1560,7 @@ mod tests {
                 amount: 100_000,
                 deposit_script: bitcoin::ScriptBuf::new(),
                 reclaim_script_hash: TaprootScriptHash::zeros(),
-                signers_public_key: crate::bitcoin::utxo::DepositSigningKey::V1(signers_public_key),
+                signers_public_key: DepositSigningKey::V1(signers_public_key),
             })
             .collect();
 
