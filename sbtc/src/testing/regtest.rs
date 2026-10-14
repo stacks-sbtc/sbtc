@@ -147,8 +147,23 @@ pub fn get_or_create_wallet(rpc: &Client, wallet: &str) {
         Err(_) => {
             // We want a wallet that is watch only, since we manage keys
             let disable_private_keys = Some(true);
-            rpc.create_wallet(wallet, disable_private_keys, None, None, None)
-                .unwrap();
+            match rpc.create_wallet(wallet, disable_private_keys, None, None, None) {
+                Ok(_) => (),
+                // Another test process may have created the wallet after our
+                // initial attempt to load it. In that case, load the newly
+                // created wallet and continue.
+                Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -4, .. }))) => {
+                    match rpc.load_wallet(wallet) {
+                        Ok(_) => (),
+                        Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError {
+                            code: -35,
+                            ..
+                        }))) => (),
+                        Err(error) => panic!("failed to load concurrently created wallet: {error}"),
+                    }
+                }
+                Err(error) => panic!("failed to create wallet: {error}"),
+            }
         }
     };
 }
