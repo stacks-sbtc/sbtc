@@ -89,10 +89,10 @@ pub async fn get_block_by_height(
     block_height: u64,
 ) -> Result<NakamotoBlock, Error> {
     let path = format!("/v3/blocks/height/{block_height}");
-    let url = stacks_client
-        .endpoint
+    let endpoint = stacks_client.endpoint.clone();
+    let url = endpoint
         .join(&path)
-        .map_err(|err| Error::PathJoin(err, stacks_client.endpoint.clone(), Cow::Owned(path)))?;
+        .map_err(|err| Error::PathJoin(err, Box::new(endpoint), Cow::Owned(path)))?;
 
     let block_bytes = stacks_client
         .client
@@ -127,10 +127,10 @@ pub async fn block_replay(
     block_id: StacksBlockHash,
 ) -> Result<BlockReplay, Error> {
     let path = format!("/v3/blocks/replay/{block_id}");
-    let url = stacks_client
-        .endpoint
+    let endpoint = stacks_client.endpoint.clone();
+    let url = endpoint
         .join(&path)
-        .map_err(|err| Error::PathJoin(err, stacks_client.endpoint.clone(), Cow::Owned(path)))?;
+        .map_err(|err| Error::PathJoin(err, Box::new(endpoint), Cow::Owned(path)))?;
 
     stacks_client
         .client
