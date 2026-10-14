@@ -230,8 +230,8 @@ pub const NEW_BLOCK_BODY_LIMIT: usize = 256 * 1024 * 1024;
 
 /// The default mainnet activation height for v2 signer UTXOs.
 ///
-/// This block height corresponds to around 2026-10-19 15:00 UTC.
-pub const MAINNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(972_145);
+/// This block height corresponds to around 2026-10-20 15:00 UTC.
+pub const MAINNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(972_295);
 
 /// The default testnet activation height for v2 signer UTXOs.
 pub const TESTNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(245);
