@@ -52,9 +52,9 @@ use signer::{
         contracts::{AsContractCall as _, SmartContract},
         wallet::SignerWallet,
     },
-    transaction_coordinator::{TxCoordinatorEventLoop, coordinator_public_key},
     storage::{DbRead as _, DbWrite as _, model, postgres::PgStore},
     testing::{self, context::*, wallet::InitiateWithdrawalRequest},
+    transaction_coordinator::{TxCoordinatorEventLoop, coordinator_public_key},
     transaction_signer::{STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop},
     util::{FutureExt as _, Sleep},
 };
@@ -523,7 +523,6 @@ async fn dkg_runs_after_v2_signing_activation() {
     }
     clean_emily_setup(emily_tables).await;
 }
-
 
 /// End to end test for deposit and withdrawal:
 ///  - the sBTC signers bootstrap

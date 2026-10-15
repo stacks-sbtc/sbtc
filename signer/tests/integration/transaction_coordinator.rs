@@ -297,7 +297,6 @@ impl<S> SignerContextProvider<S> for IntegrationTestContext<S> {
     }
 }
 
-
 /// Wait for all signers to finish their coordinator duties and do this
 /// concurrently so that we don't miss anything (not sure if we need to do
 /// it concurrently).
