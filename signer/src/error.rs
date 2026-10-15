@@ -47,7 +47,7 @@ pub enum Error {
 
     /// Unexpected [`StateMachineId`] in the given context.
     #[error("unexpected state machine id in the given context: {0:?}")]
-    UnexpectedStateMachineId(crate::wsts_state_machine::StateMachineId),
+    UnexpectedStateMachineId(Box<crate::wsts_state_machine::StateMachineId>),
 
     /// Common error from WSTS, usually raised when a polynomial is invalid.
     #[error("common WSTS error: {0}")]
@@ -98,10 +98,6 @@ pub enum Error {
         /// The expected aggregate key.
         expected: Box<PublicKeyXOnly>,
     },
-
-    /// The aggregate key for the given block hash could not be determined.
-    #[error("the signer set aggregate key could not be determined for bitcoin block {0}")]
-    MissingAggregateKey(bitcoin::BlockHash),
 
     /// Indicates an error when decoding a protobuf
     #[error("could not decode protobuf {0}")]
@@ -245,6 +241,26 @@ pub enum Error {
     #[error("the given sighash is unknown: {0}")]
     UnknownSigHash(SigHash),
 
+    /// This happens when the coordinator requested a WSTS signature type
+    /// that does not match the prevout type this sighash was approved for.
+    #[error(
+        "signature type {signature_type:?} does not match prevout type {prevout_type} for sighash {sighash}"
+    )]
+    SignatureTypeMismatch {
+        /// The sighash the coordinator asked this signer to participate in.
+        sighash: SigHash,
+        /// The prevout type stored when this signer approved the sighash.
+        prevout_type: crate::storage::model::TxPrevoutType,
+        /// The signature type in the coordinator's WSTS request.
+        signature_type: wsts::net::SignatureType,
+    },
+
+    /// The coordinator requested a non-Taproot signature during DKG
+    /// verification. DKG verification always signs the known mock transaction
+    /// using the Taproot signature type.
+    #[error("signature type {0:?} is not valid for DKG verification; expected Taproot")]
+    InvalidDkgVerificationSignatureType(wsts::net::SignatureType),
+
     /// This should never happen
     #[error("observed a tenure identified by a StacksBlockId with with no blocks")]
     EmptyStacksTenure,
@@ -352,7 +368,7 @@ pub enum Error {
 
     /// Could not parse the path part of a URL
     #[error("failed to construct a valid URL from {1} and {2}: {0}")]
-    PathJoin(#[source] url::ParseError, url::Url, Cow<'static, str>),
+    PathJoin(#[source] url::ParseError, Box<url::Url>, Cow<'static, str>),
 
     /// This occurs when combining many public keys would result in a
     /// "public key" that is the point at infinity.
@@ -402,6 +418,10 @@ pub enum Error {
     /// The given signature was invalid
     #[error("could not convert the given compact bytes into an ECDSA signature: {0}")]
     InvalidEcdsaSignatureBytes(#[source] secp256k1::Error),
+
+    /// The given BIP340 signature bytes were invalid.
+    #[error("could not convert the given bytes into a Schnorr signature: {0}")]
+    InvalidSchnorrSignatureBytes(#[source] secp256k1::Error),
 
     /// This happens when we attempt to convert a `[u8; 65]` into a
     /// recoverable ECDSA signature.
@@ -569,7 +589,7 @@ pub enum Error {
 
     /// Missing state machine
     #[error("missing state machine: {0}")]
-    MissingStateMachine(StateMachineId),
+    MissingStateMachine(Box<StateMachineId>),
 
     /// Missing key rotation
     #[error("missing key rotation")]
@@ -622,9 +642,18 @@ pub enum Error {
     #[error("invalid signature")]
     InvalidSignature,
 
+    /// A signature was offered for a key outside the key set being signed
+    /// for.
+    #[error("public key {0} is not in the signing key set")]
+    SigningKeyNotInKeySet(secp256k1::XOnlyPublicKey),
+
     /// Invalid ECDSA signature
     #[error("invalid ECDSA signature")]
     InvalidEcdsaSignature(#[source] secp256k1::Error),
+
+    /// A Schnorr signature failed to verify against the expected message.
+    #[error("invalid Schnorr signature failed verification")]
+    SchnorrSignatureFailedVerification(#[source] secp256k1::Error),
 
     /// Codec error
     #[error("codec error: {0}")]
@@ -745,7 +774,7 @@ pub enum Error {
     /// current signer is not a member of the signer set indicated by the
     /// aggregate key.
     #[error("current signer not part of signer set indicated by: {0}")]
-    ValidationSignerSet(crate::keys::PublicKey),
+    ValidationSignerSet(crate::storage::model::RegistryKey),
 
     /// Transaction coordinator timed out
     #[error("coordinator timed out after {0} seconds")]

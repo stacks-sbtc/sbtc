@@ -76,10 +76,6 @@ pub struct StacksTransactionSignature {
 /// Represents a request to sign a Stacks transaction.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StacksTransactionSignRequest {
-    /// This is the bitcoin aggregate key that was output from DKG. It is used
-    /// to identify the signing set for the transaction.
-    #[prost(message, optional, tag = "1")]
-    pub aggregate_key: ::core::option::Option<super::super::super::crypto::PublicKey>,
     /// The nonce to use for the transaction.
     #[prost(uint64, tag = "2")]
     pub nonce: u64,
@@ -217,7 +213,7 @@ pub struct RotateKeys {
     /// PoX cycle.
     #[prost(message, repeated, tag = "1")]
     pub new_keys: ::prost::alloc::vec::Vec<super::super::super::crypto::PublicKey>,
-    /// The aggregate key created by combining the above public keys.
+    /// The v1 aggregate key created by combining the above public keys.
     #[prost(message, optional, tag = "2")]
     pub aggregate_key: ::core::option::Option<super::super::super::crypto::PublicKey>,
     /// The address that deployed the contract.
@@ -226,6 +222,12 @@ pub struct RotateKeys {
     /// The number of signatures required for the multi-sig wallet.
     #[prost(uint32, tag = "4")]
     pub signatures_required: u32,
+    /// The Bitcoin block hash uniquely identifying a v2 rotation. Exactly one
+    /// of this field and aggregate_key is populated.
+    #[prost(message, optional, tag = "5")]
+    pub bitcoin_block_hash: ::core::option::Option<
+        super::super::super::bitcoin::BitcoinBlockHash,
+    >,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -284,7 +286,7 @@ pub struct SignerMessage {
         super::super::super::bitcoin::BitcoinBlockHash,
     >,
     /// The message payload
-    #[prost(oneof = "signer_message::Payload", tags = "2, 3, 4, 5, 8, 10, 11")]
+    #[prost(oneof = "signer_message::Payload", tags = "2, 3, 4, 5, 8, 10, 11, 12, 13")]
     pub payload: ::core::option::Option<signer_message::Payload>,
 }
 /// Nested message and enum types in `SignerMessage`.
@@ -313,6 +315,12 @@ pub mod signer_message {
         /// Represents an acknowledgment of a BitcoinPreSignRequest
         #[prost(message, tag = "11")]
         BitcoinPreSignAck(super::BitcoinPreSignAck),
+        /// Request one independent BIP340 signature.
+        #[prost(message, tag = "12")]
+        BitcoinSignatureRequest(super::BitcoinSignatureRequest),
+        /// A signer's independent BIP340 signature.
+        #[prost(message, tag = "13")]
+        BitcoinSignatureResponse(super::BitcoinSignatureResponse),
     }
 }
 /// A wsts message.
@@ -419,6 +427,33 @@ pub struct BitcoinPreSignRequest {
 /// Represents an acknowledgment of a BitcoinPreSignRequest.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct BitcoinPreSignAck {}
+/// A 64-byte BIP340 signature.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct SchnorrSignature {
+    /// The first 256 bits of the signature.
+    #[prost(message, optional, tag = "1")]
+    pub lower_bits: ::core::option::Option<super::super::super::crypto::Uint256>,
+    /// The last 256 bits of the signature.
+    #[prost(message, optional, tag = "2")]
+    pub upper_bits: ::core::option::Option<super::super::super::crypto::Uint256>,
+}
+/// A request for an independent signature over a Bitcoin sighash.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct BitcoinSignatureRequest {
+    /// The message to sign.
+    #[prost(message, optional, tag = "1")]
+    pub sighash: ::core::option::Option<super::super::super::crypto::Uint256>,
+}
+/// A signer's response to a BitcoinSignatureRequest.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct BitcoinSignatureResponse {
+    /// The message that was signed.
+    #[prost(message, optional, tag = "1")]
+    pub sighash: ::core::option::Option<super::super::super::crypto::Uint256>,
+    /// The BIP340 signature over the sighash.
+    #[prost(message, optional, tag = "2")]
+    pub signature: ::core::option::Option<SchnorrSignature>,
+}
 /// This type is a container for all deposits and withdrawals that are part
 /// of a transaction package.
 #[derive(Clone, PartialEq, ::prost::Message)]

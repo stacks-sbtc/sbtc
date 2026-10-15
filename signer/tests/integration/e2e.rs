@@ -52,9 +52,9 @@ use signer::{
         contracts::{AsContractCall as _, SmartContract},
         wallet::SignerWallet,
     },
-    storage::{DbRead as _, postgres::PgStore},
-    testing::{self, context::*, wallet::InitiateWithdrawalRequest},
     transaction_coordinator::{TxCoordinatorEventLoop, coordinator_public_key},
+    storage::{DbRead as _, DbWrite as _, model, postgres::PgStore},
+    testing::{self, context::*, wallet::InitiateWithdrawalRequest},
     transaction_signer::{STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop},
     util::{FutureExt as _, Sleep},
 };
@@ -77,11 +77,11 @@ use crate::{
 const SIMULATED_EVENT_OBSERVER_POLLING: Duration = Duration::from_millis(200);
 
 /// A test signer, with handles to the running event loops
-struct TestSigner {
-    ctx: IntegrationTestContext<StacksClient>,
-    db: PgStore,
-    keypair: Keypair,
-    network: SignerNetwork,
+pub struct TestSigner {
+    pub ctx: IntegrationTestContext<StacksClient>,
+    pub db: PgStore,
+    pub keypair: Keypair,
+    pub network: SignerNetwork,
     bitcoin_block_source: BitcoinChainTipPoller,
     handles: Vec<tokio::task::JoinHandle<()>>,
 }
@@ -224,7 +224,8 @@ impl TestSigner {
     }
 }
 
-async fn start_signers(
+#[allow(clippy::too_many_arguments)]
+pub async fn start_signers(
     bitcoin_client: &BitcoinCoreClient,
     bitcoin_chain_tip_poller: &BitcoinChainTipPoller,
     stacks_client: &StacksClient,
@@ -232,6 +233,8 @@ async fn start_signers(
     network: &WanNetwork,
     num_signers: usize,
     signatures_required: u16,
+    v2_signing_block_height: Option<u64>,
+    bitcoin_processing_delay: Duration,
 ) -> Vec<TestSigner> {
     let keypairs = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
         .take(num_signers)
@@ -266,18 +269,35 @@ async fn start_signers(
 
     let mut signers = Vec::new();
     for kp in keypairs.iter() {
-        signers.push(
-            TestSigner::new(
-                *kp,
-                bitcoin_client,
-                stacks_client,
-                emily_client,
-                network,
-                bitcoin_chain_tip_poller,
-                &wallet,
-            )
-            .await,
-        );
+        let mut signer = TestSigner::new(
+            *kp,
+            bitcoin_client,
+            stacks_client,
+            emily_client,
+            network,
+            bitcoin_chain_tip_poller,
+            &wallet,
+        )
+        .await;
+
+        // Apply additional settings that callers may override.
+        //
+        // Without an explicit height we keep the configured one; overriding
+        // it with `None` would fall back to the testnet activation height,
+        // which the regtest chain is already past.
+        if let Some(height) = v2_signing_block_height {
+            signer.config_mut().signer.v2_signing_block_height = Some(height.into());
+        }
+        signer.config_mut().signer.bitcoin_processing_delay = bitcoin_processing_delay;
+
+        let key_set = signer.ctx.config().signer.v2_signer_key_set().unwrap();
+        signer
+            .db
+            .write_signer_key_set(&model::SignerKeySet::from(key_set))
+            .await
+            .unwrap();
+
+        signers.push(signer);
     }
 
     for signer in signers.iter_mut() {
@@ -415,6 +435,96 @@ async fn new_block_handler(ctx: &IntegrationTestContext<StacksClient>, block: Bl
     }
 }
 
+/// DKG remains available after the v2 signer-output activation height until
+/// the separately configured DKG disable height is reached.
+#[tokio::test]
+async fn dkg_runs_after_v2_signing_activation() {
+    let stack = TestContainersBuilder::start_stacks().await;
+    let bitcoin = stack.bitcoin().await;
+    let stacks = stack.stacks().await;
+
+    let rpc = bitcoin.rpc();
+    let faucet = bitcoin.get_faucet();
+    let stacks_client = stacks.get_client();
+    let (emily_client, emily_tables) = new_emily_setup().await;
+    let network = WanNetwork::default();
+
+    faucet.generate_fee_data();
+
+    // V2 is already active when the signers observe their first new block.
+    // DKG remains enabled because its disable height retains the u64::MAX
+    // default.
+    let v2_signing_block_height = rpc.get_block_count().unwrap();
+    let bitcoin_chain_tip_poller = bitcoin.start_chain_tip_poller().await;
+    let signers = start_signers(
+        &bitcoin.get_client(),
+        &bitcoin_chain_tip_poller,
+        &stacks_client,
+        &emily_client,
+        &network,
+        3,
+        2,
+        Some(v2_signing_block_height),
+        Duration::from_millis(500),
+    )
+    .await;
+
+    // Check that no shares have been written yet.
+    for signer in &signers {
+        let shares = signer.db.get_latest_encrypted_dkg_shares().await.unwrap();
+
+        assert!(shares.is_none());
+    }
+
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
+
+    let mut aggregate_key = None;
+    for signer in &signers {
+        let bitcoin_chain_tip = signer
+            .db
+            .get_bitcoin_canonical_chain_tip_ref()
+            .await
+            .unwrap()
+            .expect("signer did not persist the Bitcoin chain tip");
+
+        let is_v2_signing_active = signer
+            .ctx
+            .config()
+            .signer
+            .is_v2_signing_active(bitcoin_chain_tip.block_height);
+        let is_dkg_disabled = signer
+            .ctx
+            .config()
+            .signer
+            .is_dkg_disabled(bitcoin_chain_tip.block_height);
+
+        assert!(is_v2_signing_active);
+        assert!(!is_dkg_disabled);
+
+        let shares = signer
+            .db
+            .get_latest_encrypted_dkg_shares()
+            .await
+            .unwrap()
+            .expect("DKG should write shares after v2 signing activation");
+        assert_eq!(shares.started_at_bitcoin_block_hash, chain_tip);
+
+        // Check that all signers have the same aggregate key. Meaning that
+        // DKG has been run.
+        match aggregate_key {
+            Some(expected) => assert_eq!(shares.aggregate_key, expected),
+            None => aggregate_key = Some(shares.aggregate_key),
+        }
+    }
+
+    for signer in signers {
+        testing::storage::drop_db(signer.db).await;
+    }
+    clean_emily_setup(emily_tables).await;
+}
+
+
 /// End to end test for deposit and withdrawal:
 ///  - the sBTC signers bootstrap
 ///  - a deposit is created on Emily
@@ -452,6 +562,8 @@ async fn deposit_and_withdrawal() {
         &network,
         num_signers,
         signatures_required,
+        None,
+        Duration::from_millis(500),
     )
     .await;
 
@@ -473,7 +585,9 @@ async fn deposit_and_withdrawal() {
         .get_current_signers_aggregate_key(&deployer)
         .await
         .unwrap()
-        .expect("no aggregate key in contract");
+        .expect("no aggregate key in contract")
+        .v1_public_key()
+        .expect("test requires a v1 signer key");
     let aggregate_key_bitcoin = (*aggregate_key).into();
 
     // Signers require a donation
@@ -531,6 +645,8 @@ async fn deposit_and_withdrawal() {
         deposit_script: deposit_request.deposit_script.to_hex_string(),
         reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
     };
 
     deposit_api::create_deposit(emily_client.config(), emily_request.clone())
@@ -766,6 +882,8 @@ async fn send_deposit(
         deposit_script: deposit_request.deposit_script.to_hex_string(),
         reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
     };
 
     deposit_api::create_deposit(emily_client.config(), emily_request.clone())
@@ -841,6 +959,8 @@ async fn signer_set_rotation(scenario: SignerRotationScenario) {
         &network,
         scenario.num_signers,
         scenario.signatures_required,
+        None,
+        Duration::from_millis(500),
     )
     .await;
 
@@ -867,7 +987,9 @@ async fn signer_set_rotation(scenario: SignerRotationScenario) {
         .get_current_signers_aggregate_key(&deployer)
         .await
         .unwrap()
-        .expect("no aggregate key in contract");
+        .expect("no aggregate key in contract")
+        .v1_public_key()
+        .expect("test requires a v1 signer key");
 
     // Signers require a donation
     let donation_amount = 10_000;
@@ -1026,7 +1148,9 @@ async fn signer_set_rotation(scenario: SignerRotationScenario) {
         .get_current_signers_aggregate_key(&deployer)
         .await
         .unwrap()
-        .expect("no aggregate key in contract");
+        .expect("no aggregate key in contract")
+        .v1_public_key()
+        .expect("test requires a v1 signer key");
 
     assert_ne!(aggregate_key, new_aggregate_key);
 

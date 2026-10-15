@@ -70,10 +70,6 @@ pub fn make_complete_deposit(data: &TestSweepSetup) -> (CompleteDepositV1, ReqCo
         context_window: 10,
         // The value here doesn't matter.
         origin: fake::Faker.fake_with_rng(&mut OsRng),
-        // When checking whether the transaction is from the signer, we
-        // check that the first "prevout" has a `scriptPubKey` that the
-        // signers control.
-        aggregate_key: data.aggregated_signer.keypair.public_key().into(),
         // This value affects how many deposit transactions are consider
         // accepted. During validation, a signer won't sign a transaction
         // if it is not considered accepted but the collection of signers.
@@ -132,10 +128,6 @@ pub fn make_complete_deposit2(data: &TestSweepSetup2) -> (CompleteDepositV1, Req
         context_window: 10,
         // The value here doesn't matter.
         origin: fake::Faker.fake_with_rng(&mut OsRng),
-        // When checking whether the transaction is from the signer, we
-        // check that the first "prevout" has a `scriptPubKey` that the
-        // signers control.
-        aggregate_key: data.signers.aggregate_key(),
         // This value affects how many deposit transactions are consider
         // accepted. During validation, a signer won't sign a transaction
         // if it is not considered accepted by enough signers.

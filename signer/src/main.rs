@@ -28,6 +28,8 @@ use signer::network::libp2p::SignerSwarmBuilder;
 use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::StacksClient;
 use signer::storage::DbRead as _;
+use signer::storage::DbWrite as _;
+use signer::storage::model;
 use signer::storage::postgres::PgStore;
 use signer::transaction_coordinator;
 use signer::transaction_signer;
@@ -120,6 +122,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing::error!(%err, "failed to apply database migrations");
         })?;
     }
+
+    // This row is entirely config-derived, so persist it before starting any
+    // signer event loops.
+    let v2_key_set = settings.signer.v2_signer_key_set()?;
+    db.write_signer_key_set(&model::SignerKeySet::from(v2_key_set))
+        .await?;
 
     // Initialize the signer context.
     let context = SignerContext::<
@@ -279,7 +287,7 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
             .unwrap_or_default();
 
         // Sort the peers by last successful dialed time, duration-descending.
-        db_peers.sort_unstable_by(|a, b| b.last_dialed_at.cmp(&a.last_dialed_at));
+        db_peers.sort_unstable_by_key(|a| std::cmp::Reverse(a.last_dialed_at));
 
         // Create a list of known peers, filtering out those that have not been
         // dialed within the KNOWN_PEER_WINDOW or are already included as seed

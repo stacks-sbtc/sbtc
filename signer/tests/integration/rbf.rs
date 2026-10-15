@@ -19,6 +19,7 @@ mod serial {
     use signer::bitcoin::utxo::SbtcRequests;
     use signer::bitcoin::utxo::SignerBtcState;
     use signer::bitcoin::utxo::SignerUtxo;
+    use signer::bitcoin::utxo::SignerUtxoKeySet;
     use signer::bitcoin::utxo::UnsignedTransaction;
     use signer::bitcoin::utxo::WithdrawalRequest;
     use signer::context::SbtcLimits;
@@ -216,17 +217,17 @@ mod serial {
                 .take(ctx.initial_withdrawals)
                 .collect(),
             signer_state: SignerBtcState {
+                output_key_set: SignerUtxoKeySet::V1(signers_public_key),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::new(signer_utxo.txid, signer_utxo.vout),
                     amount: signer_utxo.amount.to_sat(),
-                    public_key: signers_public_key,
+                    key_set: SignerUtxoKeySet::V1(signers_public_key),
                 },
                 fee_rate: ctx.initial_fee_rate,
-                public_key: signers_public_key,
                 last_fees: None,
                 // The value here isn't important, but it matches what happens
                 // in Nakamoto testnet.
-                magic_bytes: [b'T', b'3'],
+                magic_bytes: *b"T3",
             },
             accept_threshold: failure_threshold,
             num_signers: 2 * failure_threshold,

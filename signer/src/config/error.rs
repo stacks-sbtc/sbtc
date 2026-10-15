@@ -92,4 +92,15 @@ pub enum SignerConfigError {
     /// See https://github.com/stacks-sbtc/sbtc/issues/1694
     #[error("Bootstrap signer set must be at most 16 signers, but it contains {0} signers")]
     TooManySigners(usize),
+
+    /// The DKG cutoff cannot precede v2 signer-output activation.
+    #[error(
+        "DKG disable block height {dkg_disable_block_height} must be greater than or equal to v2 signing block height {v2_signing_block_height}"
+    )]
+    DkgDisableHeightBeforeV2Signing {
+        /// The effective DKG disable height.
+        dkg_disable_block_height: u64,
+        /// The effective v2 signing activation height.
+        v2_signing_block_height: u64,
+    },
 }
