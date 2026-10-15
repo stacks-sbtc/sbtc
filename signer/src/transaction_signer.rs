@@ -917,7 +917,7 @@ where
                         Metrics::increment_bitcoin_validation(&accepted_sighash);
 
                         let accepted_sighash = accepted_sighash?;
-                        let id = StateMachineId::BitcoinSign(accepted_sighash.sighash);
+                        let id = StateMachineId::BitcoinSign(accepted_sighash.sighash, *chain_tip);
 
                         (id, accepted_sighash.public_key)
                     }
@@ -1005,15 +1005,15 @@ where
 
                         // Validate the sighash and upon success, convert it to
                         // a state machine ID.
-                        Self::validate_bitcoin_sign_request(
+                        let accepted_sighash = Self::validate_bitcoin_sign_request(
                             &db,
                             &request.message,
                             request.signature_type,
                             &chain_tip.block_hash,
                         )
-                        .await?
-                        .sighash
-                        .into()
+                        .await?;
+
+                        StateMachineId::BitcoinSign(accepted_sighash.sighash, *chain_tip)
                     }
 
                     // This is a DKG verification signing round. The data
@@ -1095,7 +1095,7 @@ where
                         let sighash = TapSighash::from_slice(&request.message)
                             .map_err(Error::SigHashConversion)?
                             .into();
-                        let state_machine_id = StateMachineId::BitcoinSign(sighash);
+                        let state_machine_id = StateMachineId::BitcoinSign(sighash, *chain_tip);
 
                         if !self.wsts_state_machines.contains(&state_machine_id) {
                             tracing::warn!(

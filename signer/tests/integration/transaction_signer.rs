@@ -931,9 +931,20 @@ mod serial {
 
         // We should have a state machine associated with the sighash nonce
         // request message that we just received.
-        let id1 = StateMachineId::BitcoinSign(sighash);
+        let id1 = StateMachineId::BitcoinSign(sighash, report.chain_tip);
         assert!(tx_signer.wsts_state_machines.contains(&id1));
         assert_eq!(tx_signer.wsts_state_machines.len(), 1);
+
+        let other_chain_tip = BitcoinBlockRef {
+            block_hash: BitcoinBlockHash::from([1; 32]),
+            block_height: 1u64.into(),
+        };
+        let id_at_other_chain_tip = StateMachineId::BitcoinSign(sighash, other_chain_tip);
+        assert!(
+            !tx_signer
+                .wsts_state_machines
+                .contains(&id_at_other_chain_tip)
+        );
 
         // Now let's see what happens when we receive a nonce request message
         // for a sighash that we do not know about. Since the nonce request is
@@ -951,7 +962,7 @@ mod serial {
             .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
             .await;
 
-        let id2 = StateMachineId::BitcoinSign(random_sighash);
+        let id2 = StateMachineId::BitcoinSign(random_sighash, report.chain_tip);
         assert!(response.is_err());
         assert!(tx_signer.wsts_state_machines.contains(&id1));
         assert!(!tx_signer.wsts_state_machines.contains(&id2));
