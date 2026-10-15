@@ -194,7 +194,7 @@ impl Nonce {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 #[allow(non_snake_case)]
 /// A commitment to the private nonce
 pub struct PublicNonce {
