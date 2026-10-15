@@ -26,6 +26,7 @@ use signer::testing::btc::get_canonical_chain_tip;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use test_case::test_case;
 
+use signer::bitcoin::utxo::FeeAssessmentMethod;
 use signer::bitcoin::utxo::RequestRef;
 use signer::bitcoin::utxo::Requests;
 use signer::bitcoin::utxo::SignerUtxoKeySet;
@@ -522,6 +523,7 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
             .await
             .unwrap()
             .unwrap(),
+        fee_assessment: FeeAssessmentMethod::Proportional,
         fee_rate,
         last_fees: None,
         magic_bytes: *b"T3",

@@ -247,8 +247,7 @@ pub const MAINNET_EVEN_FEES_ACTIVATION_HEIGHT: BitcoinBlockHeight =
     BitcoinBlockHeight::new(u64::MAX);
 
 /// The default testnet activation height for even fee assessment.
-pub const TESTNET_EVEN_FEES_ACTIVATION_HEIGHT: BitcoinBlockHeight =
-    BitcoinBlockHeight::new(255);
+pub const TESTNET_EVEN_FEES_ACTIVATION_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(255);
 
 // These are all build info variables. Many of them are set in build.rs.
 

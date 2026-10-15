@@ -9,6 +9,7 @@ use test_case::test_case;
 
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::bitcoin::utxo::BitcoinSignerSet;
+use signer::bitcoin::utxo::FeeAssessmentMethod;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::validation::BitcoinTxContext;
@@ -49,6 +50,10 @@ where
         .await
         .unwrap()
         .unwrap();
+    let fee_assessment = FeeAssessmentMethod::from_block_height(
+        btc_ctx.chain_tip_height,
+        ctx.config().signer.even_fees_activation_height(),
+    );
     SignerBtcState {
         output_key_set: btc_ctx.signer_set.output_key_set(),
         utxo: signer_utxo,
@@ -58,6 +63,7 @@ where
             .map(TryInto::try_into)
             .transpose()
             .unwrap(),
+        fee_assessment,
         magic_bytes: *b"T3",
     }
 }
