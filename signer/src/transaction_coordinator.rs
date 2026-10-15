@@ -477,12 +477,21 @@ where
             return Ok(None);
         };
 
-        let (needs_verification, needs_rotate_key) = assert_v1_rotate_key_action(
+        let action = assert_v1_rotate_key_action(
             &self.context,
             &last_dkg,
             current_aggregate_key,
             bitcoin_chain_tip,
-        )?;
+        );
+        let (needs_verification, needs_rotate_key) = match action {
+            Ok(action) => action,
+            // Bitcoin signing never uses failed shares, so the tenure can go on.
+            Err(error @ Error::DkgVerificationFailed(_)) => {
+                tracing::warn!(%error, "latest DKG shares failed verification; skipping key rotation");
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
         if !needs_verification && !needs_rotate_key {
             tracing::debug!(
                 "stacks node is up to date with the current aggregate key and no DKG verification required"
