@@ -559,19 +559,27 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
     // Check that the intentions to sign the requests sighashes
     // are stored in the database
     let signing_info = db
-        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into())
+        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into(), &chain_tip.block_hash)
         .await
         .expect("query to check if signer sighash is stored failed")
         .expect("signer sighash not stored");
 
     assert!(signing_info.will_sign);
     let signing_info = db
-        .will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into())
+        .will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into(), &chain_tip.block_hash)
         .await
         .expect("query to check if deposit sighash is stored failed")
         .expect("deposit sighash not stored");
 
     assert!(signing_info.will_sign);
+
+    // The approvals only apply to the chain tip of the pre-sign request.
+    let other_chain_tip: BitcoinBlockHash = Faker.fake_with_rng(&mut rng);
+    let result = db
+        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into(), &other_chain_tip)
+        .await
+        .expect("query to check if signer sighash is stored failed");
+    assert!(result.is_none());
 
     testing::storage::drop_db(db).await;
 }
@@ -1612,7 +1620,7 @@ mod validate_dkg_verification_message {
 
         let result = params.execute(&db).await.unwrap_err();
 
-        assert!(matches!(result, Error::InvalidSigHash(_)));
+        std::assert_matches!(result, Error::InvalidSigHash(_, _));
 
         testing::storage::drop_db(db).await;
     }

@@ -3,6 +3,7 @@ use std::borrow::Cow;
 
 use bitcoin::script::PushBytesError;
 
+use crate::bitcoin::validation::InputValidationResult;
 use crate::bitcoin::validation::WithdrawalCapContext;
 use crate::blocklist_client::BlocklistClientError;
 use crate::codec;
@@ -233,8 +234,8 @@ pub enum Error {
 
     /// This happens when the tx-signer is validating the sighash and it is
     /// known but has failed validation.
-    #[error("the given sighash is known and failed validation: {0}")]
-    InvalidSigHash(SigHash),
+    #[error("the given sighash is known and failed validation: {0}, reason: {1}")]
+    InvalidSigHash(SigHash, InputValidationResult),
 
     /// This happens when the tx-signer is validating the sighash and it
     /// does not have a row for it in the database.

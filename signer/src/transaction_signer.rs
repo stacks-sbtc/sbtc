@@ -13,6 +13,7 @@ use std::time::Duration;
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::bitcoin::validation::BitcoinTxContext;
+use crate::bitcoin::validation::InputValidationResult;
 use crate::context::Context;
 use crate::context::P2PEvent;
 use crate::context::SignerCommand;
@@ -432,7 +433,7 @@ where
         let Some(signing_info) = self
             .context
             .get_storage()
-            .will_sign_bitcoin_tx_sighash(&request.sighash)
+            .will_sign_bitcoin_tx_sighash(&request.sighash, &chain_tip.block_hash)
             .await?
         else {
             return Err(Error::UnknownSigHash(request.sighash));
@@ -440,7 +441,10 @@ where
 
         let is_v2 = matches!(signing_info.key_set_id, model::KeySetId::V2(_));
         if !signing_info.will_sign || !is_v2 {
-            return Err(Error::InvalidSigHash(request.sighash));
+            return Err(Error::InvalidSigHash(
+                request.sighash,
+                signing_info.validation_result,
+            ));
         }
 
         let secret_key = sbtc::derive_signing_secret_key(self.signer_private_key.into());
@@ -906,6 +910,7 @@ where
                             &db,
                             &request.message,
                             request.signature_type,
+                            &chain_tip.block_hash,
                         )
                         .await;
 
@@ -1004,6 +1009,7 @@ where
                             &db,
                             &request.message,
                             request.signature_type,
+                            &chain_tip.block_hash,
                         )
                         .await?
                         .sighash
@@ -1307,7 +1313,10 @@ where
         let tap_sighash = UnsignedMockTransaction::new(new_key.into()).compute_sighash()?;
         if tap_sighash.as_byte_array() != message {
             tracing::warn!(data_len = %message.len(), "🔐 sighash mismatch for DKG verification signing");
-            return Err(Error::InvalidSigHash(tap_sighash.into()));
+            return Err(Error::InvalidSigHash(
+                tap_sighash.into(),
+                InputValidationResult::Unknown,
+            ));
         }
 
         Ok(())
@@ -1342,10 +1351,14 @@ where
     /// Check whether we will sign the message, which is supposed to be a
     /// bitcoin sighash, and that the requested signature type matches the
     /// prevout this sighash was approved for.
+    ///
+    /// We only sign sighashes that were approved in a pre-sign request
+    /// while the given bitcoin block was the chain tip.
     async fn validate_bitcoin_sign_request<D>(
         db: &D,
         msg: &[u8],
         signature_type: SignatureType,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<AcceptedSigHash, Error>
     where
         D: DbRead,
@@ -1354,10 +1367,13 @@ where
             .map_err(Error::SigHashConversion)?
             .into();
 
-        match db.will_sign_bitcoin_tx_sighash(&sighash).await? {
+        match db.will_sign_bitcoin_tx_sighash(&sighash, chain_tip).await? {
             Some(signing_info) if signing_info.will_sign => {
                 let model::KeySetId::V1(public_key) = signing_info.key_set_id else {
-                    return Err(Error::InvalidSigHash(sighash));
+                    return Err(Error::InvalidSigHash(
+                        sighash,
+                        signing_info.validation_result,
+                    ));
                 };
                 if signature_type != expected_signature_type(signing_info.prevout_type) {
                     return Err(Error::SignatureTypeMismatch {
@@ -1368,7 +1384,10 @@ where
                 }
                 Ok(AcceptedSigHash { public_key, sighash })
             }
-            Some(_) => Err(Error::InvalidSigHash(sighash)),
+            Some(signing_info) => Err(Error::InvalidSigHash(
+                sighash,
+                signing_info.validation_result,
+            )),
             None => Err(Error::UnknownSigHash(sighash)),
         }
     }
@@ -2025,6 +2044,18 @@ mod tests {
         prevout_type: model::TxPrevoutType,
         signature_type: SignatureType,
     ) -> (SigHash, Result<AcceptedSigHash, Error>) {
+        let chain_tip = Faker.fake_with_rng(&mut get_rng());
+        check_bitcoin_sign_request_at(prevout_type, signature_type, chain_tip, chain_tip).await
+    }
+
+    /// Approve a sighash while `approved_at` is the chain tip and then
+    /// validate a sign request for it while `signed_at` is the chain tip.
+    async fn check_bitcoin_sign_request_at(
+        prevout_type: model::TxPrevoutType,
+        signature_type: SignatureType,
+        approved_at: model::BitcoinBlockHash,
+        signed_at: model::BitcoinBlockHash,
+    ) -> (SigHash, Result<AcceptedSigHash, Error>) {
         let context = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
@@ -2037,7 +2068,7 @@ mod tests {
                 .into();
         db.write_bitcoin_txs_sighashes(&[model::BitcoinTxSigHash {
             txid: Faker.fake_with_rng(&mut rng),
-            chain_tip: Faker.fake_with_rng(&mut rng),
+            chain_tip: approved_at,
             prevout_txid: Faker.fake_with_rng(&mut rng),
             prevout_output_index: 0,
             sighash,
@@ -2053,9 +2084,27 @@ mod tests {
             &db,
             sighash.as_byte_array(),
             signature_type,
+            &signed_at,
         )
         .await;
         (sighash, result)
+    }
+
+    #[tokio::test]
+    async fn bitcoin_sign_request_rejects_sighash_approved_at_another_chain_tip() {
+        let mut rng = get_rng();
+        let approved_at = Faker.fake_with_rng(&mut rng);
+        let signed_at = Faker.fake_with_rng(&mut rng);
+
+        let (sighash, result) = check_bitcoin_sign_request_at(
+            model::TxPrevoutType::SignersInput,
+            SignatureType::Taproot,
+            approved_at,
+            signed_at,
+        )
+        .await;
+
+        assert!(matches!(result, Err(Error::UnknownSigHash(rejected)) if rejected == sighash));
     }
 
     #[test_case(model::TxPrevoutType::Deposit, SignatureType::Schnorr ; "deposit-schnorr")]
