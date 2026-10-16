@@ -1,5 +1,7 @@
 #![doc = include_str!("../README.md")]
 
+use std::num::NonZeroUsize;
+
 use crate::storage::model::BitcoinBlockHeight;
 
 pub mod api;
@@ -106,6 +108,18 @@ pub const BITCOIN_FEE_RATE_RANGE: std::ops::RangeInclusive<f64> =
 /// <https://github.com/bitcoin/bitcoin/blob/v25.0/src/policy/policy.h#L58-L59>
 pub const MAX_MEMPOOL_PACKAGE_TX_COUNT: u64 = 25;
 
+/// The maximum number of deposit requests that may be included across all
+/// transactions in one Bitcoin pre-sign request.
+pub const MAX_DEPOSITS_PER_BITCOIN_PACKAGE: usize = 50;
+
+/// The maximum number of v1 Bitcoin signing rounds retained in the replay
+/// cache. This holds two full Bitcoin blocks, each containing at most 50
+/// deposit inputs and 25 signer inputs: 2 * (50 + 25) = 150 sighashes.
+pub const BITCOIN_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(
+    2 * (MAX_DEPOSITS_PER_BITCOIN_PACKAGE + MAX_MEMPOOL_PACKAGE_TX_COUNT as usize),
+)
+.expect("the Bitcoin signing request cache size is non-zero");
+
 /// The default maximum number of deposit inputs per bitcoin transaction.
 ///
 /// The default here is chosen so that there is a ~50% chance that the
@@ -156,16 +170,13 @@ pub const MAX_MEMPOOL_PACKAGE_SIZE: u64 = 101000;
 /// This is the maximum size of a bitcoin block in virtual bytes.
 pub const MAX_BITCOIN_BLOCK_VSIZE: u64 = 1_000_000;
 
-/// This is an upper bound on the number of signer state machines that we
-/// "could" need if we wanted to sign all inputs in parallel and running
-/// DKG.
-///
-/// If the entire transaction package was nothing but donation inputs then
-/// we would need this many state machines to sign the transaction in
-/// parallel. We need to add one for DKG, hence plus 1. We then add a
-/// little buff by going to the next power of 2.
-pub const MAX_SIGNER_STATE_MACHINES: u64 = MAX_MEMPOOL_PACKAGE_SIZE
-    .div_ceil(MIN_BITCOIN_INPUT_VSIZE)
+/// This is an upper bound on the number of signer state machines needed to
+/// sign every input authorized by one Bitcoin pre-sign request while also
+/// running DKG. Each transaction has one signer input, so a package can
+/// authorize at most 50 deposit inputs and 25 signer inputs. We add one for
+/// DKG and round up to the next power of two.
+pub const MAX_SIGNER_STATE_MACHINES: u64 = (MAX_DEPOSITS_PER_BITCOIN_PACKAGE as u64)
+    .saturating_add(MAX_MEMPOOL_PACKAGE_TX_COUNT)
     .saturating_add(1)
     .next_power_of_two();
 

@@ -41,14 +41,14 @@ use wsts::state_machine::coordinator::frost;
 ///
 /// Signer state machines are used for either DKG or signing rounds on
 /// bitcoin. For DKG, the state machine is identified by the bitcoin block
-/// hash bytes while for the signing rounds we identify the state machine
-/// by the sighash bytes.
+/// while for signing rounds we identify the state machine by the sighash
+/// and bitcoin block.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StateMachineId {
     /// Identifier for a DKG state machines
     Dkg(model::BitcoinBlockRef),
-    /// Identifier for a Bitcoin signing state machines
-    BitcoinSign(SigHash),
+    /// Identifier for a Bitcoin signing state machine
+    BitcoinSign(SigHash, model::BitcoinBlockRef),
     /// Identifier for a rotate key verification signing round
     DkgVerification(PublicKeyXOnly, model::BitcoinBlockRef),
 }
@@ -61,7 +61,11 @@ impl std::fmt::Display for StateMachineId {
                 "dkg(block_hash={}, block_height={})",
                 block.block_hash, block.block_height
             ),
-            StateMachineId::BitcoinSign(sighash) => write!(f, "bitcoin-sign({sighash})"),
+            StateMachineId::BitcoinSign(sighash, block) => write!(
+                f,
+                "bitcoin-sign(sighash={sighash}, block_hash={}, block_height={})",
+                block.block_hash, block.block_height
+            ),
             StateMachineId::DkgVerification(pubkey, block) => write!(
                 f,
                 "dkg-verification(key={pubkey}, block_hash={}, block_height={})",
@@ -74,12 +78,6 @@ impl std::fmt::Display for StateMachineId {
 impl From<&model::BitcoinBlockRef> for StateMachineId {
     fn from(value: &model::BitcoinBlockRef) -> Self {
         StateMachineId::Dkg(*value)
-    }
-}
-
-impl From<SigHash> for StateMachineId {
-    fn from(value: SigHash) -> Self {
-        StateMachineId::BitcoinSign(value)
     }
 }
 
