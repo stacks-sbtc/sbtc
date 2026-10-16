@@ -71,6 +71,14 @@ use wsts::net::SignatureType;
 /// bitcoin tenures for which we keep track of the signed stacks transactions.
 pub const STACKS_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(2).expect("2 is non zero");
 
+/// The maximum number of v1 Bitcoin signing rounds retained by a signer.
+/// This holds two full Bitcoin blocks, each containing at most 50 deposit
+/// inputs and 25 signer inputs: 2 * (50 + 25) = 150 sighashes.
+pub const BITCOIN_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(
+    2 * (crate::MAX_DEPOSITS_PER_BITCOIN_PACKAGE + crate::MAX_MEMPOOL_PACKAGE_TX_COUNT as usize),
+)
+.unwrap();
+
 /// # Transaction signer event loop
 ///
 /// This struct contains the implementation of the transaction signer
@@ -160,6 +168,9 @@ pub struct TxSignerEventLoop<Context, Network> {
     /// Stacks transactions signed during a bitcoin tenure. We don't allow
     /// signing for the same request multiple times in a tenure.
     pub stacks_sign_request: LruCache<model::BitcoinBlockHash, HashSet<StacksSignRequestId>>,
+    /// The v1 Bitcoin sighashes for which this signer has started a nonce round.
+    /// A sighash authorization can start a signing round only once.
+    pub bitcoin_sign_request: LruCache<(model::BitcoinBlockHash, SigHash), ()>,
 }
 
 /// This struct represents a signature hash and the public key that locks
@@ -303,6 +314,7 @@ where
                 NonZeroUsize::new(5).ok_or(Error::TypeConversion)?,
             ),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         })
     }
 
@@ -906,6 +918,21 @@ where
                     WstsMessageId::Sweep(txid) => {
                         span.record("txid", txid.to_string());
 
+                        let sighash = TapSighash::from_slice(&request.message)
+                            .map_err(Error::SigHashConversion)?
+                            .into();
+                        let request_id = (chain_tip.block_hash, sighash);
+
+                        // Reject a repeated nonce request before querying the
+                        // database. The cache entry is added below only after
+                        // the first request has passed authorization.
+                        if self.bitcoin_sign_request.contains(&request_id) {
+                            return Err(Error::BitcoinSigningRoundAlreadyStarted(
+                                sighash,
+                                chain_tip.block_hash,
+                            ));
+                        }
+
                         let accepted_sighash = Self::validate_bitcoin_sign_request(
                             &db,
                             &request.message,
@@ -918,6 +945,11 @@ where
 
                         let accepted_sighash = accepted_sighash?;
                         let id = StateMachineId::BitcoinSign(accepted_sighash.sighash, *chain_tip);
+
+                        // Reserve this authorization before processing the
+                        // request so that failures cannot lead to fresh nonce
+                        // generation on a retry.
+                        self.bitcoin_sign_request.put(request_id, ());
 
                         (id, accepted_sighash.public_key)
                     }
@@ -948,9 +980,10 @@ where
                     }
                 };
 
-                // Reuse an active state machine so that a duplicate
-                // NonceRequest cannot discard state already collected for the
-                // signing round.
+                // Reuse an active state machine for DKG verification so that
+                // a duplicate NonceRequest cannot discard state already
+                // collected for the signing round. Sweep duplicates were
+                // rejected above.
                 if !self.wsts_state_machines.contains(&state_machine_id) {
                     let state_machine =
                         SignerStateMachine::load(&db, aggregate_key, self.signer_private_key)
@@ -1003,9 +1036,21 @@ where
                     WstsMessageId::Sweep(txid) => {
                         span.record("txid", txid.to_string());
 
-                        // Validate the sighash and upon success, convert it to
-                        // a state machine ID.
-                        let accepted_sighash = Self::validate_bitcoin_sign_request(
+                        let sighash = TapSighash::from_slice(&request.message)
+                            .map_err(Error::SigHashConversion)?
+                            .into();
+                        let state_machine_id = StateMachineId::BitcoinSign(sighash, *chain_tip);
+
+                        // A sweep state machine exists only between the first
+                        // nonce request and the first signature-share request.
+                        // Reject missing, completed, or replayed rounds before
+                        // querying the database.
+                        if !self.wsts_state_machines.contains(&state_machine_id) {
+                            return Err(Error::MissingStateMachine(Box::new(state_machine_id)));
+                        }
+
+                        // Validate the sighash and signature type.
+                        Self::validate_bitcoin_sign_request(
                             &db,
                             &request.message,
                             request.signature_type,
@@ -1013,7 +1058,7 @@ where
                         )
                         .await?;
 
-                        StateMachineId::BitcoinSign(accepted_sighash.sighash, *chain_tip)
+                        state_machine_id
                     }
 
                     // This is a DKG verification signing round. The data
@@ -1977,6 +2022,7 @@ mod tests {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
 
         // A signer in the bootstrap set gets past the signer set check,
@@ -2293,6 +2339,7 @@ mod tests {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
 
         // Create a DkgBegin message to be handled by the signer.
@@ -2363,6 +2410,7 @@ mod tests {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
 
         // Create a DkgBegin message to be handled by the signer.
@@ -2451,6 +2499,7 @@ mod tests {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
 
         let msg = message::WstsMessage {
@@ -2565,6 +2614,7 @@ mod tests {
                     dkg_begin_pause: None,
                     dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
                     stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+                    bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
                 };
 
                 // The is_coordinator function checks whether the
@@ -2652,6 +2702,7 @@ mod tests {
                 dkg_begin_pause: None,
                 dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
                 stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+                bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
             };
 
             // Check if the coordinator event loop says this signer is coordinator

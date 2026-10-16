@@ -242,6 +242,11 @@ pub enum Error {
     #[error("the given sighash is unknown: {0}")]
     UnknownSigHash(SigHash),
 
+    /// A v1 WSTS signing round has already been started for this sighash at
+    /// the given Bitcoin chain tip.
+    #[error("a bitcoin signing round for sighash {0} was already started at chain tip {1}")]
+    BitcoinSigningRoundAlreadyStarted(SigHash, BitcoinBlockHash),
+
     /// This happens when the coordinator requested a WSTS signature type
     /// that does not match the prevout type this sighash was approved for.
     #[error(
@@ -801,6 +806,26 @@ pub enum Error {
     /// any deposit or withdrawal requests.
     #[error("the BitcoinPreSignRequest object does not contain deposit or withdrawal requests")]
     PreSignContainsNoRequests,
+
+    /// Indicates that a Bitcoin pre-sign request contains too many deposits.
+    #[error("the BitcoinPreSignRequest contains {count} deposits, exceeding the maximum of {max}")]
+    PreSignTooManyDeposits {
+        /// Number of deposits in the request.
+        count: usize,
+        /// Maximum number of deposits allowed in one request package.
+        max: usize,
+    },
+
+    /// Indicates that a Bitcoin pre-sign request contains too many transactions.
+    #[error(
+        "the BitcoinPreSignRequest contains {count} transactions, exceeding the maximum of {max}"
+    )]
+    PreSignTooManyTransactions {
+        /// Number of transactions in the request package.
+        count: usize,
+        /// Maximum number of transactions allowed in one request package.
+        max: usize,
+    },
 
     /// Indicates that we tried to create an UnsignedTransaction object
     /// without any deposit or withdrawal requests.

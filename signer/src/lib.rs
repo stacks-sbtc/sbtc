@@ -106,6 +106,10 @@ pub const BITCOIN_FEE_RATE_RANGE: std::ops::RangeInclusive<f64> =
 /// <https://github.com/bitcoin/bitcoin/blob/v25.0/src/policy/policy.h#L58-L59>
 pub const MAX_MEMPOOL_PACKAGE_TX_COUNT: u64 = 25;
 
+/// The maximum number of deposit requests that may be included across all
+/// transactions in one Bitcoin pre-sign request.
+pub const MAX_DEPOSITS_PER_BITCOIN_PACKAGE: usize = 50;
+
 /// The default maximum number of deposit inputs per bitcoin transaction.
 ///
 /// The default here is chosen so that there is a ~50% chance that the

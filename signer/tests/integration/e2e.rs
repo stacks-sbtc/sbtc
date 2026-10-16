@@ -54,7 +54,9 @@ use signer::{
     storage::{DbRead as _, DbWrite as _, model, postgres::PgStore},
     testing::{self, context::*, wallet::InitiateWithdrawalRequest},
     transaction_coordinator::TxCoordinatorEventLoop,
-    transaction_signer::{STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop},
+    transaction_signer::{
+        BITCOIN_SIGN_REQUEST_LRU_SIZE, STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop,
+    },
     util::{FutureExt as _, Sleep},
 };
 
@@ -182,6 +184,7 @@ pub async fn start_signers(
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
