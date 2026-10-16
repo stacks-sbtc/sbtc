@@ -67,17 +67,11 @@ use wsts::net::DkgStatus;
 use wsts::net::Message as WstsNetMessage;
 use wsts::net::SignatureType;
 
+pub use crate::BITCOIN_SIGN_REQUEST_LRU_SIZE;
+
 /// LRU cache max size for the stacks signature requests. This is the number of
 /// bitcoin tenures for which we keep track of the signed stacks transactions.
 pub const STACKS_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(2).expect("2 is non zero");
-
-/// The maximum number of v1 Bitcoin signing rounds retained by a signer.
-/// This holds two full Bitcoin blocks, each containing at most 50 deposit
-/// inputs and 25 signer inputs: 2 * (50 + 25) = 150 sighashes.
-pub const BITCOIN_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(
-    2 * (crate::MAX_DEPOSITS_PER_BITCOIN_PACKAGE + crate::MAX_MEMPOOL_PACKAGE_TX_COUNT as usize),
-)
-.unwrap();
 
 /// # Transaction signer event loop
 ///
