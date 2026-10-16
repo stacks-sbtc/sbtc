@@ -8,6 +8,7 @@ members = [
     "blocklist-client",
     "blocklist-openapi-gen",
     "emily/handler",
+    "emily_cron2",
     "emily/openapi-gen",
     "sbtc",
     "signer",
@@ -20,6 +21,7 @@ blocklist-api = { path = "./.generated-sources/blocklist-api" }
 blocklist-client = { path = "./blocklist-client" }
 emily-client = { path = "./.generated-sources/emily/client/rust/public" }
 emily-handler = { path = "./emily/handler" }
+private-emily-client = { path = "./.generated-sources/emily/client/rust/private" }
 sbtc = { path = "./sbtc" }
 testing-emily-client = { path = "./.generated-sources/emily/client/rust/testing" }
 wsts = { path = "./wsts" }
