@@ -53,6 +53,7 @@ use crate::util::FutureExt as _;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
+use futures::FutureExt as _;
 use futures::stream::StreamExt as _;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
@@ -175,15 +176,34 @@ where
                 .with_timeout(Duration::from_millis(100));
 
             match poll.await {
-                Ok(Some(Ok(block_hash))) => {
+                Ok(Some(Ok(mut block_hash))) => {
+                    // Ancestors get backfilled, so only the newest queued tip matters.
+                    let mut observed: u64 = 1;
+                    while let Some(Some(next)) = bitcoin_blocks.next().now_or_never() {
+                        match next {
+                            Ok(newer) => {
+                                block_hash = newer;
+                                observed += 1;
+                            }
+                            Err(error) => {
+                                tracing::error!(%error, "error decoding new bitcoin block hash from stream");
+                            }
+                        }
+                    }
                     span.record("bitcoin_tip_hash", tracing::field::display(block_hash));
 
                     tracing::info!("observed new bitcoin block from stream");
+                    if observed > 1 {
+                        tracing::info!(
+                            skipped = observed - 1,
+                            "skipping superseded bitcoin blocks"
+                        );
+                    }
                     metrics::counter!(
                         Metrics::BlocksObservedTotal,
                         "blockchain" => BITCOIN_BLOCKCHAIN,
                     )
-                    .increment(1);
+                    .increment(observed);
 
                     if let Err(error) = self.process_bitcoin_chain_tip(block_hash).await {
                         tracing::error!(%error, "could not process bitcoin blocks");
@@ -1127,6 +1147,67 @@ mod tests {
             "gave up after {:?}",
             start.elapsed()
         );
+    }
+
+    /// Only the newest queued tip is signalled; skipped blocks are still stored.
+    #[tokio::test]
+    async fn queued_tips_are_coalesced_to_the_newest() {
+        let mut rng = get_rng();
+        // Two Stacks blocks per tenure, so the backfill stops at a known parent.
+        let test_harness = TestHarness::generate(&mut rng, 3, 2..3);
+        let min_height = test_harness.min_block_height();
+        let storage = storage::memory::Store::new_shared();
+        let ctx = TestContext::builder()
+            .with_storage(storage.clone())
+            .with_stacks_client(test_harness.clone())
+            .with_emily_client(test_harness.clone())
+            .with_bitcoin_client(test_harness.clone())
+            .modify_settings(|settings| settings.signer.sbtc_bitcoin_start_height = min_height)
+            .build();
+
+        let mut signal_rx = ctx.get_signal_receiver();
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_block_source: OpenBlockSource(test_harness.clone()),
+        };
+        let chain_tip: BitcoinBlockHash = test_harness
+            .bitcoin_blocks()
+            .iter()
+            .max_by_key(|block| block.height)
+            .unwrap()
+            .block_hash
+            .into();
+
+        // All three hashes are queued before the observer reads one.
+        let handle = tokio::spawn(block_observer.run());
+        ctx.wait_for_signal(Duration::from_secs(3), |signal| {
+            matches!(
+                signal,
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                    if block_ref.block_hash == chain_tip
+            )
+        })
+        .await
+        .expect("block observer did not signal the chain tip");
+        handle.abort();
+
+        let observed: Vec<BitcoinBlockHash> = std::iter::from_fn(|| signal_rx.try_recv().ok())
+            .filter_map(|signal| match signal {
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref)) => {
+                    Some(block_ref.block_hash)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(observed, vec![chain_tip]);
+
+        for block in test_harness.bitcoin_blocks() {
+            let stored = storage
+                .get_bitcoin_block(&block.block_hash.into())
+                .await
+                .unwrap();
+            assert!(stored.is_some(), "block wasn't persisted");
+        }
     }
 
     /// Test that `BlockObserver::load_latest_deposit_requests` takes
