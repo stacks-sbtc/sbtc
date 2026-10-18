@@ -58,6 +58,11 @@ use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
 use std::collections::HashSet;
 
+/// Per-block budget for retrying Emily `GET /limits`.
+const LIMITS_RETRY_BUDGET: Duration = Duration::from_secs(120);
+/// Max backoff between `GET /limits` attempts.
+const LIMITS_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
+
 /// Block observer
 #[derive(Debug)]
 pub struct BlockObserver<Context, BlockSource> {
@@ -502,9 +507,34 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
+    /// Fetch Emily limits, backing off until [`LIMITS_RETRY_BUDGET`] or shutdown.
+    async fn get_limits_with_retry(&self) -> Result<SbtcLimits, Error> {
+        let emily = self.context.get_emily_client();
+        let mut term = self.context.get_termination_handle();
+        let deadline = tokio::time::Instant::now() + LIMITS_RETRY_BUDGET;
+        let mut delay = Duration::from_secs(1);
+        loop {
+            let error = match emily.get_limits().await {
+                Ok(limits) => return Ok(limits),
+                Err(error) => error,
+            };
+            let now = tokio::time::Instant::now();
+            if term.shutdown_signalled() || now >= deadline {
+                return Err(error);
+            }
+            let wait = delay.min(deadline - now);
+            tracing::warn!(%error, ?wait, "could not fetch sBTC limits from Emily, retrying");
+            tokio::select! {
+                _ = tokio::time::sleep(wait) => {}
+                _ = term.wait_for_shutdown() => return Err(error),
+            }
+            delay = (delay * 2).min(LIMITS_RETRY_MAX_DELAY);
+        }
+    }
+
     /// Update the sBTC peg limits from Emily
     async fn update_sbtc_limits(&self, chain_tip: BitcoinBlockHash) -> Result<(), Error> {
-        let limits = self.context.get_emily_client().get_limits().await?;
+        let limits = self.get_limits_with_retry().await?;
         let sbtc_deployed = self.context.state().sbtc_contracts_deployed();
 
         let max_mintable = if limits.total_cap_exists() && sbtc_deployed {
@@ -578,13 +608,19 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// # Notes
     ///
     /// The function updates the following:
-    /// * sBTC limits from Emily.
+    /// * sBTC limits from Emily, or zero limits if they can't be computed.
     /// * The current signer set.
     /// * The current aggregate key.
     /// * The current bitcoin chain tip.
     async fn update_signer_state(&self, chain_tip: BitcoinBlockRef) -> Result<(), Error> {
         tracing::info!("loading sbtc limits from Emily");
-        self.update_sbtc_limits(chain_tip.block_hash).await?;
+        if let Err(error) = self.update_sbtc_limits(chain_tip.block_hash).await {
+            tracing::error!(%error, "could not update sBTC limits, using zero limits for this block");
+            // Not the last limits: they may predate a throttle set during the outage.
+            self.context
+                .state()
+                .update_current_limits(SbtcLimits::zero());
+        }
 
         tracing::info!("updating the signer state with the current signer set");
         self.set_signer_set_info().await?;
@@ -851,6 +887,10 @@ mod tests {
     use fake::Fake as _;
     use model::BitcoinTxId;
     use model::ScriptPubKey;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+    use test_case::test_case;
 
     use crate::bitcoin::rpc::GetTxResponse;
     use crate::context::SignerSignal;
@@ -990,6 +1030,103 @@ mod tests {
         }
 
         handle.abort();
+    }
+
+    /// Stays open like the real poller; a closed stream makes `run` spin.
+    struct OpenBlockSource(TestHarness);
+
+    impl BitcoinBlockHashStreamProvider for OpenBlockSource {
+        type Error = Error;
+        fn get_block_hash_stream(
+            &self,
+        ) -> impl futures::Stream<Item = Result<BlockHash, Error>> + Send + Sync + Unpin + 'static
+        {
+            self.0
+                .spawn_block_hash_stream()
+                .chain(futures::stream::pending())
+        }
+    }
+
+    /// A failing `GET /limits` is retried for the whole budget; if it never
+    /// succeeds the block runs with zero limits.
+    #[test_case(usize::MAX, |limits| *limits == SbtcLimits::zero(), LIMITS_RETRY_BUDGET ; "emily-down")]
+    #[test_case(2, |limits| limits.per_deposit_cap() == Amount::from_sat(2_000), Duration::ZERO ; "emily-recovers")]
+    #[tokio::test(start_paused = true)]
+    async fn failed_limits_fetch_does_not_skip_block(
+        failures: usize,
+        expected_limits: fn(&SbtcLimits) -> bool,
+        min_elapsed: Duration,
+    ) {
+        let mut rng = get_rng();
+        // Two Stacks blocks per tenure, so the backfill stops at a known parent.
+        let test_harness = TestHarness::generate(&mut rng, 1, 2..3);
+        let min_height = test_harness.min_block_height();
+        let ctx = TestContext::builder()
+            .with_storage(storage::memory::Store::new_shared())
+            .with_stacks_client(test_harness.clone())
+            .with_mocked_emily_client()
+            .with_bitcoin_client(test_harness.clone())
+            .modify_settings(|settings| settings.signer.sbtc_bitcoin_start_height = min_height)
+            .build();
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        ctx.with_emily_client(|client| {
+            client
+                .expect_get_deposits()
+                .returning(|| Box::pin(std::future::ready(Ok(vec![]))));
+            client.expect_get_limits().returning(move || {
+                let limits = if counter.fetch_add(1, Ordering::SeqCst) < failures {
+                    Err(Error::NoChainTip)
+                } else {
+                    Ok(SbtcLimits::new_per_deposit(1_000, 2_000))
+                };
+                Box::pin(std::future::ready(limits))
+            });
+        })
+        .await;
+        ctx.state().update_current_limits(SbtcLimits::unlimited());
+
+        let _signal_rx = ctx.get_signal_receiver();
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_block_source: OpenBlockSource(test_harness.clone()),
+        };
+        let chain_tip: BitcoinBlockHash = test_harness
+            .bitcoin_blocks()
+            .iter()
+            .max_by_key(|block| block.height)
+            .unwrap()
+            .block_hash
+            .into();
+
+        let start = tokio::time::Instant::now();
+        let handle = tokio::spawn(block_observer.run());
+        // Free on a paused clock.
+        ctx.wait_for_signal(Duration::from_secs(1800), |signal| {
+            matches!(
+                signal,
+                SignerSignal::Event(SignerEvent::BitcoinBlockObserved(block_ref))
+                    if block_ref.block_hash == chain_tip
+            )
+        })
+        .await
+        .expect("block observer did not signal the chain tip");
+        handle.abort();
+
+        let state = ctx.state();
+        assert_eq!(
+            state.bitcoin_chain_tip().map(|tip| tip.block_hash),
+            Some(chain_tip)
+        );
+        let limits = state.get_current_limits();
+        assert!(expected_limits(&limits), "unexpected limits: {limits}");
+        assert!(calls.load(Ordering::SeqCst) >= 3);
+        assert!(
+            start.elapsed() >= min_elapsed,
+            "gave up after {:?}",
+            start.elapsed()
+        );
     }
 
     /// Test that `BlockObserver::load_latest_deposit_requests` takes

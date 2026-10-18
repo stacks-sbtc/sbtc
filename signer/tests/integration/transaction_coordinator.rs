@@ -4403,7 +4403,7 @@ fn create_test_setup(
 /// requests until we can fetch limits from Emily.
 ///
 /// Since the block observer doesn't signal the request decider (and tx coordinator)
-/// if it fails to get the limits, the scenario required to check this issue is:
+/// while it retries fetching the limits, the scenario required to check this issue is:
 ///  - The signers fetch a deposit from Emily, and it is validated and inserted
 ///    into the db
 ///  - Emily goes offline for some of the signers (at least one can still reach it)
@@ -4525,8 +4525,7 @@ async fn test_conservative_initial_sbtc_limits() {
 
             let enable_emily_limits = enable_emily_limits.clone();
             client.expect_get_limits().times(1..).returning(move || {
-                // Since we don't signal the coordinator if we fail to fetch the limits
-                // we need the coordinator to be able to fetch them.
+                // Signers don't signal while retrying limits, so the coordinator must get them.
                 // But we want the other signers to fail fetching limits.
                 let limits = if i == 0 || enable_emily_limits.load(Ordering::SeqCst) {
                     Ok(SbtcLimits::unlimited())
@@ -4723,17 +4722,17 @@ async fn test_conservative_initial_sbtc_limits() {
     // =========================================================================
     // Wait for the first signer to be the coordinator
     // -------------------------------------------------------------------------
-    // - Two of three signers will not be able to coordinate, because of failing
-    //   in getting deposits (so no signal is sent to request decider and tx
-    //   coordinator)
+    // - Two of three signers will not be able to coordinate: they are still
+    //   retrying limits, so they don't signal the request decider and tx
+    //   coordinator
     // =========================================================================
     let signers_key = setup.signers.signer_keys().iter().cloned().collect();
-    loop {
+    let chain_tip = loop {
         let chain_tip: BitcoinBlockHash = faucet.generate_blocks(1).pop().unwrap().into();
         if given_key_is_coordinator(signers[0].2.public_key().into(), &chain_tip, &signers_key) {
-            break;
+            break chain_tip;
         }
-    }
+    };
     // Giving enough time to process the transaction
     Sleep::for_secs(3).await;
 
@@ -4749,6 +4748,17 @@ async fn test_conservative_initial_sbtc_limits() {
     // Re-enable limits fetching
     // =========================================================================
     enable_emily_limits.store(true, Ordering::SeqCst);
+
+    // Signers may still be retrying an earlier block; wait until all reach `chain_tip`.
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while !signers.iter().all(|(ctx, _, _, _)| {
+            ctx.state().bitcoin_chain_tip().map(|tip| tip.block_hash) == Some(chain_tip)
+        }) {
+            Sleep::for_millis(100).await;
+        }
+    })
+    .await
+    .expect("signers did not process the chain tip");
 
     faucet.generate_block();
     Sleep::for_secs(3).await;
