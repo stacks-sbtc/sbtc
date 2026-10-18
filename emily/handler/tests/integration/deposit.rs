@@ -223,6 +223,8 @@ async fn create_deposit_stores_exact_transaction_hex() {
         reclaim_script: transaction.reclaim_scripts[0].clone(),
         deposit_script: transaction.deposit_scripts[0].clone(),
         transaction_hex: submitted_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
 
     apis::deposit_api::create_deposit(&configuration, request)
@@ -271,6 +273,8 @@ async fn create_deposit_omits_oversized_transaction_hex() {
         reclaim_script: transaction.reclaim_scripts[0].clone(),
         deposit_script: transaction.deposit_scripts[0].clone(),
         transaction_hex: transaction.transaction_hex,
+        recipient: None,
+        max_fee: None,
     };
 
     apis::deposit_api::create_deposit(&configuration, request)
@@ -317,6 +321,8 @@ async fn update_deposit_removes_stored_transaction_hex_when_item_grows_too_large
         reclaim_script: transaction.reclaim_scripts[0].clone(),
         deposit_script: transaction.deposit_scripts[0].clone(),
         transaction_hex: transaction.transaction_hex.clone(),
+        recipient: None,
+        max_fee: None,
     };
     apis::deposit_api::create_deposit(&configuration, request)
         .await
