@@ -465,6 +465,7 @@ pub trait DbRead {
     fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> impl Future<Output = Result<Option<model::BitcoinTxSigHashSigningInfo>, Error>> + Send;
 
     /// Returns the list of stored peers.

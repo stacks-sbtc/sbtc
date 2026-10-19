@@ -77,6 +77,12 @@ pub enum Error {
     /// A nonce response was invalid
     #[error("InvalidNonceResponse")]
     InvalidNonceResponse,
+    /// The same signer sent two different nonce responses for one round.
+    #[error("ConflictingNonceResponse")]
+    ConflictingNonceResponse,
+    /// Two signers claimed the same public nonce.
+    #[error("DuplicateNonce")]
+    DuplicateNonce,
     /// A nonce request was invalid
     #[error("InvalidNonceRequest")]
     InvalidNonceRequest,
@@ -167,6 +173,26 @@ pub struct Signer {
     nonce_request: Option<NonceRequest>,
     /// Nonce responses received for the current signing round.
     nonce_responses: BTreeMap<u32, NonceResponse>,
+    /// The nonce conflict that invalidated the current signing round.
+    nonce_response_conflict: Option<NonceResponseConflict>,
+}
+
+/// Why a signing round was invalidated by its nonce responses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonceResponseConflict {
+    /// The same signer sent two different nonce responses.
+    ConflictingResponse,
+    /// Two signers claimed the same public nonce.
+    DuplicateNonce,
+}
+
+impl From<NonceResponseConflict> for Error {
+    fn from(conflict: NonceResponseConflict) -> Self {
+        match conflict {
+            NonceResponseConflict::ConflictingResponse => Error::ConflictingNonceResponse,
+            NonceResponseConflict::DuplicateNonce => Error::DuplicateNonce,
+        }
+    }
 }
 
 impl Signer {
@@ -244,6 +270,7 @@ impl Signer {
             use_nonce_response_cache: true,
             nonce_request: None,
             nonce_responses: Default::default(),
+            nonce_response_conflict: None,
         })
     }
 
@@ -254,6 +281,7 @@ impl Signer {
         self.use_nonce_response_cache = false;
         self.nonce_request = None;
         self.nonce_responses.clear();
+        self.nonce_response_conflict = None;
     }
 
     /// Reset internal state
@@ -271,6 +299,7 @@ impl Signer {
         self.dkg_end_begin_msg = None;
         self.nonce_request = None;
         self.nonce_responses.clear();
+        self.nonce_response_conflict = None;
         self.state = State::Idle;
     }
 
@@ -607,6 +636,10 @@ impl Signer {
                 && current_request.sign_iter_id == nonce_request.sign_iter_id;
 
             if same_round {
+                if let Some(conflict) = self.nonce_response_conflict {
+                    return Err(conflict.into());
+                }
+
                 if current_request != nonce_request {
                     tracing::warn!("received conflicting NonceRequests for the same signing round");
                     return Err(Error::InvalidNonceRequest);
@@ -636,11 +669,16 @@ impl Signer {
         }
 
         self.nonce_responses.clear();
+        self.nonce_response_conflict = None;
         self.nonce_request = Some(nonce_request.clone());
         self.nonce_request(nonce_request, rng)
     }
 
     fn cache_nonce_response(&mut self, response: &NonceResponse) -> Result<(), Error> {
+        if let Some(conflict) = self.nonce_response_conflict {
+            return Err(conflict.into());
+        }
+
         let Some(request) = &self.nonce_request else {
             return Err(Error::InvalidNonceResponse);
         };
@@ -669,26 +707,56 @@ impl Signer {
         match self.nonce_responses.get(&response.signer_id) {
             // Exact duplicates are harmless retransmissions. A signer must
             // not send two different nonces for the same signing round.
-            Some(cached_response) if cached_response == response => {}
+            Some(cached_response) if cached_response == response => return Ok(()),
             Some(_) => {
                 tracing::warn!(
                     signer_id = %response.signer_id,
                     "received conflicting NonceResponses for the same signing round"
                 );
-                return Err(Error::InvalidNonceResponse);
+                return Err(self.record_nonce_conflict(NonceResponseConflict::ConflictingResponse));
             }
-            None => {
-                self.nonce_responses
-                    .insert(response.signer_id, response.clone());
-            }
+            None => {}
         };
+
+        let responses = self
+            .nonce_responses
+            .values()
+            .chain(std::iter::once(response));
+
+        if Self::has_duplicate_nonces(responses) {
+            tracing::warn!(
+                signer_id = %response.signer_id,
+                "received a NonceResponse containing a nonce already claimed by another signer"
+            );
+            return Err(self.record_nonce_conflict(NonceResponseConflict::DuplicateNonce));
+        }
+
+        self.nonce_responses
+            .insert(response.signer_id, response.clone());
         Ok(())
+    }
+
+    fn has_duplicate_nonces<'a>(responses: impl IntoIterator<Item = &'a NonceResponse>) -> bool {
+        let mut nonces = HashSet::new();
+        responses
+            .into_iter()
+            .flat_map(|response| response.nonces.iter())
+            .any(|nonce| !nonces.insert(nonce))
+    }
+
+    fn record_nonce_conflict(&mut self, conflict: NonceResponseConflict) -> Error {
+        self.nonce_response_conflict = Some(conflict);
+        conflict.into()
     }
 
     fn sign_share_request(
         &mut self,
         sign_request: &SignatureShareRequest,
     ) -> Result<Vec<Message>, Error> {
+        if let Some(conflict) = self.nonce_response_conflict {
+            return Err(conflict.into());
+        }
+
         let signer_id_set = sign_request
             .nonce_responses
             .iter()
@@ -706,6 +774,11 @@ impl Signer {
         if is_invalid_request {
             warn!("received an invalid SignatureShareRequest");
             return Err(Error::InvalidNonceResponse);
+        }
+
+        if Self::has_duplicate_nonces(&sign_request.nonce_responses) {
+            warn!("received a SignatureShareRequest containing duplicate nonces");
+            return Err(self.record_nonce_conflict(NonceResponseConflict::DuplicateNonce));
         }
 
         let nonce_responses =
@@ -1152,7 +1225,7 @@ pub mod test {
                 fire::Coordinator as FireCoordinator,
                 test::{run_dkg, run_sign},
             },
-            signer::{ConfigError, Error, Signer, State as SignerState},
+            signer::{ConfigError, Error, NonceResponseConflict, Signer, State as SignerState},
             PublicKeys,
         },
         util::create_rng,
@@ -1291,6 +1364,138 @@ pub mod test {
             ),
             Err(Error::InvalidSignatureShareRequest)
         ));
+    }
+
+    #[test]
+    fn nonce_response_rejects_a_second_response_from_the_same_signer() {
+        let (mut signers, mut rng) = signing_test_signers(3, 2);
+        let nonce_request = NonceRequest {
+            dkg_id: 1,
+            sign_id: 2,
+            sign_iter_id: 3,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+        let first = nonce_response(
+            &signers[0]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let other = nonce_response(
+            &signers[1]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let conflicting = NonceResponse {
+            nonces: other.nonces,
+            ..first.clone()
+        };
+
+        signers[0]
+            .process(&Message::NonceResponse(first), &mut rng)
+            .unwrap();
+        assert!(matches!(
+            signers[0].process(&Message::NonceResponse(conflicting), &mut rng),
+            Err(Error::ConflictingNonceResponse)
+        ));
+        assert_eq!(
+            signers[0].nonce_response_conflict,
+            Some(NonceResponseConflict::ConflictingResponse)
+        );
+        assert!(matches!(
+            signers[0].process(&Message::NonceRequest(nonce_request), &mut rng),
+            Err(Error::ConflictingNonceResponse)
+        ));
+    }
+
+    #[test]
+    fn nonce_response_rejects_nonce_claimed_by_another_signer() {
+        let (mut signers, mut rng) = signing_test_signers(3, 2);
+        let nonce_request = NonceRequest {
+            dkg_id: 1,
+            sign_id: 2,
+            sign_iter_id: 3,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+        let own_response = nonce_response(
+            &signers[0]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let mut copied_response = nonce_response(
+            &signers[1]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        copied_response.nonces = own_response.nonces.clone();
+
+        signers[0]
+            .process(&Message::NonceResponse(own_response), &mut rng)
+            .unwrap();
+        assert!(matches!(
+            signers[0].process(&Message::NonceResponse(copied_response), &mut rng),
+            Err(Error::DuplicateNonce)
+        ));
+        assert_eq!(
+            signers[0].nonce_response_conflict,
+            Some(NonceResponseConflict::DuplicateNonce)
+        );
+        assert!(matches!(
+            signers[0].process(&Message::NonceRequest(nonce_request.clone()), &mut rng),
+            Err(Error::DuplicateNonce)
+        ));
+
+        let next_request = NonceRequest {
+            sign_iter_id: nonce_request.sign_iter_id + 1,
+            ..nonce_request
+        };
+        signers[0]
+            .process(&Message::NonceRequest(next_request), &mut rng)
+            .unwrap();
+        assert!(signers[0].nonce_response_conflict.is_none());
+    }
+
+    #[test]
+    fn signature_share_request_rejects_duplicate_nonces() {
+        let (mut signers, mut rng) = signing_test_signers(3, 2);
+        let nonce_request = NonceRequest {
+            dkg_id: 1,
+            sign_id: 2,
+            sign_iter_id: 3,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+        let own_response = nonce_response(
+            &signers[0]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let mut copied_response = nonce_response(
+            &signers[1]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        copied_response.nonces = own_response.nonces.clone();
+
+        signers[0].disable_nonce_response_cache();
+        let share_request = SignatureShareRequest {
+            dkg_id: nonce_request.dkg_id,
+            sign_id: nonce_request.sign_id,
+            sign_iter_id: nonce_request.sign_iter_id,
+            nonce_responses: vec![own_response, copied_response],
+            message: nonce_request.message,
+            signature_type: nonce_request.signature_type,
+        };
+
+        assert!(matches!(
+            signers[0].sign_share_request(&share_request),
+            Err(Error::DuplicateNonce)
+        ));
+        assert_eq!(
+            signers[0].nonce_response_conflict,
+            Some(NonceResponseConflict::DuplicateNonce)
+        );
     }
 
     #[test]

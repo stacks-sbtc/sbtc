@@ -674,12 +674,15 @@ impl DbRead for SharedStore {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
-        Ok(self.lock().await.bitcoin_sighashes.get(sighash).map(|s| {
+        let key = (*sighash, *chain_tip);
+        Ok(self.lock().await.bitcoin_sighashes.get(&key).map(|s| {
             model::BitcoinTxSigHashSigningInfo {
                 will_sign: s.will_sign,
                 key_set_id: s.key_set_id,
                 prevout_type: s.prevout_type,
+                validation_result: s.validation_result,
             }
         }))
     }
@@ -1168,8 +1171,11 @@ impl DbRead for InMemoryTransaction {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
-        self.store.will_sign_bitcoin_tx_sighash(sighash).await
+        self.store
+            .will_sign_bitcoin_tx_sighash(sighash, chain_tip)
+            .await
     }
 
     async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {

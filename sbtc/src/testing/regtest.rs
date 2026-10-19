@@ -147,10 +147,34 @@ pub fn get_or_create_wallet(rpc: &Client, wallet: &str) {
         Err(_) => {
             // We want a wallet that is watch only, since we manage keys
             let disable_private_keys = Some(true);
-            rpc.create_wallet(wallet, disable_private_keys, None, None, None)
-                .unwrap();
+            match rpc.create_wallet(wallet, disable_private_keys, None, None, None) {
+                Ok(_) => (),
+                // Another test process may have created the wallet after our
+                // initial attempt to load it. In that case, load the newly
+                // created wallet and continue.
+                Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -4, .. }))) => {
+                    match rpc.load_wallet(wallet) {
+                        Ok(_) => (),
+                        Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError {
+                            code: -35,
+                            ..
+                        }))) => (),
+                        Err(error) => panic!("failed to load concurrently created wallet: {error}"),
+                    }
+                }
+                Err(error) => panic!("failed to create wallet: {error}"),
+            }
         }
     };
+}
+
+/// Get the total amount of UTXOs controlled by an address.
+pub fn get_btc_balance(rpc: &Client, public_key: &PublicKey, kind: AddressType) -> Amount {
+    let desc = descriptor_base(public_key, kind);
+    let descriptor = ScanTxOutRequest::Single(desc);
+    rpc.scan_tx_out_set_blocking(&[descriptor])
+        .unwrap()
+        .total_amount
 }
 
 /// Struct representing the bitcoin miner, all coins are usually generated

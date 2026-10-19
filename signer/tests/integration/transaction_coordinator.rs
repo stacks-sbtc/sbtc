@@ -89,6 +89,7 @@ use signer::testing::get_rng;
 use signer::testing::FuturesIterExt as _;
 use signer::transaction_coordinator::given_key_is_coordinator;
 use signer::transaction_coordinator::should_run_dkg;
+use signer::transaction_signer::BITCOIN_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::assert_allow_dkg_begin;
 use signer::util::FutureExt as _;
@@ -803,6 +804,7 @@ async fn deploy_smart_contracts_coordinator() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -1455,6 +1457,7 @@ async fn run_subsequent_dkg() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         });
 
     // We only proceed with the test after all processes have started, and
@@ -1703,6 +1706,7 @@ async fn pseudo_random_dkg() {
             last_presign_block: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2123,6 +2127,7 @@ async fn sign_bitcoin_transaction() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2456,6 +2461,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -2966,6 +2972,7 @@ async fn wsts_ids_set_during_dkg_and_signing_rounds() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3327,6 +3334,7 @@ async fn skip_signer_activites_after_key_rotation() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -3875,6 +3883,7 @@ async fn skip_smart_contract_deployment_and_key_rotation_if_up_to_date() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -4673,6 +4682,7 @@ async fn test_conservative_initial_sbtc_limits() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -4892,6 +4902,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -6455,6 +6466,7 @@ async fn reuse_nonce_attack() {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {

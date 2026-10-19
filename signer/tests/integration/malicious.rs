@@ -54,6 +54,7 @@ use signer::testing;
 use signer::testing::context::*;
 use signer::transaction_coordinator::TxCoordinatorEventLoop;
 use signer::transaction_coordinator::coordinator_public_key;
+use signer::transaction_signer::BITCOIN_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::TxSignerEventLoop;
 use signer::util::FutureExt as _;
@@ -307,6 +308,7 @@ async fn start_signers(
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {

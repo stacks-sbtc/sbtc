@@ -375,15 +375,12 @@ impl Validatable for EmilyClientConfig {
 /// Signer-specific configuration
 #[derive(Deserialize, Clone, Debug)]
 pub struct SignerConfig {
-    /// Activation height for v2 signer UTXOs on non-mainnet networks.
-    /// Mainnet always uses [`MAINNET_V2_SIGNING_BLOCK_HEIGHT`].
+    /// Activation height for v2 signer UTXOs.
     #[serde(default)]
     pub v2_signing_block_height: Option<BitcoinBlockHeight>,
-    /// Bitcoin height at which DKG is disabled and rotate-keys calls switch to
-    /// the v2 registry-key encoding on non-mainnet networks.
-    ///
-    /// Mainnet always uses [`MAINNET_DKG_DISABLE_BLOCK_HEIGHT`]. This must be
-    /// greater than or equal to the effective v2 signing block height.
+    /// Bitcoin height at which DKG is disabled and rotate-keys calls
+    /// switch to the v2 registry-key encoding. This must be greater than
+    /// or equal to the effective v2 signing block height.
     #[serde(default)]
     pub dkg_disable_block_height: Option<BitcoinBlockHeight>,
     /// The private key of the signer
@@ -568,12 +565,12 @@ impl SignerConfig {
 
     /// Return the Bitcoin height at which signer outputs switch to v2.
     pub fn v2_signing_block_height(&self) -> BitcoinBlockHeight {
-        if self.network.is_mainnet() {
+        let default = if self.network.is_mainnet() {
             MAINNET_V2_SIGNING_BLOCK_HEIGHT
         } else {
-            self.v2_signing_block_height
-                .unwrap_or(TESTNET_V2_SIGNING_BLOCK_HEIGHT)
-        }
+            TESTNET_V2_SIGNING_BLOCK_HEIGHT
+        };
+        self.v2_signing_block_height.unwrap_or(default)
     }
 
     /// Return whether newly-created signer outputs should use v2.
@@ -583,12 +580,12 @@ impl SignerConfig {
 
     /// Return the Bitcoin height at which DKG is disabled.
     pub fn dkg_disable_block_height(&self) -> BitcoinBlockHeight {
-        if self.network.is_mainnet() {
+        let default = if self.network.is_mainnet() {
             MAINNET_DKG_DISABLE_BLOCK_HEIGHT
         } else {
-            self.dkg_disable_block_height
-                .unwrap_or(TESTNET_DKG_DISABLE_BLOCK_HEIGHT)
-        }
+            TESTNET_DKG_DISABLE_BLOCK_HEIGHT
+        };
+        self.dkg_disable_block_height.unwrap_or(default)
     }
 
     /// Return whether DKG is disabled at the given Bitcoin block height.
@@ -1456,12 +1453,33 @@ mod tests {
     }
 
     #[test]
-    fn mainnet_ignores_configured_dkg_disable_height() {
+    fn mainnet_uses_configured_v2_and_dkg_disable_heights() {
         clear_env();
         let mut settings = Settings::new_from_default_config().unwrap();
         settings.signer.network = NetworkKind::Mainnet;
-        settings.signer.dkg_disable_block_height = Some(300_u64.into());
+        settings.signer.v2_signing_block_height = Some(300_u64.into());
+        settings.signer.dkg_disable_block_height = Some(400_u64.into());
 
+        assert_eq!(
+            settings.signer.v2_signing_block_height(),
+            BitcoinBlockHeight::from(300_u64)
+        );
+        assert_eq!(
+            settings.signer.dkg_disable_block_height(),
+            BitcoinBlockHeight::from(400_u64)
+        );
+    }
+
+    #[test]
+    fn mainnet_uses_compiled_activation_defaults_when_unconfigured() {
+        clear_env();
+        let mut settings = Settings::new_from_default_config().unwrap();
+        settings.signer.network = NetworkKind::Mainnet;
+
+        assert_eq!(
+            settings.signer.v2_signing_block_height(),
+            MAINNET_V2_SIGNING_BLOCK_HEIGHT
+        );
         assert_eq!(
             settings.signer.dkg_disable_block_height(),
             MAINNET_DKG_DISABLE_BLOCK_HEIGHT
