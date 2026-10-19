@@ -290,7 +290,7 @@ message TupleProof {
 message SchnorrProof {
   // This is R, where R = r*G for a random scalar r.
   crypto.Point random_commitment = 1;
-  // This is z, where z = r + a*s where s = H(G,A,B,K,R) as per Fiat-Shamir
+  // This is z, where z = r + a*s where s = H(A,B,K,R,rB) as per Fiat-Shamir
   crypto.Scalar response = 2;
 }
 

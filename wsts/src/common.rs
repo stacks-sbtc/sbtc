@@ -279,7 +279,7 @@ pub struct TupleProof {
     pub R: Point,
     /// rB = r*B
     pub rB: Point,
-    /// z = r + a*s where s = H(G,A,B,K,R) as per Fiat-Shamir
+    /// z = r + a*s where s = H(A,B,K,R,rB) as per Fiat-Shamir
     pub z: Scalar,
 }
 
@@ -295,21 +295,22 @@ impl TupleProof {
     ) -> Self {
         let r = Scalar::random(rng);
         let R = r * G;
-        let s = Self::challenge(A, B, K, &R);
+        let rB = r * B;
+        let s = Self::challenge(A, B, K, &R, &rB);
 
-        Self { R, rB: r * B, z: r + a * s }
+        Self { R, rB, z: r + a * s }
     }
 
     #[allow(non_snake_case)]
     /// Verify the proof using the transcript and public parameters
     pub fn verify(&self, A: &Point, B: &Point, K: &Point) -> bool {
-        let s = Self::challenge(A, B, K, &self.R);
+        let s = Self::challenge(A, B, K, &self.R, &self.rB);
 
         (self.z * G == self.R + s * A) && (self.z * B == self.rB + s * K)
     }
 
     #[allow(non_snake_case)]
-    fn challenge(A: &Point, B: &Point, K: &Point, R: &Point) -> Scalar {
+    fn challenge(A: &Point, B: &Point, K: &Point, R: &Point, rB: &Point) -> Scalar {
         let mut hasher = Sha256::new();
 
         hasher.update("TUPLE_PROOF/".as_bytes());
@@ -317,6 +318,7 @@ impl TupleProof {
         hasher.update(B.compress().as_bytes());
         hasher.update(K.compress().as_bytes());
         hasher.update(R.compress().as_bytes());
+        hasher.update(rB.compress().as_bytes());
 
         hash_to_scalar(&mut hasher)
     }
@@ -399,6 +401,31 @@ pub mod test {
         let tuple_proof = TupleProof::new(&a, &A, &B, &K, &mut rng);
         assert!(!tuple_proof.verify(&A, &B, &K));
         assert!(!tuple_proof.verify(&B, &A, &K));
+    }
+
+    #[test]
+    #[allow(non_snake_case)]
+    fn tuple_proof_rejects_forged_shared_key() {
+        let mut rng = ChaCha8Rng::seed_from_u64(2098);
+        let a = Scalar::random(&mut rng);
+        let b = Scalar::random(&mut rng);
+        let k = Scalar::random(&mut rng);
+        let A = a * G;
+        let B = b * G;
+        let K_fake = k * G;
+        assert_ne!(K_fake, a * B);
+
+        let r = Scalar::random(&mut rng);
+        let R = r * G;
+        let rB = r * B;
+        let s = TupleProof::challenge(&A, &B, &K_fake, &R, &rB);
+        let z = r + a * s;
+        // Without rB in the challenge, it can be chosen after z to make
+        // verification accept a shared key unrelated to A and B.
+        let rB_fake = z * B - s * K_fake;
+        let forged_proof = TupleProof { R, rB: rB_fake, z };
+
+        assert!(!forged_proof.verify(&A, &B, &K_fake));
     }
 
     #[test]

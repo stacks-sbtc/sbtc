@@ -440,7 +440,7 @@ pub struct SchnorrProof {
     /// This is R, where R = r*G for a random scalar r.
     #[prost(message, optional, tag = "1")]
     pub random_commitment: ::core::option::Option<super::Point>,
-    /// This is z, where z = r + a*s where s = H(G,A,B,K,R) as per Fiat-Shamir
+    /// This is z, where z = r + a*s where s = H(A,B,K,R,rB) as per Fiat-Shamir
     #[prost(message, optional, tag = "2")]
     pub response: ::core::option::Option<super::Scalar>,
 }
