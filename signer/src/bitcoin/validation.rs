@@ -12,6 +12,8 @@ use bitcoin::relative::LockTime;
 use crate::BITCOIN_FEE_RATE_RANGE;
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
+use crate::MAX_DEPOSITS_PER_BITCOIN_PACKAGE;
+use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo::BitcoinSignerSet;
@@ -146,6 +148,27 @@ impl BitcoinPreSignRequest {
 
         if no_requests || self.request_package.is_empty() {
             return Err(Error::PreSignContainsNoRequests);
+        }
+
+        let transaction_count = self.request_package.len();
+        let max_transaction_count = MAX_MEMPOOL_PACKAGE_TX_COUNT as usize;
+        if transaction_count > max_transaction_count {
+            return Err(Error::PreSignTooManyTransactions {
+                count: transaction_count,
+                max: max_transaction_count,
+            });
+        }
+
+        let deposit_count = self
+            .request_package
+            .iter()
+            .map(|requests| requests.deposits.len())
+            .sum();
+        if deposit_count > MAX_DEPOSITS_PER_BITCOIN_PACKAGE {
+            return Err(Error::PreSignTooManyDeposits {
+                count: deposit_count,
+                max: MAX_DEPOSITS_PER_BITCOIN_PACKAGE,
+            });
         }
 
         if !is_unique(&self.request_package) {
@@ -605,8 +628,9 @@ impl SbtcReports {
 }
 
 /// The responses for validation of a sweep transaction on bitcoin.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type, strum::Display)]
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum InputValidationResult {
     /// The deposit request passed validation
@@ -2242,6 +2266,74 @@ mod tests {
         }, false; "unique-requests-positive-infinity-fee-rate")]
     fn test_pre_validation(requests: BitcoinPreSignRequest, result: bool) {
         assert_eq!(requests.pre_validation().is_ok(), result);
+    }
+
+    fn presign_request_with_deposits(count: usize) -> BitcoinPreSignRequest {
+        let deposits: Vec<_> = (0..count)
+            .map(|vout| OutPoint {
+                txid: Txid::from_byte_array([1; 32]),
+                vout: vout as u32,
+            })
+            .collect();
+
+        BitcoinPreSignRequest {
+            request_package: deposits
+                .chunks(crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX as usize)
+                .map(|deposits| TxRequestIds {
+                    deposits: deposits.to_vec(),
+                    withdrawals: Vec::new(),
+                })
+                .collect(),
+            fee_rate: 1.0,
+            last_fees: None,
+        }
+    }
+
+    #[test]
+    fn presign_request_enforces_package_deposit_limit() {
+        let request = presign_request_with_deposits(MAX_DEPOSITS_PER_BITCOIN_PACKAGE);
+        assert!(request.pre_validation().is_ok());
+
+        let count = MAX_DEPOSITS_PER_BITCOIN_PACKAGE + 1;
+        let request = presign_request_with_deposits(count);
+        assert!(matches!(
+            request.pre_validation(),
+            Err(Error::PreSignTooManyDeposits { count: actual, max })
+                if actual == count && max == MAX_DEPOSITS_PER_BITCOIN_PACKAGE
+        ));
+    }
+
+    #[test]
+    fn presign_request_enforces_package_transaction_limit() {
+        let max = MAX_MEMPOOL_PACKAGE_TX_COUNT as usize;
+        let request = BitcoinPreSignRequest {
+            request_package: (0..max)
+                .map(|vout| TxRequestIds {
+                    deposits: vec![OutPoint {
+                        txid: Txid::from_byte_array([1; 32]),
+                        vout: vout as u32,
+                    }],
+                    withdrawals: Vec::new(),
+                })
+                .collect(),
+            fee_rate: 1.0,
+            last_fees: None,
+        };
+        assert!(request.pre_validation().is_ok());
+
+        let mut request = request;
+        request.request_package.push(TxRequestIds {
+            deposits: vec![OutPoint {
+                txid: Txid::from_byte_array([1; 32]),
+                vout: max as u32,
+            }],
+            withdrawals: Vec::new(),
+        });
+        assert!(matches!(
+            request.pre_validation(),
+            Err(Error::PreSignTooManyTransactions { count, max: actual_max })
+                if count == max + 1 && actual_max == max
+        ));
     }
 
     fn create_deposit_report(idx: u8, amount: u64) -> (DepositRequestReport, SignerVotes) {

@@ -5054,7 +5054,7 @@ async fn can_write_and_get_multiple_bitcoin_txs_sighashes() {
 
     let withdrawal_outputs_futures = sighashes
         .iter()
-        .map(|sighash| db.will_sign_bitcoin_tx_sighash(&sighash.sighash));
+        .map(|sighash| db.will_sign_bitcoin_tx_sighash(&sighash.sighash, &sighash.chain_tip));
 
     let results = join_all(withdrawal_outputs_futures).await;
 
@@ -5063,6 +5063,50 @@ async fn can_write_and_get_multiple_bitcoin_txs_sighashes() {
         assert_eq!(signing_info.will_sign, output.will_sign);
         assert_eq!(signing_info.prevout_type, output.prevout_type);
     }
+    signer::testing::storage::drop_db(db).await;
+}
+
+/// The same sighash may be approved under more than one chain tip, and
+/// each approval only applies to its own chain tip.
+#[tokio::test]
+async fn bitcoin_txs_sighashes_are_scoped_to_chain_tip() {
+    let db = testing::storage::new_test_database().await;
+
+    let first: BitcoinTxSigHash = BitcoinTxSigHash {
+        will_sign: true,
+        ..fake::Faker.fake()
+    };
+    let second = BitcoinTxSigHash {
+        chain_tip: fake::Faker.fake(),
+        will_sign: false,
+        ..first.clone()
+    };
+
+    db.write_bitcoin_txs_sighashes(&[first.clone(), second.clone()])
+        .await
+        .unwrap();
+
+    let signing_info = db
+        .will_sign_bitcoin_tx_sighash(&first.sighash, &first.chain_tip)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(signing_info.will_sign);
+
+    let signing_info = db
+        .will_sign_bitcoin_tx_sighash(&second.sighash, &second.chain_tip)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!signing_info.will_sign);
+
+    let other_chain_tip: model::BitcoinBlockHash = fake::Faker.fake();
+    let result = db
+        .will_sign_bitcoin_tx_sighash(&first.sighash, &other_chain_tip)
+        .await
+        .unwrap();
+    assert!(result.is_none());
+
     signer::testing::storage::drop_db(db).await;
 }
 
