@@ -2420,7 +2420,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
-                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
 
