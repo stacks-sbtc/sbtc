@@ -1696,7 +1696,7 @@ impl<'a> UnsignedTransaction<'a> {
     /// In the above layout:
     /// - magic: UTF-8 encoded string indicator (2 bytes)
     /// - op: version byte (1 byte); version 1 indicates the proportional
-    ///   fee assesment rule should be used, while version 2 indicates the
+    ///   fee assessment rule should be used, while version 2 indicates the
     ///   even fees rule should be used.
     /// - encoded IDs: withdrawal request IDs encoded using idpack (variable
     ///   length, if there are withdrawals serviced by the transaction)
@@ -1836,8 +1836,8 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
     /// <https://github.com/stacks-sbtc/sbtc/issues/182> or
     /// <https://github.com/stacks-sbtc/sbtc/issues/2144>.
     fn assess_input_fee(&self, outpoint: &OutPoint, tx_fee: Amount) -> Option<Amount> {
-        // We skip the first input because that is always the signers'
-        // input UTXO.
+        // We skip the first input because it is always the signers' input
+        // UTXO.
         let input_weight = self
             .inputs()
             .iter()
@@ -1868,8 +1868,8 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
     /// <https://github.com/stacks-sbtc/sbtc/issues/2144> depending on the
     /// version encoded in the OP_RETURN.
     fn assess_output_fee(&self, vout: usize, tx_fee: Amount) -> Option<Amount> {
-        // We skip the first input because that is always the signers'
-        // input UTXO.
+        // We skip the first two outputs because they always belong to the
+        // signers.
         if vout < 2 {
             return None;
         }
@@ -1936,7 +1936,7 @@ pub enum FeeAssessmentMethod {
 impl FeeAssessmentMethod {
     /// Select the fee rule from the Bitcoin chain-tip block height
     /// relative to the activation height.
-    pub fn from_block_height(
+    pub fn from_chain_tip_height(
         chain_tip_height: BitcoinBlockHeight,
         activation_height: BitcoinBlockHeight,
     ) -> Self {
@@ -4284,6 +4284,62 @@ mod tests {
         assert_eq!(even_output_fee, even_input_fee);
     }
 
+    /// Malformed OP_RETURN layouts that must not select a fee rule.
+    #[derive(Debug, Clone, Copy)]
+    enum MalformedFeeAssessmentCommitment {
+        /// The transaction has no OP_RETURN output.
+        MissingOutput,
+        /// The second output does not begin with OP_RETURN.
+        MissingOpReturn,
+        /// OP_RETURN is not followed by pushed data.
+        MissingData,
+        /// The pushed data does not contain a version byte.
+        MissingVersion,
+        /// The pushed data contains an unsupported version byte.
+        UnsupportedVersion,
+        /// The script contains an instruction after the data push.
+        ExtraInstruction,
+    }
+
+    /// Fee assessment rejects malformed or unsupported OP_RETURN commitments.
+    #[test_case(MalformedFeeAssessmentCommitment::MissingOutput; "missing output")]
+    #[test_case(MalformedFeeAssessmentCommitment::MissingOpReturn; "missing OP_RETURN")]
+    #[test_case(MalformedFeeAssessmentCommitment::MissingData; "missing data push")]
+    #[test_case(MalformedFeeAssessmentCommitment::MissingVersion; "missing version")]
+    #[test_case(MalformedFeeAssessmentCommitment::UnsupportedVersion; "unsupported version")]
+    #[test_case(MalformedFeeAssessmentCommitment::ExtraInstruction; "extra instruction")]
+    fn malformed_op_return_does_not_select_fee_assessment(
+        malformed: MalformedFeeAssessmentCommitment,
+    ) {
+        let mut tx = base_signer_transaction();
+
+        match malformed {
+            MalformedFeeAssessmentCommitment::MissingOutput => tx.output.truncate(1),
+            MalformedFeeAssessmentCommitment::MissingOpReturn => {
+                tx.output[1].script_pubkey = ScriptBuf::new();
+            }
+            MalformedFeeAssessmentCommitment::MissingData => {
+                tx.output[1].script_pubkey =
+                    ScriptBuf::builder().push_opcode(OP_RETURN).into_script();
+            }
+            MalformedFeeAssessmentCommitment::MissingVersion => {
+                tx.output[1].script_pubkey = ScriptBuf::new_op_return(*b"T3");
+            }
+            MalformedFeeAssessmentCommitment::UnsupportedVersion => {
+                tx.output[1].script_pubkey = ScriptBuf::new_op_return(*b"T3\x03");
+            }
+            MalformedFeeAssessmentCommitment::ExtraInstruction => {
+                tx.output[1].script_pubkey = ScriptBuf::builder()
+                    .push_opcode(OP_RETURN)
+                    .push_slice([b'T', b'3', OP_RETURN_VERSION_EVEN_FEES])
+                    .push_int(1)
+                    .into_script();
+            }
+        }
+
+        assert_eq!(FeeAssessmentMethod::from_transaction(&tx), None);
+    }
+
     /// The activation height selects the fee rule at the boundary.
     #[test_case(99, 100, FeeAssessmentMethod::Proportional; "proportional")]
     #[test_case(100, 100, FeeAssessmentMethod::Even; "at the boundary")]
@@ -4295,7 +4351,7 @@ mod tests {
     ) {
         let activation_height = BitcoinBlockHeight::from(activation_height);
         let actual_method =
-            FeeAssessmentMethod::from_block_height(chain_height.into(), activation_height);
+            FeeAssessmentMethod::from_chain_tip_height(chain_height.into(), activation_height);
 
         assert_eq!(actual_method, expected_method);
     }

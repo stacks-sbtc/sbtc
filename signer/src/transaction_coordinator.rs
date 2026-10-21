@@ -1989,7 +1989,7 @@ where
 
         let activation_height = self.context.config().signer.even_fees_activation_height();
         let fee_assessment =
-            FeeAssessmentMethod::from_block_height(chain_tip.block_height, activation_height);
+            FeeAssessmentMethod::from_chain_tip_height(chain_tip.block_height, activation_height);
 
         // We still need to send these to the other signers, since they may
         // not have upgraded their binaries yet.

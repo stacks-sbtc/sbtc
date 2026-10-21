@@ -529,12 +529,8 @@ impl CompleteDepositV1 {
             return Err(DepositErrorMsg::InvalidSweep.into_error(req_ctx, self));
         }
 
-        // None is only returned from BitcoinTxInfo::assess_output_fee when:
-        // a) The indicated output index is 0 or 1, since or those cannot
-        //    be valid output indices for sweep transactions, or
-        // b) When the output index points to an output that is not in
-        //    the transaction.
-        // Both cases indicate that the UTXO is missing from the transaction.
+        // A missing input or a malformed fee-assessment commitment makes
+        // the sweep invalid for this deposit.
         sweep_tx
             .assess_input_fee(&self.outpoint)
             .ok_or_else(|| DepositErrorMsg::MissingFromSweep.into_error(req_ctx, self))
@@ -864,12 +860,8 @@ impl AcceptWithdrawalV1 {
         // 4. That the sweep transaction has the UTXO indicated by the
         //    outpoint.
         //
-        // None is only returned from BitcoinTxInfo::assess_output_fee when:
-        // a) The indicated output index is 0 or 1, since or those cannot
-        //    be valid output indices for sweep transactions, or
-        // b) When the output index points to an output that is not in
-        //    the transaction.
-        // Both cases indicate that the UTXO is missing from the transaction.
+        // A reserved or missing output, or a malformed fee-assessment
+        // commitment, makes the sweep invalid for this withdrawal.
         let Some(expected_fee) = sweep_tx.assess_output_fee(self.outpoint.vout as usize) else {
             return Err(WithdrawalErrorMsg::UtxoMissingFromSweep.into_error(req_ctx, self));
         };

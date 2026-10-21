@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::ops::Deref as _;
 
+use bitcoin::ScriptBuf;
 use bitcoin::hashes::Hash as _;
 use rand::rngs::OsRng;
 use rand::seq::SliceRandom as _;
@@ -50,7 +51,7 @@ where
         .await
         .unwrap()
         .unwrap();
-    let fee_assessment = FeeAssessmentMethod::from_block_height(
+    let fee_assessment = FeeAssessmentMethod::from_chain_tip_height(
         btc_ctx.chain_tip_height,
         ctx.config().signer.even_fees_activation_height(),
     );
@@ -103,8 +104,15 @@ impl AssertConstantInvariants for Vec<BitcoinTxValidationData> {
     }
 }
 
+/// Signer validation commits to the configured fee rule on both sides of
+/// the activation boundary.
+#[test_case(1, FeeAssessmentMethod::Proportional; "before activation")]
+#[test_case(0, FeeAssessmentMethod::Even; "at activation")]
 #[tokio::test]
-async fn one_tx_per_request_set() {
+async fn one_tx_per_request_set(
+    activation_offset: u64,
+    expected_fee_assessment: FeeAssessmentMethod,
+) {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
 
@@ -113,7 +121,7 @@ async fn one_tx_per_request_set() {
     let rpc = bitcoin.rpc();
     let faucet = &bitcoin.get_faucet();
 
-    let ctx = TestContext::builder()
+    let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_bitcoin_client(bitcoin.get_client())
         .with_mocked_stacks_client()
@@ -141,6 +149,8 @@ async fn one_tx_per_request_set() {
 
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
     let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
+    ctx.config_mut().signer.fee_assessment_block_height =
+        Some(chain_tip_block.block_height + activation_offset);
 
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
     ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
@@ -183,6 +193,9 @@ async fn one_tx_per_request_set() {
     // empty (it only has signer outputs).
     let set = &validation_data[0];
     assert!(set.to_withdrawal_rows().is_empty());
+    let expected_script_pubkey =
+        ScriptBuf::new_op_return([b'T', b'3', expected_fee_assessment.op_return_version()]);
+    assert_eq!(set.tx.output[1].script_pubkey, expected_script_pubkey);
 
     // This transaction package
     let input_rows = set.to_input_rows();
