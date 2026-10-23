@@ -6738,6 +6738,7 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
             // This test signs with a v1 signer set, and the chain tip
             // below has a random height.
             settings.signer.v2_signing_block_height = Some(u64::MAX.into());
+            settings.signer.fee_assessment_block_height = Some(u64::MAX.into());
         })
         .build();
 
