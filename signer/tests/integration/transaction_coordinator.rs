@@ -281,6 +281,27 @@ where
     assert_eq!(contract_call.function_name.as_str(), T::FUNCTION_NAME);
 }
 
+/// Return the Bitcoin txid of the deposit in a `complete-deposit-wrapper`
+/// call.
+///
+/// The contract stores that txid in little-endian order.
+fn completed_deposit_txid(tx: &StacksTransaction) -> Option<model::BitcoinTxId> {
+    let TransactionPayload::ContractCall(call) = &tx.payload else {
+        return None;
+    };
+    if call.function_name.as_str() != CompleteDepositV1::FUNCTION_NAME {
+        return None;
+    }
+    let ClarityValue::Sequence(SequenceData::Buffer(buffer)) = call.function_args.first()? else {
+        return None;
+    };
+    let Ok(mut bytes) = <[u8; 32]>::try_from(buffer.data.as_slice()) else {
+        return None;
+    };
+    bytes.reverse();
+    Some(model::BitcoinTxId::from(bytes))
+}
+
 /// Trait for `IntegrationTestContext` wrappers
 pub trait SignerContextProvider<S> {
     fn context(&self) -> &IntegrationTestContext<S>;
@@ -1934,6 +1955,12 @@ async fn pseudo_random_dkg() {
     // the signers.
     wait_for_tenure_completed(&signers, chain_tip).await;
 
+    signers
+        .iter()
+        .map(|(_, db, _, _)| testing::storage::wait_for_dkg(db, 3))
+        .join_all()
+        .await;
+
     for (_, db, keypair, _) in signers.iter() {
         let count = db.get_encrypted_dkg_shares_count().await.unwrap();
         assert_eq!(count, 3);
@@ -2350,7 +2377,7 @@ async fn sign_bitcoin_transaction() {
 /// ```
 ///
 /// then, once everything is up and running, run the test.
-#[test(tokio::test)]
+#[tokio::test]
 async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let (_, signer_key_pairs): (_, [Keypair; 3]) = testing::wallet::regtest_bootstrap_wallet();
 
@@ -2393,7 +2420,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
             .with_mocked_stacks_client()
             .modify_settings(|settings| {
                 settings.signer.dkg_min_bitcoin_block_height = Some(dkg_run_two_height.into());
-                settings.signer.bitcoin_processing_delay = Duration::from_millis(200);
+                settings.signer.bitcoin_processing_delay = Duration::from_secs(1);
             })
             .build();
 
@@ -2414,7 +2441,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     //   that each coordinator will broadcast a rotate keys transaction.
     // =========================================================================
     let (broadcast_stacks_tx, rx) = tokio::sync::broadcast::channel(10);
-    let stacks_tx_stream = BroadcastStream::new(rx);
+    let mut stacks_tx_stream = BroadcastStream::new(rx);
 
     for (ctx, db, _, _) in signers.iter_mut() {
         let broadcast_stacks_tx = broadcast_stacks_tx.clone();
@@ -2559,6 +2586,9 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
         make_deposit_request(&depositor1, amount, utxo, max_fee, signers_public_key);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
 
+    let mut expected_deposit_txids: HashSet<model::BitcoinTxId> =
+        HashSet::from([deposit_tx.compute_txid().into()]);
+
     assert_eq!(deposit_tx.compute_txid(), deposit_request.outpoint.txid);
 
     let body = build_emily_request(&deposit_info, &deposit_tx);
@@ -2675,6 +2705,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let (deposit_tx, _, deposit_info) =
         make_deposit_request(&depositor2, amount, utxo, max_fee, signers_public_key2);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
+    expected_deposit_txids.insert(deposit_tx.compute_txid().into());
 
     let body = build_emily_request(&deposit_info, &deposit_tx);
     deposit_api::create_deposit(emily_client.config(), body)
@@ -2688,6 +2719,7 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     let (deposit_tx, _, deposit_info) =
         make_deposit_request(&depositor1, amount, utxo, max_fee, signers_public_key1);
     rpc.send_raw_transaction(&deposit_tx).unwrap();
+    expected_deposit_txids.insert(deposit_tx.compute_txid().into());
 
     let body = build_emily_request(&deposit_info, &deposit_tx);
     deposit_api::create_deposit(emily_client.config(), body)
@@ -2732,14 +2764,24 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // - Check that the sweep transaction spend to the signers'
     //   scriptPubKey.
     // =========================================================================
-    let sleep_fut = Sleep::for_secs(5);
-    let broadcast_stacks_txs: Vec<StacksTransaction> = stacks_tx_stream
-        .take_until(sleep_fut)
-        .collect::<Vec<_>>()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
+    let mut broadcast_stacks_txs = Vec::new();
+    let mut completed_deposit_txids = HashSet::new();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while completed_deposit_txids != expected_deposit_txids {
+            let tx = stacks_tx_stream
+                .next()
+                .await
+                .expect("stacks transaction stream ended")
+                .expect("stacks transaction stream lagged");
+
+            if let Some(txid) = completed_deposit_txid(&tx) {
+                completed_deposit_txids.insert(txid);
+            }
+            broadcast_stacks_txs.push(tx);
+        }
+    })
+    .await
+    .expect("timed out waiting for complete-deposit transactions");
 
     let mut complete_deposit_txs: Vec<StacksTransaction> = broadcast_stacks_txs
         .iter()
@@ -2755,19 +2797,8 @@ async fn sign_bitcoin_transaction_multiple_locking_keys() {
     // We should try to mint for each of the three deposits. But since the
     // signers continually submit Stacks transaction for each swept
     // deposit, we need to deduplicate the contract calls before checking.
-    complete_deposit_txs.sort_by_key(|tx| match &tx.payload {
-        // The first argument in the contract call is the transaction ID
-        // of the deposit
-        TransactionPayload::ContractCall(cc) => match cc.function_args.first() {
-            Some(ClarityValue::Sequence(SequenceData::Buffer(buff))) => buff.data.clone(),
-            _ => Vec::new(),
-        },
-        _ => Vec::new(),
-    });
-    complete_deposit_txs.dedup_by_key(|tx| match &tx.payload {
-        TransactionPayload::ContractCall(cc) => cc.function_args.first().cloned(),
-        _ => None,
-    });
+    complete_deposit_txs.sort_by_key(completed_deposit_txid);
+    complete_deposit_txs.dedup_by_key(|tx| completed_deposit_txid(tx));
 
     // We ran DKG twice, so we should observe two distinct rotate-keys
     // contract calls. Since we call rotate keys with each bitcoin block we

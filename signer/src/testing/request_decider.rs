@@ -306,21 +306,12 @@ where
             )))
             .expect("failed to send signal");
 
-        // let msg = TxSignerEvent::PendingWithdrawalRequestRegistered;
-        // handle.wait_for_events(msg, 1, Duration::from_secs(10))
-        //     .await
-        //     .expect("timed out waiting for events");
-
-        // TODO: For some reason this works but the above commented-out doesn't.
-        // Probably to due with when the channel is subscribed. But that's weird
-        // because the handle has its own copy of the receiver just for this.
-        // Investigate.
         tokio::time::timeout(Duration::from_secs(10), async move {
             while !matches!(
                 signal_rx.recv().await,
                 Ok(SignerSignal::Event(SignerEvent::RequestDecider(
-                    RequestDeciderEvent::PendingWithdrawalRequestRegistered
-                )))
+                    RequestDeciderEvent::NewRequestsHandled(block_ref)
+                ))) if block_ref == chain_tip_ref
             ) {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
