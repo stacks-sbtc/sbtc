@@ -27,6 +27,7 @@ use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo;
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::DepositSigningKey;
+use crate::bitcoin::utxo::FeeAssessmentMethod;
 use crate::bitcoin::utxo::SignatureCollector;
 use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
@@ -1986,6 +1987,10 @@ where
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
 
+        let activation_height = self.context.config().signer.even_fees_activation_height();
+        let fee_assessment =
+            FeeAssessmentMethod::from_chain_tip_height(chain_tip.block_height, activation_height);
+
         // We still need to send these to the other signers, since they may
         // not have upgraded their binaries yet.
         let last_fees = assess_mempool_sweep_transaction_fees(&bitcoin_client, &utxo).await?;
@@ -1995,6 +2000,7 @@ where
             utxo,
             output_key_set: output_key_set.clone(),
             last_fees,
+            fee_assessment,
             magic_bytes: *b"T3",
         })
     }

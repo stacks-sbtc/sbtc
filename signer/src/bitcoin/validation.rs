@@ -19,6 +19,7 @@ use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::DepositSigningKey;
 use crate::bitcoin::utxo::FeeAssessment;
+use crate::bitcoin::utxo::FeeAssessmentMethod;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::context::Context;
 use crate::context::SbtcLimits;
@@ -331,11 +332,15 @@ impl BitcoinPreSignRequest {
             assess_mempool_sweep_transaction_fees(&bitcoin_client, &signer_utxo).await?;
 
         let output_key_set = btc_ctx.signer_set.output_key_set();
+        let activation_height = ctx.config().signer.even_fees_activation_height();
+        let fee_assessment =
+            FeeAssessmentMethod::from_chain_tip_height(btc_ctx.chain_tip_height, activation_height);
         let mut signer_state = SignerBtcState {
             fee_rate: self.fee_rate,
             utxo: signer_utxo,
             output_key_set,
             last_fees,
+            fee_assessment,
             magic_bytes: *b"T3",
         };
         let mut outputs = Vec::new();
@@ -1541,6 +1546,63 @@ mod tests {
         assert_eq!(status, mapping.status);
     }
 
+    /// The even fee rule rejects a deposit whose proportional assessment
+    /// would have remained below its maximum fee.
+    #[test]
+    fn even_fee_assessment_enforces_deposit_max_fee() {
+        let deposit_outpoint = OutPoint::null();
+        let mut tx = crate::testing::btc::base_signer_transaction();
+        tx.input.push(TxIn {
+            previous_output: deposit_outpoint,
+            ..Default::default()
+        });
+        tx.input.push(TxIn {
+            previous_output: OutPoint::new(bitcoin::Txid::from_byte_array([1; 32]), 0),
+            witness: Witness::from_slice(&[vec![0; 200]]),
+            ..Default::default()
+        });
+
+        let proportional_fee = tx
+            .assess_input_fee(&deposit_outpoint, TX_FEE)
+            .unwrap()
+            .to_sat();
+        let mut even_tx = tx.clone();
+        even_tx.output[1].script_pubkey =
+            ScriptBuf::new_op_return([b'T', b'3', FeeAssessmentMethod::Even.op_return_version()]);
+        let even_fee = even_tx
+            .assess_input_fee(&deposit_outpoint, TX_FEE)
+            .unwrap()
+            .to_sat();
+        assert!(even_fee > proportional_fee);
+
+        let report = DepositRequestReport {
+            status: DepositConfirmationStatus::Confirmed(
+                0_u64.into(),
+                BitcoinBlockHash::from([0; 32]),
+            ),
+            can_sign: Some(true),
+            can_accept: Some(true),
+            amount: 100_000_000,
+            max_fee: even_fee - 1,
+            lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
+            outpoint: deposit_outpoint,
+            deposit_script: ScriptBuf::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
+        };
+        let chain_tip_height = 2_u64.into();
+        let limits = SbtcLimits::new_per_deposit(0, u64::MAX);
+
+        assert_eq!(
+            report.validate(chain_tip_height, &tx, TX_FEE, &limits),
+            InputValidationResult::Ok
+        );
+        assert_eq!(
+            report.validate(chain_tip_height, &even_tx, TX_FEE, &limits),
+            InputValidationResult::FeeTooHigh
+        );
+    }
+
     /// A helper struct to aid in testing of deposit validation.
     #[derive(Debug)]
     struct WithdrawalReportErrorMapping {
@@ -1816,6 +1878,57 @@ mod tests {
         let status = report.validate(bitcoin_chain_tip_height, output_index, &tx, TX_FEE, limits);
 
         assert_eq!(status, WithdrawalValidationResult::Unknown);
+    }
+
+    /// The even fee rule rejects a withdrawal whose proportional assessment
+    /// would have remained below its maximum fee.
+    #[test]
+    fn even_fee_assessment_enforces_withdrawal_max_fee() {
+        let mut tx = crate::testing::btc::base_signer_transaction();
+        tx.input.push(TxIn {
+            previous_output: OutPoint::null(),
+            witness: Witness::from_slice(&[vec![0; 200]]),
+            ..Default::default()
+        });
+        tx.output.push(TxOut {
+            value: Amount::ONE_BTC,
+            script_pubkey: TEST_RECIPIENT.clone(),
+        });
+
+        let output_index = 2;
+        let proportional_fee = tx.assess_output_fee(output_index, TX_FEE).unwrap();
+
+        let mut even_tx = tx.clone();
+        even_tx.output[1].script_pubkey =
+            ScriptBuf::new_op_return([b'T', b'3', FeeAssessmentMethod::Even.op_return_version()]);
+        let even_fee = even_tx.assess_output_fee(output_index, TX_FEE).unwrap();
+
+        more_asserts::assert_gt!(even_fee, proportional_fee);
+
+        let report = WithdrawalRequestReport {
+            status: WithdrawalRequestStatus::Confirmed,
+            id: QualifiedRequestId {
+                request_id: 0,
+                txid: StacksTxId::from([0; 32]),
+                block_hash: StacksBlockHash::from([0; 32]),
+            },
+            amount: Amount::ONE_BTC.to_sat(),
+            max_fee: even_fee.to_sat() - 1,
+            recipient: TEST_RECIPIENT.clone(),
+            is_accepted: Some(true),
+            bitcoin_block_height: 0_u64.into(),
+        };
+        let chain_tip_height = WITHDRAWAL_MIN_CONFIRMATIONS.into();
+        let limits = SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat());
+
+        assert_eq!(
+            report.validate(chain_tip_height, output_index, &tx, TX_FEE, &limits),
+            WithdrawalValidationResult::Ok
+        );
+        assert_eq!(
+            report.validate(chain_tip_height, output_index, &even_tx, TX_FEE, &limits),
+            WithdrawalValidationResult::FeeTooHigh
+        );
     }
 
     #[test_case(

@@ -29,6 +29,7 @@ use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::DepositSigningKey;
+use signer::bitcoin::utxo::FeeAssessmentMethod;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
@@ -269,6 +270,7 @@ mod serial {
                 },
                 fee_rate: 10.0,
                 last_fees: None,
+                fee_assessment: FeeAssessmentMethod::Proportional,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,
@@ -334,6 +336,7 @@ mod serial {
                 },
                 fee_rate: FEE_RATE,
                 last_fees: None,
+                fee_assessment: FeeAssessmentMethod::Proportional,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,
@@ -479,6 +482,7 @@ mod serial {
                 },
                 fee_rate: FEE_RATE,
                 last_fees: None,
+                fee_assessment: FeeAssessmentMethod::Proportional,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,

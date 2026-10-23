@@ -61,6 +61,7 @@ use signer::bitcoin::utxo::BASE_WITHDRAWAL_TX_VSIZE;
 use signer::bitcoin::utxo::BitcoinInputsOutputs as _;
 use signer::bitcoin::utxo::BitcoinSignerSet;
 use signer::bitcoin::utxo::DepositRequest;
+use signer::bitcoin::utxo::FeeAssessmentMethod;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SOLO_DEPOSIT_TX_VSIZE;
 use signer::bitcoin::utxo::SignerUtxoKeySet;
@@ -3968,6 +3969,9 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     let db = testing::storage::new_test_database().await;
 
     let context = TestContext::builder()
+        .modify_settings(|settings| {
+            settings.signer.fee_assessment_block_height = Some(2_u64.into());
+        })
         .with_storage(db.clone())
         .with_mocked_clients()
         .build();
@@ -4100,21 +4104,27 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     );
     assert_eq!(btc_state.fee_rate, 1.3);
     assert_eq!(btc_state.last_fees, None);
+    assert_eq!(btc_state.fee_assessment, FeeAssessmentMethod::Proportional);
     assert_eq!(btc_state.magic_bytes, [b'T', b'3']);
 
     // Let's grab the state again, this time we expect fees from
     // "bitcoin-core" that are too high.
+    let chain_tip_at_activation = model::BitcoinBlockRef {
+        block_height: 2_u64.into(),
+        ..chain_tip
+    };
     let btc_state = coord
-        .get_btc_state(&chain_tip, &signer_set.output_key_set())
+        .get_btc_state(&chain_tip_at_activation, &signer_set.output_key_set())
         .await
         .unwrap();
 
     assert_eq!(btc_state.fee_rate, MAX_BITCOIN_FEE_RATE);
+    assert_eq!(btc_state.fee_assessment, FeeAssessmentMethod::Even);
 
     // Let's grab the state one last time, where this time we expect fees
     // from "bitcoin-core" that are too low.
     let btc_state = coord
-        .get_btc_state(&chain_tip, &signer_set.output_key_set())
+        .get_btc_state(&chain_tip_at_activation, &signer_set.output_key_set())
         .await
         .unwrap();
 
@@ -6728,6 +6738,7 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
             // This test signs with a v1 signer set, and the chain tip
             // below has a random height.
             settings.signer.v2_signing_block_height = Some(u64::MAX.into());
+            settings.signer.fee_assessment_block_height = Some(u64::MAX.into());
         })
         .build();
 
