@@ -91,6 +91,7 @@ tempfile.workspace = true
 test-case.workspace = true
 test-log.workspace = true
 testing-emily-client.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 toml_edit.workspace = true
 tower.workspace = true
 
