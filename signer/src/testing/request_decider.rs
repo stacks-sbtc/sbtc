@@ -216,18 +216,14 @@ where
             while !matches!(
                 signal_rx.recv().await,
                 Ok(SignerSignal::Event(SignerEvent::RequestDecider(
-                    RequestDeciderEvent::PendingDepositRequestRegistered
-                )))
+                    RequestDeciderEvent::NewRequestsHandled(block_ref)
+                ))) if block_ref == chain_tip_ref
             ) {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
         .await
         .expect("timeout");
-
-        // TODO: Figure out the race condition in the `should_store_decisions_for_pending_deposit_requests`
-        // integration test.
-        tokio::time::sleep(Duration::from_millis(250)).await;
 
         Self::assert_only_deposit_requests_in_context_window_has_decisions(
             &handle.context.get_storage(),
