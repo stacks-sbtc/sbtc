@@ -14,6 +14,7 @@ use test_case::test_case;
 
 use sbtc::testing;
 use sbtc::testing::deposits::TxSetup;
+use sbtc::testing::emily::EmilyTables;
 use testing_emily_client::apis::chainstate_api::set_chainstate;
 use testing_emily_client::models::{
     Chainstate, DepositStatus, Fulfillment, UpdateDepositsRequestBody,
@@ -69,6 +70,26 @@ async fn batch_create_deposits(
         );
     }
     created_deposits
+}
+
+/// Reads the raw DynamoDB item of the deposit with output index 0.
+async fn get_stored_deposit_item(tables: &EmilyTables, bitcoin_txid: String) -> serde_dynamo::Item {
+    let key: serde_dynamo::Item = serde_dynamo::to_item(DepositEntryKey {
+        bitcoin_txid,
+        bitcoin_tx_output_index: 0,
+    })
+    .unwrap();
+    let item = tables
+        .client
+        .get_item()
+        .table_name(&tables.deposit)
+        .set_key(Some(key.into()))
+        .send()
+        .await
+        .unwrap()
+        .item
+        .unwrap();
+    item.into()
 }
 
 /// Test deposit txn information. This is useful for testing.
@@ -233,21 +254,7 @@ async fn create_deposit_stores_exact_transaction_hex() {
         .await
         .unwrap();
 
-    let key: serde_dynamo::Item = serde_dynamo::to_item(DepositEntryKey {
-        bitcoin_txid: transaction.bitcoin_txid,
-        bitcoin_tx_output_index: 0,
-    })
-    .unwrap();
-    let item = tables
-        .client
-        .get_item()
-        .table_name(&tables.deposit)
-        .set_key(Some(key.into()))
-        .send()
-        .await
-        .unwrap()
-        .item
-        .unwrap();
+    let item = get_stored_deposit_item(&tables, transaction.bitcoin_txid).await;
     let entry: DepositEntry = serde_dynamo::from_item(item).unwrap();
     assert_eq!(
         entry.transaction_hex.as_deref(),
@@ -266,7 +273,10 @@ async fn create_deposit_omits_oversized_transaction_hex() {
     // maximum stored length.
     tx_setup.tx.output.push(bitcoin::TxOut {
         value: bitcoin::Amount::ZERO,
-        script_pubkey: ScriptBuf::from_bytes(vec![opcodes::OP_RETURN.to_u8(); 10_240]),
+        script_pubkey: ScriptBuf::from_bytes(vec![
+            opcodes::OP_RETURN.to_u8();
+            MAX_TRANSACTION_HEX_LEN / 2
+        ]),
     });
     let transaction = DepositTxnData::from_tx_setup(tx_setup);
     assert!(transaction.transaction_hex.len() > MAX_TRANSACTION_HEX_LEN);
@@ -284,21 +294,7 @@ async fn create_deposit_omits_oversized_transaction_hex() {
         .await
         .unwrap();
 
-    let key: serde_dynamo::Item = serde_dynamo::to_item(DepositEntryKey {
-        bitcoin_txid: transaction.bitcoin_txid,
-        bitcoin_tx_output_index: 0,
-    })
-    .unwrap();
-    let item = tables
-        .client
-        .get_item()
-        .table_name(&tables.deposit)
-        .set_key(Some(key.into()))
-        .send()
-        .await
-        .unwrap()
-        .item
-        .unwrap();
+    let item = get_stored_deposit_item(&tables, transaction.bitcoin_txid).await;
     assert!(!item.contains_key("TransactionHex"));
     let entry: DepositEntry = serde_dynamo::from_item(item).unwrap();
     assert!(entry.transaction_hex.is_none());
