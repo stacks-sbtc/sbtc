@@ -252,6 +252,13 @@ sbtc_bitcoin_start_height = 101
 # Environment: SIGNER_SIGNER__MAX_DEPOSITS_PER_BITCOIN_TX
 # max_deposits_per_bitcoin_tx = 25
 
+# The maximum number of Emily deposit requests validated per bitcoin
+# block. The rest are validated on later blocks.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__MAX_DEPOSIT_VALIDATIONS_PER_BLOCK
+# max_deposit_validations_per_block = 100
+
 # When defined, this field sets the scrape endpoint as an IPv4 or IPv6
 # socket address for exporting metrics for Prometheus.
 #

@@ -15,6 +15,7 @@ use url::Url;
 
 use sbtc::SignerKeySet;
 
+use crate::DEFAULT_MAX_DEPOSIT_VALIDATIONS_PER_BLOCK;
 use crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use crate::MAINNET_DKG_DISABLE_BLOCK_HEIGHT;
 use crate::MAINNET_V2_SIGNING_BLOCK_HEIGHT;
@@ -451,6 +452,9 @@ pub struct SignerConfig {
     /// arrives. The default here is controlled by the
     /// [`MAX_DEPOSITS_PER_BITCOIN_TX`] constant
     pub max_deposits_per_bitcoin_tx: NonZeroU16,
+    /// Max Emily deposit requests validated per bitcoin block, the rest wait
+    /// for later blocks.
+    pub max_deposit_validations_per_block: NonZeroU16,
     /// Configures a DKG re-run Bitcoin block height. If this is set and DKG has
     /// already been run, the coordinator will attempt to re-run DKG after this
     /// block height is met if there are no non-failed shares created after that
@@ -664,6 +668,10 @@ impl Settings {
         cfg_builder = cfg_builder.set_default(
             "signer.max_deposits_per_bitcoin_tx",
             DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
+        )?;
+        cfg_builder = cfg_builder.set_default(
+            "signer.max_deposit_validations_per_block",
+            DEFAULT_MAX_DEPOSIT_VALIDATIONS_PER_BLOCK,
         )?;
         cfg_builder = cfg_builder.set_default("emily.pagination_timeout", 10)?;
         cfg_builder = cfg_builder.set_default("emily.timeout", 10)?;
@@ -1309,6 +1317,7 @@ mod tests {
         remove_parameter("signer", "bitcoin_presign_request_max_duration");
         remove_parameter("signer", "dkg_max_duration");
         remove_parameter("signer", "max_deposits_per_bitcoin_tx");
+        remove_parameter("signer", "max_deposit_validations_per_block");
 
         remove_parameter("bitcoin", "timeout");
 
@@ -1333,6 +1342,10 @@ mod tests {
             Duration::from_secs(30)
         );
         assert_eq!(settings.signer.dkg_max_duration, Duration::from_secs(120));
+        assert_eq!(
+            settings.signer.max_deposit_validations_per_block.get(),
+            DEFAULT_MAX_DEPOSIT_VALIDATIONS_PER_BLOCK
+        );
 
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
 
@@ -1361,6 +1374,7 @@ mod tests {
     #[test_case("bitcoin_presign_request_max_duration" ; "bitcoin_presign_request_max_duration")]
     #[test_case("signer_round_max_duration" ; "signer_round_max_duration")]
     #[test_case("stacks_fees_max_ustx" ; "stacks_fees_max_ustx")]
+    #[test_case("max_deposit_validations_per_block" ; "max_deposit_validations_per_block")]
     fn zero_values_for_nonzero_fields_fail_in_signer_config(field: &str) {
         clear_env();
 
