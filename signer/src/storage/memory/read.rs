@@ -225,6 +225,19 @@ impl DbRead for SharedStore {
         Ok(store.deposit_requests.contains_key(&(*txid, output_index)))
     }
 
+    async fn get_confirmed_deposit_outpoints(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<HashSet<bitcoin::OutPoint>, Error> {
+        let store = self.lock().await;
+        Ok(store
+            .get_deposit_requests(chain_tip, context_window)
+            .iter()
+            .map(model::DepositRequest::outpoint)
+            .collect())
+    }
+
     async fn get_withdrawal_signers(
         &self,
         request_id: u64,
@@ -856,6 +869,16 @@ impl DbRead for InMemoryTransaction {
         output_index: u32,
     ) -> Result<bool, Error> {
         self.store.deposit_request_exists(txid, output_index).await
+    }
+
+    async fn get_confirmed_deposit_outpoints(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<HashSet<bitcoin::OutPoint>, Error> {
+        self.store
+            .get_confirmed_deposit_outpoints(chain_tip, context_window)
+            .await
     }
 
     async fn get_deposit_request_report(

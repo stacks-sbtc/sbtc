@@ -2261,6 +2261,74 @@ async fn deposit_request_exists_works() {
     signer::testing::storage::drop_db(db).await;
 }
 
+/// [`DbRead::get_confirmed_deposit_outpoints`] returns the deposits in the context window, and Postgres agrees with the in-memory store.
+#[tokio::test]
+async fn get_confirmed_deposit_outpoints_returns_deposits_in_the_context_window() {
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::memory::Store::new_shared();
+    let mut rng = get_rng();
+
+    // Random parents put some deposits on forks, a small window leaves others too deep.
+    let context_window = 3;
+    let test_model_params = testing::storage::model::Params {
+        num_bitcoin_blocks: 30,
+        num_stacks_blocks_per_bitcoin_block: 0,
+        num_deposit_requests_per_block: 2,
+        num_withdraw_requests_per_block: 0,
+        num_signers_per_request: 0,
+        consecutive_blocks: false,
+    };
+    let test_data = TestData::generate(&mut rng, &[], &test_model_params);
+    // Its deposits are never in the window.
+    let other_chain = TestData::generate(&mut rng, &[], &test_model_params);
+
+    for data in [&test_data, &other_chain] {
+        data.write_to(&pg_store).await;
+        data.write_to(&in_memory_store).await;
+    }
+
+    let chain_tip = test_data
+        .bitcoin_blocks
+        .iter()
+        .max_by_key(|block| (block.block_height, block.block_hash))
+        .unwrap();
+
+    let window: HashSet<BitcoinBlockHash> =
+        std::iter::successors(Some(chain_tip.clone()), |block| {
+            test_data.get_bitcoin_block(&block.parent_hash)
+        })
+        .take(context_window as usize)
+        .map(|block| block.block_hash)
+        .collect();
+    let txids_in_window: HashSet<BitcoinTxId> = test_data
+        .bitcoin_transactions
+        .iter()
+        .filter(|tx_ref| window.contains(&tx_ref.block_hash))
+        .map(|tx_ref| tx_ref.txid)
+        .collect();
+    let expected: HashSet<bitcoin::OutPoint> = test_data
+        .deposit_requests
+        .iter()
+        .filter(|req| txids_in_window.contains(&req.txid))
+        .map(model::DepositRequest::outpoint)
+        .collect();
+    assert!(!expected.is_empty());
+    assert!(expected.len() < test_data.deposit_requests.len());
+
+    let pg_confirmed = pg_store
+        .get_confirmed_deposit_outpoints(&chain_tip.block_hash, context_window)
+        .await
+        .unwrap();
+    let in_memory_confirmed = in_memory_store
+        .get_confirmed_deposit_outpoints(&chain_tip.block_hash, context_window)
+        .await
+        .unwrap();
+    assert_eq!(pg_confirmed, expected);
+    assert_eq!(in_memory_confirmed, expected);
+
+    signer::testing::storage::drop_db(pg_store).await;
+}
+
 /// Check that is_known_bitcoin_block_hash correctly reports whether a
 /// given block is in the database.
 #[tokio::test]
