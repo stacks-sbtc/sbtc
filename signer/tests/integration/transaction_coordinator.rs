@@ -4782,12 +4782,19 @@ async fn test_conservative_initial_sbtc_limits() {
     enable_emily_limits.store(true, Ordering::SeqCst);
 
     faucet.generate_block();
-    Sleep::for_secs(3).await;
     // =========================================================================
     // Check we did process the deposit now
     // =========================================================================
     let (ctx, _, _, _) = signers.first().unwrap();
-    let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
+    let rpc_client = ctx.bitcoin_client.inner_client();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while rpc_client.get_raw_mempool().unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(100)).await
+        }
+    })
+    .await
+    .expect("the signers did not broadcast a sweep transaction");
+    let txids = rpc_client.get_raw_mempool().unwrap();
 
     assert_eq!(txids.len(), 1);
     let tx_info = bitcoin_client.get_tx(&txids[0]).unwrap().unwrap();
