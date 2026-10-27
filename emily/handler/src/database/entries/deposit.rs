@@ -17,6 +17,17 @@ use crate::{
 
 // Deposit entry ---------------------------------------------------------------
 
+/// Maximum length, in hex characters, of a transaction hex stored with a deposit.
+/// Larger transaction hex is not stored, which keeps deposit items well below
+/// DynamoDB's 400 KB item limit. Typical deposits are well under 1 KB of hex.
+pub const MAX_TRANSACTION_HEX_LEN: usize = 20 * 1024;
+
+/// Returns the transaction hex to store with a deposit, or `None` if it is longer
+/// than `MAX_TRANSACTION_HEX_LEN`.
+pub fn transaction_hex_to_store(transaction_hex: String) -> Option<String> {
+    (transaction_hex.len() <= MAX_TRANSACTION_HEX_LEN).then_some(transaction_hex)
+}
+
 /// Deposit table entry key. This is the primary index key.
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -59,6 +70,9 @@ pub struct DepositEntry {
     /// Deposit script format version.
     #[serde(default)]
     pub deposit_version: DepositVersion,
+    /// Original transaction hex submitted with the validated deposit request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_hex: Option<String>,
     /// The most recent Stacks block height the API was aware of when the deposit was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this height is the Stacks block height that contains that artifact.
@@ -745,7 +759,27 @@ impl DepositUpdatePackage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_dynamo::Item;
     use test_case::test_case;
+
+    #[test_case(4, true; "small")]
+    #[test_case(MAX_TRANSACTION_HEX_LEN, true; "at the limit")]
+    #[test_case(MAX_TRANSACTION_HEX_LEN + 1, false; "over the limit")]
+    fn transaction_hex_is_stored_only_within_the_limit(len: usize, stored: bool) {
+        let transaction_hex = "aB".repeat(len.div_ceil(2))[..len].to_string();
+        assert_eq!(
+            transaction_hex_to_store(transaction_hex.clone()),
+            stored.then_some(transaction_hex)
+        );
+    }
+
+    #[test]
+    fn transaction_hex_is_optional_in_stored_items() {
+        let item: Item = serde_dynamo::to_item(DepositEntry::default()).unwrap();
+        assert!(!item.contains_key("TransactionHex"));
+        let entry: DepositEntry = serde_dynamo::from_item(item).unwrap();
+        assert!(entry.transaction_hex.is_none());
+    }
 
     #[test]
     fn deposit_update_should_be_unnecessary_when_event_is_present() {
@@ -773,6 +807,7 @@ mod tests {
             status: DepositStatus::Pending,
             reclaim_script: "".to_string(),
             deposit_script: "".to_string(),
+            transaction_hex: None,
             last_update_height: 0,
             last_update_block_hash: "".to_string(),
             fulfillment: None,
@@ -815,6 +850,7 @@ mod tests {
             status: DepositStatus::Pending,
             reclaim_script: "".to_string(),
             deposit_script: "".to_string(),
+            transaction_hex: None,
             last_update_height: 0,
             last_update_block_hash: "".to_string(),
             fulfillment: None,
@@ -875,6 +911,7 @@ mod tests {
             status: (&confirmed.status).into(),
             reclaim_script: "test-reclaim".to_string(),
             deposit_script: "test-deposit".to_string(),
+            transaction_hex: None,
             last_update_height: 6,
             last_update_block_hash: "hash6".to_string(),
             fulfillment: Some(fulfillment.clone()),
