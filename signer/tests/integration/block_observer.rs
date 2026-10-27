@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::num::NonZeroU16;
 use std::ops::Deref as _;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -277,6 +278,149 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
 
     assert!(req_outpoints.contains(&setup.deposits[0].0.outpoint));
     assert!(req_outpoints.contains(&setup.deposits[1].0.outpoint));
+
+    testing::storage::drop_db(db).await;
+}
+
+/// With a budget of 1, a deposit is stored on its confirming block ahead of older never-confirming requests, and re-linked after a reorg.
+#[tokio::test]
+async fn block_observer_stores_deposits_confirmed_in_new_blocks_first() {
+    let mut rng = get_rng();
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let db = testing::storage::new_test_database().await;
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_bitcoin_client(bitcoin.get_client())
+        .with_mocked_emily_client()
+        .with_mocked_stacks_client()
+        .modify_settings(|settings| {
+            settings.signer.max_deposit_validations_per_block = NonZeroU16::MIN;
+        })
+        .build();
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
+
+    let depositor = Recipient::new(AddressType::P2tr);
+    faucet.send_to(50_000_000, &depositor.address);
+    faucet.generate_blocks(1);
+    let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
+    let signers_public_key = Recipient::new(AddressType::P2tr)
+        .keypair
+        .x_only_public_key()
+        .0;
+    let (deposit_tx, _, deposit_info) =
+        make_deposit_request(&depositor, 100_000, utxo, 50_000, signers_public_key);
+    let deposit_request = CreateDepositRequest {
+        outpoint: deposit_info.outpoint,
+        deposit_script: deposit_info.deposit_script.clone(),
+        reclaim_script: deposit_info.reclaim_script.clone(),
+        recipient: None,
+        max_fee: None,
+    };
+
+    // The deposit is the newest, behind more older requests than blocks.
+    let mut emily_requests = vec![deposit_request.clone()];
+    for _ in 0..5 {
+        let txid: model::BitcoinTxId = Faker.fake_with_rng(&mut rng);
+        emily_requests.push(CreateDepositRequest {
+            outpoint: OutPoint::new(txid.into(), 0),
+            ..deposit_request.clone()
+        });
+    }
+    ctx.with_emily_client(|client| {
+        client
+            .expect_get_deposits()
+            .returning(move || Box::pin(std::future::ready(Ok(emily_requests.clone()))));
+        client
+            .expect_get_limits()
+            .returning(|| Box::pin(async { Ok(SbtcLimits::unlimited()) }));
+    })
+    .await;
+
+    let anchor = get_canonical_chain_tip(rpc);
+    ctx.with_stacks_client(|client| {
+        client
+            .expect_get_tenure_info()
+            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+        client.expect_get_block().returning(|_| {
+            let response = Ok(NakamotoBlock {
+                header: NakamotoBlockHeader::empty(),
+                txs: Vec::new(),
+            });
+            Box::pin(std::future::ready(response))
+        });
+        let tenure_headers = TenureBlockHeaders::from_anchor(&anchor);
+        client
+            .expect_get_tenure_headers()
+            .returning(move |_| Box::pin(std::future::ready(Ok(tenure_headers.clone()))));
+        client.expect_get_epoch_status().returning(|| {
+            Box::pin(std::future::ready(Ok(StacksEpochStatus::PostNakamoto {
+                nakamoto_start_height: BitcoinBlockHeight::from(232_u32),
+            })))
+        });
+        client
+            .expect_get_sortition_info()
+            .returning(move |_| Box::pin(std::future::ready(Ok(DUMMY_SORTITION_INFO.clone()))));
+        client.expect_get_contract_source().returning(|_, _| {
+            Box::pin(async {
+                Err(Error::StacksNodeResponse(
+                    mock_reqwests_status_code_error(404).await,
+                ))
+            })
+        });
+    })
+    .await;
+
+    let start_flag = Arc::new(AtomicBool::new(false));
+    let flag = start_flag.clone();
+    let block_observer = BlockObserver {
+        context: ctx.clone(),
+        bitcoin_block_source: bitcoin.start_chain_tip_poller().await,
+    };
+    let _signal = ctx.get_signal_receiver();
+    tokio::spawn(async move {
+        flag.store(true, Ordering::Relaxed);
+        block_observer.run().await
+    });
+    while !start_flag.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Not broadcast yet, so the oldest request gets this block's slot.
+    let chain_tip: BitcoinBlockHash = faucet.generate_block().into();
+    wait_for_block_observed(&ctx, chain_tip).await;
+    assert!(
+        db.get_deposit_requests(&chain_tip, 100)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    rpc.send_raw_transaction(&deposit_tx).unwrap();
+    let deposit_block: BitcoinBlockHash = faucet.generate_block().into();
+    wait_for_block_observed(&ctx, deposit_block).await;
+
+    let stored = db.get_deposit_requests(&deposit_block, 100).await.unwrap();
+    let outpoints: Vec<OutPoint> = stored.iter().map(model::DepositRequest::outpoint).collect();
+    assert_eq!(outpoints, [deposit_info.outpoint]);
+
+    // The deposit returns to the mempool and confirms in the replacement.
+    rpc.invalidate_block(&deposit_block).unwrap();
+    // Makes the replacement block differ from the invalidated one.
+    faucet.send_to(1001, &faucet.address);
+    let replacement_block: BitcoinBlockHash = faucet.generate_block().into();
+    assert_ne!(replacement_block, deposit_block);
+    wait_for_block_observed(&ctx, replacement_block).await;
+
+    let stored = db
+        .get_deposit_requests(&replacement_block, 100)
+        .await
+        .unwrap();
+    let outpoints: Vec<OutPoint> = stored.iter().map(model::DepositRequest::outpoint).collect();
+    assert_eq!(outpoints, [deposit_info.outpoint]);
 
     testing::storage::drop_db(db).await;
 }

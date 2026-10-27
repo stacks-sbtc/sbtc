@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 use bitcoin::OutPoint;
 
@@ -1252,6 +1253,40 @@ impl PgRead {
         .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
+    }
+
+    async fn get_confirmed_deposit_outpoints<'e, E>(
+        executor: &'e mut E,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<HashSet<OutPoint>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        let rows = sqlx::query_as::<_, (model::BitcoinTxId, i32)>(
+            r#"
+            SELECT dr.txid, dr.output_index
+            FROM bitcoin_blockchain_of($1, $2) AS blocks_in_window
+            JOIN sbtc_signer.bitcoin_transactions AS bt
+              ON bt.block_hash = blocks_in_window.block_hash
+            JOIN sbtc_signer.deposit_requests AS dr
+              ON dr.txid = bt.txid
+            "#,
+        )
+        .bind(chain_tip)
+        .bind(i32::from(context_window))
+        .fetch_all(executor)
+        .await
+        .map_err(Error::SqlxQuery)?;
+
+        rows.into_iter()
+            .map(|(txid, output_index)| {
+                Ok(OutPoint {
+                    txid: txid.into(),
+                    vout: u32::try_from(output_index).map_err(Error::ConversionDatabaseInt)?,
+                })
+            })
+            .collect()
     }
 
     async fn get_withdrawal_signers<'e, E>(
@@ -2761,6 +2796,19 @@ impl DbRead for PgStore {
             .await
     }
 
+    async fn get_confirmed_deposit_outpoints(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<HashSet<OutPoint>, Error> {
+        PgRead::get_confirmed_deposit_outpoints(
+            self.get_connection().await?.as_mut(),
+            chain_tip,
+            context_window,
+        )
+        .await
+    }
+
     async fn get_withdrawal_signers(
         &self,
         request_id: u64,
@@ -3142,6 +3190,15 @@ impl DbRead for PgTransaction<'_> {
     ) -> Result<bool, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::deposit_request_exists(tx.as_mut(), txid, output_index).await
+    }
+
+    async fn get_confirmed_deposit_outpoints(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> Result<HashSet<OutPoint>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_confirmed_deposit_outpoints(tx.as_mut(), chain_tip, context_window).await
     }
 
     async fn get_deposit_request_report(
