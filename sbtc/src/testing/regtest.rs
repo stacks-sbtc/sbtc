@@ -391,7 +391,12 @@ impl<'a> Faucet<'a> {
     /// Note: only P2TR and P2WPKH addresses are supported.
     pub fn send_to_script(&self, amount: u64, script_pubkey: ScriptBuf) -> OutPoint {
         let fee = BITCOIN_CORE_FALLBACK_FEE.to_sat();
-        let utxo = self.get_utxos(Some(amount + fee)).pop().unwrap();
+        // bitcoind ignores txs with unconfirmed parents for fee estimation.
+        let utxo = self
+            .get_utxos(Some(amount + fee))
+            .into_iter()
+            .max_by_key(|utxo| utxo.confirmations)
+            .unwrap();
 
         let mut tx = Transaction {
             version: Version::ONE,
