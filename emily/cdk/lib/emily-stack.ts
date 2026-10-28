@@ -191,13 +191,27 @@ export class EmilyStack extends cdk.Stack {
                 "BitcoinTxid",
                 "BitcoinTxOutputIndex",
                 "Recipient",
-                "MaxFee",
                 "Amount",
-                "DepositVersion",
                 "LastUpdateBlockHash",
                 "ReclaimScript",
                 "DepositScript",
             ]
+        });
+
+        // Project the full deposit so future response fields do not require another
+        // index replacement.
+        const byStatusV2IndexName: string = "DepositStatusV2";
+        table.addGlobalSecondaryIndex({
+            indexName: byStatusV2IndexName,
+            partitionKey: {
+                name: 'OpStatus',
+                type: dynamodb.AttributeType.STRING
+            },
+            sortKey: {
+                name: 'LastUpdateHeight',
+                type: dynamodb.AttributeType.NUMBER
+            },
+            projectionType: dynamodb.ProjectionType.ALL,
         });
 
         const byRecipientIndexName: string = "DepositRecipient";
@@ -216,13 +230,27 @@ export class EmilyStack extends cdk.Stack {
                 "BitcoinTxid",
                 "BitcoinTxOutputIndex",
                 "OpStatus",
-                "MaxFee",
                 "Amount",
-                "DepositVersion",
                 "LastUpdateBlockHash",
                 "ReclaimScript",
                 "DepositScript",
             ]
+        });
+
+        // Project the full deposit so future response fields do not require another
+        // index replacement.
+        const byRecipientV2IndexName: string = "DepositRecipientV2";
+        table.addGlobalSecondaryIndex({
+            indexName: byRecipientV2IndexName,
+            partitionKey: {
+                name: 'Recipient',
+                type: dynamodb.AttributeType.STRING
+            },
+            sortKey: {
+                name: 'LastUpdateHeight',
+                type: dynamodb.AttributeType.NUMBER
+            },
+            projectionType: dynamodb.ProjectionType.ALL,
         });
 
         // Index to efficiently query deposits that comes from a specific address
@@ -243,13 +271,27 @@ export class EmilyStack extends cdk.Stack {
                 "BitcoinTxOutputIndex",
                 "Recipient",
                 "OpStatus",
-                "MaxFee",
                 "Amount",
-                "DepositVersion",
                 "LastUpdateBlockHash",
                 "ReclaimScript",
                 "DepositScript",
             ]
+        });
+
+        // Project the full deposit so future response fields do not require another
+        // index replacement.
+        const byReclaimPubkeysHashV2IndexName: string = "DepositReclaimPubkeysHashIndexV2";
+        table.addGlobalSecondaryIndex({
+            indexName: byReclaimPubkeysHashV2IndexName,
+            partitionKey: {
+                name: 'ReclaimPubkeysHash',
+                type: dynamodb.AttributeType.STRING
+            },
+            sortKey: {
+                name: 'LastUpdateHeight',
+                type: dynamodb.AttributeType.NUMBER
+            },
+            projectionType: dynamodb.ProjectionType.ALL,
         });
         return table;
     }
