@@ -30,9 +30,12 @@ use bitcoincore_rpc_json::Utxo;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use clarity::vm::Value as ClarityValue;
+use clarity::vm::types::PrincipalData;
 use clarity::vm::types::SequenceData;
+use clarity::vm::types::StandardPrincipalData;
 use emily_client::apis::deposit_api;
 use lru::LruCache;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use sbtc::testing::containers::BitcoinContainer;
 use sbtc::testing::containers::TestContainersBuilder;
 use sbtc::testing::emily::EmilyTables;
@@ -50,23 +53,34 @@ use signer::network::in_memory2::SignerNetwork;
 use signer::network::in_memory2::WanNetwork;
 use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::MockStacksInteract;
+use signer::stacks::contracts::AcceptWithdrawalV1;
 use signer::stacks::contracts::AsContractCall as _;
 use signer::stacks::contracts::CompleteDepositV1;
 use signer::storage::DbRead as _;
+use signer::storage::DbWrite as _;
+use signer::storage::model::StacksTxId;
+use signer::storage::model::WithdrawalRequest;
 use signer::storage::postgres::PgStore;
 use signer::testing;
 use signer::testing::btc::build_emily_request;
 use signer::testing::btc::get_canonical_chain_tip;
 use signer::testing::context::*;
+use signer::testing::storage::DbReadTestExt as _;
 use signer::transaction_coordinator::TxCoordinatorEventLoop;
 use signer::transaction_signer::BITCOIN_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::TxSignerEventLoop;
 use signer::util::Sleep;
+use testing_emily_client::apis::chainstate_api;
+use testing_emily_client::apis::withdrawal_api;
+use testing_emily_client::models::Chainstate;
+use testing_emily_client::models::CreateWithdrawalRequestBody;
+use testing_emily_client::models::WithdrawalParameters;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::TryRecvError;
 
 use crate::containers::BitcoinContainerExt as _;
+use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::backfill_bitcoin_blocks;
 use crate::setup::clean_emily_setup;
 use crate::setup::new_emily_setup;
@@ -85,7 +99,7 @@ type Signer = (
     SignerNetwork,
 );
 
-/// The sweep a complete-deposit call points at.
+/// The sweep a complete-deposit or accept-withdrawal call points at.
 #[derive(Debug, PartialEq, Eq)]
 struct SweepRef {
     txid: Txid,
@@ -310,6 +324,56 @@ impl<'a> Harness<'a> {
         }
     }
 
+    /// Records a withdrawal request as the stacks event observer would.
+    async fn submit_withdrawal(&self, recipient: &Recipient, amount: u64) -> u64 {
+        let (_, db, _, _) = self.signers.first().unwrap();
+        let (bitcoin_chain_tip, stacks_chain_tip) = db.get_chain_tips().await;
+        let request = WithdrawalRequest {
+            request_id: 1,
+            bitcoin_block_height: bitcoin_chain_tip.block_height,
+            amount,
+            block_hash: stacks_chain_tip,
+            recipient: recipient.script_pubkey.clone().into(),
+            max_fee: 10_000,
+            txid: StacksTxId::from([1; 32]),
+            sender_address: PrincipalData::from(StandardPrincipalData::transient()).into(),
+        };
+        for (_, db, _, _) in &self.signers {
+            db.write_withdrawal_request(&request).await.unwrap();
+        }
+
+        let emily_config = self.emily_client.config().as_testing();
+        let stacks_block_height = *db
+            .get_stacks_block(&stacks_chain_tip)
+            .await
+            .unwrap()
+            .unwrap()
+            .block_height;
+        let chainstate = Chainstate {
+            stacks_block_hash: stacks_chain_tip.to_string(),
+            stacks_block_height,
+            bitcoin_block_height: Some(Some(0)),
+        };
+        chainstate_api::set_chainstate(&emily_config, chainstate)
+            .await
+            .unwrap();
+        let body = CreateWithdrawalRequestBody {
+            amount,
+            parameters: Box::new(WithdrawalParameters { max_fee: request.max_fee }),
+            recipient: request.recipient.to_string(),
+            request_id: request.request_id,
+            sender: request.sender_address.to_string(),
+            stacks_block_hash: request.block_hash.to_string(),
+            stacks_block_height,
+            txid: request.txid.to_string(),
+        };
+        withdrawal_api::create_withdrawal(&emily_config, body)
+            .await
+            .unwrap();
+
+        request.request_id
+    }
+
     /// Mines up to `max_blocks` blocks until a mempool tx spends `outpoint`.
     async fn mine_until_spent(&self, outpoint: OutPoint, max_blocks: u64) -> Txid {
         for _ in 0..max_blocks {
@@ -411,6 +475,35 @@ fn drain_complete_deposits(
             block_hash: BlockHash::from_byte_array(le_buffer(&args[4])),
             block_height: uint(&args[5]) as u64,
         });
+    }
+}
+
+/// Drains submitted stacks txs into the sweeps each accept-withdrawal points at.
+fn drain_accepted_withdrawals(
+    stacks_txs: &mut broadcast::Receiver<StacksTransaction>,
+) -> HashMap<u64, Vec<SweepRef>> {
+    let mut sweeps: HashMap<u64, Vec<SweepRef>> = HashMap::new();
+    loop {
+        let tx = match stacks_txs.try_recv() {
+            Ok(tx) => tx,
+            Err(TryRecvError::Empty) => return sweeps,
+            Err(error) => panic!("missed stacks transactions: {error}"),
+        };
+        let TransactionPayload::ContractCall(call) = &tx.payload else {
+            continue;
+        };
+        if call.function_name.as_str() != AcceptWithdrawalV1::FUNCTION_NAME {
+            continue;
+        }
+        let args = &call.function_args;
+        sweeps
+            .entry(uint(&args[0]) as u64)
+            .or_default()
+            .push(SweepRef {
+                txid: Txid::from_byte_array(le_buffer(&args[1])),
+                block_hash: BlockHash::from_byte_array(le_buffer(&args[5])),
+                block_height: uint(&args[6]) as u64,
+            });
     }
 }
 
@@ -623,6 +716,63 @@ async fn swept_deposit_double_spent_on_new_branch() {
         [harness.sweep_ref(other_sweep_txid, chain_tip)]
     );
     assert!(!minted.contains_key(&deposit.outpoint), "{minted:?}");
+
+    harness.cleanup().await;
+}
+
+/// A withdrawal's sweep is reorged out and left in the mempool. The recipient
+/// must be paid once, and accepted against the sweep's new block.
+#[tokio::test]
+async fn withdrawal_sweep_left_out_of_new_branch() {
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let harness = Harness::new(bitcoin, 0).await;
+    let mut stacks_txs = harness.stacks_txs.resubscribe();
+
+    let recipient = Recipient::new(AddressType::P2tr);
+    let amount = 50_000;
+    let request_id = harness.submit_withdrawal(&recipient, amount).await;
+    let sweep_txid = harness
+        .mine_until_spent(
+            harness.donation,
+            WITHDRAWAL_MIN_CONFIRMATIONS + SWEEP_SLACK_BLOCKS,
+        )
+        .await;
+    let sweep_block = harness.mine().await;
+    assert_eq!(recipient.get_balance(harness.rpc).to_sat(), amount);
+    let accepted = drain_accepted_withdrawals(&mut stacks_txs);
+    assert_eq!(
+        accepted[&request_id],
+        [harness.sweep_ref(sweep_txid, sweep_block)]
+    );
+
+    // A longer empty branch leaves the sweep in the mempool.
+    harness.rpc.invalidate_block(&sweep_block).unwrap();
+    harness.generate_block_with(&[]);
+    let chain_tip = harness.generate_block_with(&[]);
+    harness.assert_orphaned(&sweep_block);
+    harness.wait_for_tenure(chain_tip).await;
+
+    assert_eq!(recipient.get_balance(harness.rpc), Amount::ZERO);
+    harness
+        .assert_signer_utxo(chain_tip, harness.donation)
+        .await;
+    let accepted = drain_accepted_withdrawals(&mut stacks_txs);
+    assert!(!accepted.contains_key(&request_id), "{accepted:?}");
+    let pending_txid = harness
+        .mempool_spender(harness.donation)
+        .expect("nothing spends the signers' UTXO");
+
+    let chain_tip = harness.mine().await;
+    assert_eq!(recipient.get_balance(harness.rpc).to_sat(), amount);
+    harness
+        .assert_signer_utxo(chain_tip, OutPoint::new(pending_txid, 0))
+        .await;
+    let accepted = drain_accepted_withdrawals(&mut stacks_txs);
+    assert_eq!(
+        accepted[&request_id],
+        [harness.sweep_ref(pending_txid, chain_tip)]
+    );
 
     harness.cleanup().await;
 }
