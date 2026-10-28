@@ -10,12 +10,23 @@ use std::time::Duration;
 
 use bitcoin::Address;
 use bitcoin::AddressType;
+use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::OutPoint;
+use bitcoin::ScriptBuf;
+use bitcoin::Sequence;
+use bitcoin::Transaction;
+use bitcoin::TxIn;
+use bitcoin::TxOut;
 use bitcoin::Txid;
+use bitcoin::Witness;
+use bitcoin::absolute::LockTime;
+use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::hashes::Hash as _;
+use bitcoin::transaction::Version;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi as _;
+use bitcoincore_rpc_json::Utxo;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use clarity::vm::Value as ClarityValue;
@@ -25,6 +36,7 @@ use lru::LruCache;
 use sbtc::testing::containers::BitcoinContainer;
 use sbtc::testing::containers::TestContainersBuilder;
 use sbtc::testing::emily::EmilyTables;
+use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
 use secp256k1::Keypair;
@@ -83,6 +95,8 @@ struct SweepRef {
 
 struct Deposit {
     outpoint: OutPoint,
+    /// The UTXO the deposit transaction spends.
+    funding: Utxo,
 }
 
 /// Three signers that have run DKG and own a confirmed donation.
@@ -279,7 +293,7 @@ impl<'a> Harness<'a> {
         let (deposit_tx, deposit_request, deposit_info) = make_deposit_request(
             depositor,
             amount,
-            funding,
+            funding.clone(),
             amount / 2,
             self.aggregate_key.into(),
         );
@@ -292,6 +306,7 @@ impl<'a> Harness<'a> {
 
         Deposit {
             outpoint: deposit_request.outpoint,
+            funding,
         }
     }
 
@@ -461,6 +476,153 @@ async fn deposit_and_sweep_reorged_out() {
         .expect("the deposit was not minted again");
     let reorged = harness.sweep_ref(sweep_txid, new_sweep_block);
     assert!(sweeps.iter().all(|sweep| sweep == &reorged), "{sweeps:?}");
+
+    harness.cleanup().await;
+}
+
+/// The latest sweep is reorged out and left in the mempool. The signers must
+/// fall back to the previous sweep's output, then sweep and mint again.
+#[tokio::test]
+async fn latest_sweep_left_out_of_new_branch() {
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let harness = Harness::new(bitcoin, 2).await;
+    let mut stacks_txs = harness.stacks_txs.resubscribe();
+
+    harness.submit_deposit(&harness.depositors[0]).await;
+    let first_sweep = OutPoint::new(
+        harness
+            .mine_until_spent(harness.donation, 1 + SWEEP_SLACK_BLOCKS)
+            .await,
+        0,
+    );
+    harness.mine().await;
+
+    let deposit = harness.submit_deposit(&harness.depositors[1]).await;
+    let second_sweep_txid = harness
+        .mine_until_spent(first_sweep, 1 + SWEEP_SLACK_BLOCKS)
+        .await;
+    let second_sweep_block = harness.mine().await;
+    harness
+        .assert_signer_utxo(second_sweep_block, OutPoint::new(second_sweep_txid, 0))
+        .await;
+    let minted = drain_complete_deposits(&mut stacks_txs);
+    let second_sweep = harness.sweep_ref(second_sweep_txid, second_sweep_block);
+    assert_eq!(minted[&deposit.outpoint], [second_sweep]);
+
+    // A longer empty branch leaves the sweep in the mempool.
+    harness.rpc.invalidate_block(&second_sweep_block).unwrap();
+    harness.generate_block_with(&[]);
+    let chain_tip = harness.generate_block_with(&[]);
+    harness.assert_orphaned(&second_sweep_block);
+    harness.wait_for_tenure(chain_tip).await;
+
+    harness.assert_signer_utxo(chain_tip, first_sweep).await;
+    let minted = drain_complete_deposits(&mut stacks_txs);
+    assert!(!minted.contains_key(&deposit.outpoint), "{minted:?}");
+    let pending_txid = harness
+        .mempool_spender(first_sweep)
+        .expect("nothing spends the signers' UTXO");
+    let pending = harness
+        .rpc
+        .get_raw_transaction(&pending_txid, None)
+        .unwrap();
+    assert!(
+        pending
+            .input
+            .iter()
+            .any(|tx_in| tx_in.previous_output == deposit.outpoint)
+    );
+
+    let chain_tip = harness.mine().await;
+    harness
+        .assert_signer_utxo(chain_tip, OutPoint::new(pending_txid, 0))
+        .await;
+    let minted = drain_complete_deposits(&mut stacks_txs);
+    assert_eq!(
+        minted[&deposit.outpoint],
+        [harness.sweep_ref(pending_txid, chain_tip)]
+    );
+
+    harness.cleanup().await;
+}
+
+/// A swept deposit is double-spent on the new branch. The signers must not
+/// mint it, must fall back to their previous UTXO, and keep sweeping.
+#[tokio::test]
+async fn swept_deposit_double_spent_on_new_branch() {
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let harness = Harness::new(bitcoin, 2).await;
+    let mut stacks_txs = harness.stacks_txs.resubscribe();
+
+    let deposit = harness.submit_deposit(&harness.depositors[0]).await;
+    let sweep_txid = harness
+        .mine_until_spent(harness.donation, 1 + SWEEP_SLACK_BLOCKS)
+        .await;
+    let deposit_block = harness
+        .rpc
+        .get_raw_transaction_info(&deposit.outpoint.txid, None)
+        .unwrap()
+        .blockhash
+        .unwrap();
+    let sweep_block = harness.mine().await;
+    let minted = drain_complete_deposits(&mut stacks_txs);
+    assert_eq!(
+        minted[&deposit.outpoint],
+        [harness.sweep_ref(sweep_txid, sweep_block)]
+    );
+
+    // The new branch spends the deposit's input elsewhere.
+    harness.rpc.invalidate_block(&deposit_block).unwrap();
+    let depositor = &harness.depositors[0];
+    let mut double_spend = Transaction {
+        version: Version::TWO,
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::new(deposit.funding.txid, deposit.funding.vout),
+            sequence: Sequence::ZERO,
+            script_sig: ScriptBuf::new(),
+            witness: Witness::new(),
+        }],
+        output: vec![TxOut {
+            value: deposit.funding.amount - Amount::from_sat(10_000),
+            script_pubkey: depositor.address.script_pubkey(),
+        }],
+    };
+    regtest::p2tr_sign_transaction(
+        &mut double_spend,
+        0,
+        std::slice::from_ref(&deposit.funding),
+        &depositor.keypair,
+    );
+    harness.generate_block_with(&[serialize_hex(&double_spend)]);
+    let chain_tip = harness.generate_block_with(&[]);
+    harness.assert_orphaned(&sweep_block);
+    assert!(harness.mempool_spender(harness.donation).is_none());
+    harness.wait_for_tenure(chain_tip).await;
+
+    harness
+        .assert_signer_utxo(chain_tip, harness.donation)
+        .await;
+    let minted = drain_complete_deposits(&mut stacks_txs);
+    assert!(!minted.contains_key(&deposit.outpoint), "{minted:?}");
+
+    // Other deposits are still swept and minted.
+    let other = harness.submit_deposit(&harness.depositors[1]).await;
+    let other_sweep_txid = harness
+        .mine_until_spent(harness.donation, 1 + SWEEP_SLACK_BLOCKS)
+        .await;
+    let chain_tip = harness.mine().await;
+    harness
+        .assert_signer_utxo(chain_tip, OutPoint::new(other_sweep_txid, 0))
+        .await;
+    let minted = drain_complete_deposits(&mut stacks_txs);
+    assert_eq!(
+        minted[&other.outpoint],
+        [harness.sweep_ref(other_sweep_txid, chain_tip)]
+    );
+    assert!(!minted.contains_key(&deposit.outpoint), "{minted:?}");
 
     harness.cleanup().await;
 }
