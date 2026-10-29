@@ -2345,6 +2345,7 @@ mod tests {
     use model::SignerVote;
     use more_asserts::assert_ge;
     use more_asserts::assert_gt;
+    use proptest::prelude::*;
     use rand::distributions::Distribution as _;
     use rand::distributions::Uniform;
     use rand::rngs::OsRng;
@@ -2629,12 +2630,17 @@ mod tests {
 
     /// Return a v2 deposit locked by `key_set`.
     fn v2_deposit(key_set: &SignerKeySet) -> DepositRequest {
+        v2_deposit_with_max_fee(key_set, 1_000)
+    }
+
+    /// Return a v2 deposit locked by `key_set` with the given maximum fee.
+    fn v2_deposit_with_max_fee(key_set: &SignerKeySet, max_fee: u64) -> DepositRequest {
         let recipient = PrincipalData::from(StacksAddress::burn_address(false));
         let inputs = DepositScriptInputsV2::new(
             key_set.public_keys().clone(),
             key_set.signatures_required(),
             recipient.clone(),
-            1_000,
+            max_fee,
         )
         .unwrap();
         let reclaim_script = ScriptBuf::new_op_return([]);
@@ -3119,7 +3125,7 @@ mod tests {
         let combined_assessed_fee = combined.tx_fee.div_ceil(2);
         assert_gt!(combined_assessed_fee, withdrawal.max_fee);
 
-        let requests = SbtcRequests {
+        let mut requests = SbtcRequests {
             deposits: vec![deposit],
             withdrawals: vec![withdrawal],
             signer_state,
@@ -3136,6 +3142,12 @@ mod tests {
             transactions[0].requests[0],
             RequestRef::Deposit(_)
         ));
+
+        // The bound is computed over the candidates before any request is
+        // filtered. Consequently, the larger deposit still sets the bound
+        // for the withdrawal even when the deposit itself cannot pay it.
+        requests.deposits[0].max_fee = 0;
+        assert!(requests.construct_transactions().unwrap().is_empty());
     }
 
     /// Even fee admission accounts for the signer input created by the first
@@ -3185,6 +3197,271 @@ mod tests {
 
         requests.signer_state.output_key_set = SignerUtxoKeySet::V1(signer_public_key);
         assert_eq!(requests.construct_transactions().unwrap().len(), 2);
+    }
+
+    /// Generated inputs for one deposit in the even-fee package property test.
+    #[derive(Debug, Clone)]
+    struct EvenFeeDepositSpec {
+        /// The deposit amount in satoshis.
+        amount: u64,
+        /// Whether the request has enough fee budget to pass admission.
+        can_pay_fee: bool,
+        /// Whether the deposit uses the v2 signing path.
+        is_v2: bool,
+        /// The signers that voted against the request.
+        signer_bitmap: u16,
+    }
+
+    impl From<(u64, bool, bool, u16)> for EvenFeeDepositSpec {
+        /// Convert the values produced by the deposit strategy into a named
+        /// test input.
+        fn from((amount, can_pay_fee, is_v2, signer_bitmap): (u64, bool, bool, u16)) -> Self {
+            Self {
+                amount,
+                can_pay_fee,
+                is_v2,
+                signer_bitmap,
+            }
+        }
+    }
+
+    impl EvenFeeDepositSpec {
+        /// Construct the deposit request described by this generated input.
+        fn to_request(&self, signer_key_set: &SignerKeySet) -> DepositRequest {
+            let max_fee = if self.can_pay_fee { 100_000 } else { 0 };
+            let mut deposit = if self.is_v2 {
+                v2_deposit_with_max_fee(signer_key_set, max_fee)
+            } else {
+                create_deposit(self.amount, max_fee, u128::from(self.signer_bitmap))
+            };
+            deposit.outpoint = generate_outpoint(self.amount, 1);
+            deposit.amount = self.amount;
+            deposit.max_fee = max_fee;
+            deposit.signer_bitmap = BitArray::new(u128::from(self.signer_bitmap).to_le_bytes());
+            deposit
+        }
+    }
+
+    /// Generated inputs for one withdrawal in the even-fee package property
+    /// test.
+    #[derive(Debug, Clone)]
+    struct EvenFeeWithdrawalSpec {
+        /// The withdrawal amount in satoshis.
+        amount: u64,
+        /// Whether the request has enough fee budget to pass admission.
+        can_pay_fee: bool,
+        /// The signers that voted against the request.
+        signer_bitmap: u16,
+    }
+
+    impl From<(u64, bool, u16)> for EvenFeeWithdrawalSpec {
+        /// Convert the values produced by the withdrawal strategy into a
+        /// named test input.
+        fn from((amount, can_pay_fee, signer_bitmap): (u64, bool, u16)) -> Self {
+            Self {
+                amount,
+                can_pay_fee,
+                signer_bitmap,
+            }
+        }
+    }
+
+    impl EvenFeeWithdrawalSpec {
+        /// Construct the withdrawal request described by this generated input.
+        fn to_request(&self, request_id: u64) -> WithdrawalRequest {
+            let max_fee = if self.can_pay_fee { 100_000 } else { 0 };
+            create_withdrawal(self.amount, max_fee, u128::from(self.signer_bitmap)).wid(request_id)
+        }
+    }
+
+    /// All generated inputs for one run of the even-fee package property.
+    #[derive(Debug, Clone)]
+    struct EvenFeePackageTestCase {
+        /// The generated deposit candidates.
+        deposits: Vec<EvenFeeDepositSpec>,
+        /// The generated withdrawal candidates.
+        withdrawals: Vec<EvenFeeWithdrawalSpec>,
+        /// The target fee rate in satoshis per virtual byte.
+        fee_rate: u16,
+        /// Whether the current signer input uses the v2 signing path.
+        current_signer_input_is_v2: bool,
+        /// Whether the next signer input uses the v2 signing path.
+        next_signer_input_is_v2: bool,
+        /// The maximum deposits allowed in one Bitcoin transaction.
+        max_deposits_per_bitcoin_tx: u16,
+    }
+
+    /// Raw values produced by the combined even-fee package strategy.
+    type GeneratedEvenFeePackage = (
+        (Vec<EvenFeeDepositSpec>, Vec<EvenFeeWithdrawalSpec>),
+        u16,
+        (bool, bool),
+        u16,
+    );
+
+    impl EvenFeePackageTestCase {
+        /// Convert the combined strategy output into a named test case.
+        fn from_generated(generated: GeneratedEvenFeePackage) -> Self {
+            let (
+                (deposits, withdrawals),
+                fee_rate,
+                (current_signer_input_is_v2, next_signer_input_is_v2),
+                max_deposits_per_bitcoin_tx,
+            ) = generated;
+            let mut test_case = Self {
+                deposits,
+                withdrawals,
+                fee_rate,
+                current_signer_input_is_v2,
+                next_signer_input_is_v2,
+                max_deposits_per_bitcoin_tx,
+            };
+            test_case.ensure_payable_request();
+            test_case
+        }
+
+        /// Make at least one generated request pass the fee and vote checks so
+        /// that the property cannot pass vacuously with an empty package.
+        fn ensure_payable_request(&mut self) {
+            if let Some(spec) = self.deposits.first_mut() {
+                spec.can_pay_fee = true;
+                spec.signer_bitmap = 0;
+            } else if let Some(spec) = self.withdrawals.first_mut() {
+                spec.can_pay_fee = true;
+                spec.signer_bitmap = 0;
+            }
+        }
+    }
+
+    /// Generate complete, nonempty cases for the even-fee package property.
+    fn even_fee_package_test_cases() -> impl Strategy<Value = EvenFeePackageTestCase> {
+        let amount_range = 200_000_u64..2_000_000;
+        let deposit = (amount_range, any::<bool>(), any::<bool>(), any::<u16>())
+            .prop_map(EvenFeeDepositSpec::from);
+        let amount_range = 100_000_u64..1_000_000;
+        let withdrawal =
+            (amount_range, any::<bool>(), any::<u16>()).prop_map(EvenFeeWithdrawalSpec::from);
+        let requests = (
+            prop::collection::vec(deposit, 0..10),
+            prop::collection::vec(withdrawal, 0..10),
+        )
+            .prop_filter(
+                "a package needs at least one request",
+                |(deposits, withdrawals)| !deposits.is_empty() || !withdrawals.is_empty(),
+            );
+        let signer_input_versions = (any::<bool>(), any::<bool>());
+
+        (requests, 1_u16..100, signer_input_versions, 1_u16..=4)
+            .prop_map(EvenFeePackageTestCase::from_generated)
+    }
+
+    /// Assert that every request in an even-fee transaction can pay the fee
+    /// share that validation will assess to it.
+    fn assert_even_fee_package_respects_max_fees(transactions: &[UnsignedTransaction<'_>]) {
+        for transaction in transactions {
+            let transaction_fee = Amount::from_sat(transaction.tx_fee);
+            let expected_share = transaction
+                .tx_fee
+                .div_ceil(transaction.requests.len() as u64);
+            let mut withdrawal_vout = 2;
+
+            for request in transaction.requests.iter() {
+                let (assessed_fee, max_fee) = match request {
+                    RequestRef::Deposit(deposit) => (
+                        FeeAssessment::assess_input_fee(
+                            transaction,
+                            &deposit.outpoint,
+                            transaction_fee,
+                        )
+                        .unwrap()
+                        .to_sat(),
+                        deposit.max_fee.min(deposit.amount),
+                    ),
+                    RequestRef::Withdrawal(withdrawal) => {
+                        let assessed_fee = FeeAssessment::assess_output_fee(
+                            transaction,
+                            withdrawal_vout,
+                            transaction_fee,
+                        )
+                        .unwrap()
+                        .to_sat();
+                        withdrawal_vout += 1;
+                        (assessed_fee, withdrawal.max_fee)
+                    }
+                };
+
+                assert_eq!(assessed_fee, expected_share);
+                more_asserts::assert_le!(assessed_fee, max_fee);
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        /// Across varying request sets, signer-input versions, package sizes,
+        /// and RBF state, every constructed request can pay its even fee share.
+        #[test]
+        fn even_fee_packages_respect_every_request_max_fee(
+            test_case in even_fee_package_test_cases(),
+        ) {
+            // This annotation helps IDEs that cannot propagate the strategy's
+            // value type through the `proptest!` macro.
+            let test_case: EvenFeePackageTestCase = test_case;
+
+            let signer_public_key = generate_x_only_public_key();
+            let signer_key_set =
+                SignerKeySet::new((0..15).map(|_| generate_x_only_public_key()), 11).unwrap();
+            let current_key_set = if test_case.current_signer_input_is_v2 {
+                SignerUtxoKeySet::V2(signer_key_set.clone())
+            } else {
+                SignerUtxoKeySet::V1(signer_public_key)
+            };
+            let output_key_set = if test_case.next_signer_input_is_v2 {
+                SignerUtxoKeySet::V2(signer_key_set.clone())
+            } else {
+                SignerUtxoKeySet::V1(signer_public_key)
+            };
+
+            let deposits: Vec<DepositRequest> = test_case
+                .deposits
+                .iter()
+                .map(|spec| spec.to_request(&signer_key_set))
+                .collect();
+            let withdrawals: Vec<WithdrawalRequest> = test_case
+                .withdrawals
+                .iter()
+                .enumerate()
+                .map(|(index, spec)| spec.to_request(index as u64))
+                .collect();
+
+            for last_fees in [None, Some(Fees::new_unchecked(10_000, 500))] {
+                let requests = SbtcRequests {
+                    deposits: deposits.clone(),
+                    withdrawals: withdrawals.clone(),
+                    signer_state: SignerBtcState {
+                        utxo: SignerUtxo {
+                            outpoint: generate_outpoint(1_000_000_000, 0),
+                            amount: 1_000_000_000,
+                            key_set: current_key_set.clone(),
+                        },
+                        fee_rate: f64::from(test_case.fee_rate),
+                        output_key_set: output_key_set.clone(),
+                        last_fees,
+                        fee_assessment: FeeAssessmentMethod::Even,
+                        magic_bytes: *b"T3",
+                    },
+                    num_signers: 15,
+                    accept_threshold: 11,
+                    sbtc_limits: SbtcLimits::unlimited(),
+                    max_deposits_per_bitcoin_tx: test_case.max_deposits_per_bitcoin_tx,
+                };
+
+                let transactions = requests.construct_transactions().unwrap();
+                prop_assert!(!transactions.is_empty());
+                assert_even_fee_package_respects_max_fees(&transactions);
+            }
+        }
     }
 
     #[ignore = "this is for generating the MIN_BITCOIN_INPUT_VSIZE constant"]
