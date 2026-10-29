@@ -112,6 +112,13 @@ network = "regtest"
 # Environment: SIGNER_SIGNER__V2_SIGNING_BLOCK_HEIGHT
 v2_signing_block_height = 245
 
+# Bitcoin block height at which newly proposed sweeps split transaction
+# fees evenly across requests.
+#
+# Required: false
+# Environment: SIGNER_SIGNER__FEE_ASSESSMENT_BLOCK_HEIGHT
+fee_assessment_block_height = 245
+
 # Bitcoin height at which signers disable DKG and switch rotate-keys calls to
 # the v2 registry-key encoding. The height must not be lower than the effective
 # v2 signing height.

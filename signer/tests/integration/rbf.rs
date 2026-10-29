@@ -14,6 +14,7 @@ mod serial {
     use rand::distributions::Uniform;
     use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
     use signer::bitcoin::utxo::DepositRequest;
+    use signer::bitcoin::utxo::FeeAssessmentMethod;
     use signer::bitcoin::utxo::Fees;
     use signer::bitcoin::utxo::RequestRef;
     use signer::bitcoin::utxo::SbtcRequests;
@@ -225,6 +226,7 @@ mod serial {
                 },
                 fee_rate: ctx.initial_fee_rate,
                 last_fees: None,
+                fee_assessment: FeeAssessmentMethod::Proportional,
                 // The value here isn't important, but it matches what happens
                 // in Nakamoto testnet.
                 magic_bytes: *b"T3",

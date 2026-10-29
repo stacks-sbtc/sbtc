@@ -86,6 +86,7 @@ assert_matches.workspace = true
 bitcoincore-rpc.workspace = true
 mockito.workspace = true
 more-asserts.workspace = true
+proptest.workspace = true
 ripemd.workspace = true
 tempfile.workspace = true
 test-case.workspace = true

@@ -30,6 +30,7 @@ use sbtc::testing::regtest::Recipient;
 use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
+use signer::bitcoin::utxo::FeeAssessmentMethod;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
@@ -597,6 +598,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         signer_state: SignerBtcState {
             output_key_set: SignerUtxoKeySet::V1(signers_public_key),
             utxo: db.get_signer_utxo(&chain_tip).await.unwrap().unwrap(),
+            fee_assessment: FeeAssessmentMethod::Proportional,
             fee_rate: 10.0,
             last_fees: None,
             magic_bytes: *b"T3",
@@ -772,6 +774,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
                 amount: signers_amount,
                 key_set: SignerUtxoKeySet::V1(signers_public_key1),
             },
+            fee_assessment: FeeAssessmentMethod::Proportional,
             fee_rate: 2.0,
             // This ensures that the new signer UTXO is locked by the new
             // aggregate key.
