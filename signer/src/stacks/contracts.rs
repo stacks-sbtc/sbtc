@@ -45,6 +45,7 @@ use clarity::vm::types::TypeSignature;
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::bitcoin::BitcoinInteract as _;
+use crate::bitcoin::utxo::FeeAssessmentError;
 use crate::bitcoin::validation::WithdrawalRequestStatus;
 use crate::context::Context;
 use crate::error::Error;
@@ -502,15 +503,21 @@ impl CompleteDepositV1 {
             return Err(DepositErrorMsg::SweepTransactionReorged.into_error(req_ctx, self));
         }
         // 4. Check that the sweep transaction uses the indicated deposit
-        //    outpoint as an input.
-        //
-        // Okay great, we know that the sweep transaction exists on the
-        // canonical bitcoin blockchain, we just need to do a simple check
-        // of the transaction inputs.
-        let mut tx_inputs = sweep_tx.tx.input.iter();
-        if !tx_inputs.any(|tx_in| tx_in.previous_output == self.outpoint) {
-            return Err(DepositErrorMsg::MissingFromSweep.into_error(req_ctx, self));
-        }
+        //    outpoint as an input. Fee assessment also distinguishes a missing
+        //    input from missing RPC fee data or an invalid sweep OP_RETURN.
+        let assessed_fee = match sweep_tx.assess_input_fee(&self.outpoint) {
+            Ok(fee) => fee,
+            Err(FeeAssessmentError::InputNotFound) => {
+                return Err(DepositErrorMsg::MissingFromSweep.into_error(req_ctx, self));
+            }
+            Err(FeeAssessmentError::MissingTransactionFee) => {
+                return Err(Error::BitcoinTxMissingFields(sweep_tx.compute_txid()));
+            }
+            Err(FeeAssessmentError::InvalidOpReturn)
+            | Err(FeeAssessmentError::InvalidOutputIndex) => {
+                return Err(DepositErrorMsg::InvalidSweep.into_error(req_ctx, self));
+            }
+        };
 
         // 9. That the first input into the sweep transaction is the
         //    signers' UTXO.
@@ -529,11 +536,7 @@ impl CompleteDepositV1 {
             return Err(DepositErrorMsg::InvalidSweep.into_error(req_ctx, self));
         }
 
-        // A missing input or a malformed fee-assessment commitment makes
-        // the sweep invalid for this deposit.
-        sweep_tx
-            .assess_input_fee(&self.outpoint)
-            .ok_or_else(|| DepositErrorMsg::MissingFromSweep.into_error(req_ctx, self))
+        Ok(assessed_fee)
     }
 }
 
@@ -858,12 +861,19 @@ impl AcceptWithdrawalV1 {
             return Err(WithdrawalErrorMsg::SweepTransactionReorged.into_error(req_ctx, self));
         }
         // 4. That the sweep transaction has the UTXO indicated by the
-        //    outpoint.
-        //
-        // A reserved or missing output, or a malformed fee-assessment
-        // commitment, makes the sweep invalid for this withdrawal.
-        let Some(expected_fee) = sweep_tx.assess_output_fee(self.outpoint.vout as usize) else {
-            return Err(WithdrawalErrorMsg::UtxoMissingFromSweep.into_error(req_ctx, self));
+        //    outpoint. Fee assessment also distinguishes an invalid output
+        //    index from missing RPC fee data or an invalid sweep OP_RETURN.
+        let expected_fee = match sweep_tx.assess_output_fee(self.outpoint.vout as usize) {
+            Ok(fee) => fee,
+            Err(FeeAssessmentError::InvalidOutputIndex) => {
+                return Err(WithdrawalErrorMsg::UtxoMissingFromSweep.into_error(req_ctx, self));
+            }
+            Err(FeeAssessmentError::MissingTransactionFee) => {
+                return Err(Error::BitcoinTxMissingFields(sweep_tx.compute_txid()));
+            }
+            Err(FeeAssessmentError::InvalidOpReturn) | Err(FeeAssessmentError::InputNotFound) => {
+                return Err(WithdrawalErrorMsg::InvalidSweep.into_error(req_ctx, self));
+            }
         };
 
         // 8. That the fee matches the expected assessed fee for the output.

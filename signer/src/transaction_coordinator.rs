@@ -27,6 +27,7 @@ use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo;
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::DepositSigningKey;
+use crate::bitcoin::utxo::FeeAssessmentError;
 use crate::bitcoin::utxo::FeeAssessmentMethod;
 use crate::bitcoin::utxo::SignatureCollector;
 use crate::bitcoin::utxo::SignerUtxoKeySet;
@@ -1327,9 +1328,17 @@ where
             })?;
 
         let outpoint = req.deposit_outpoint();
-        let assessed_bitcoin_fee = tx_info
-            .assess_input_fee(&outpoint)
-            .ok_or_else(|| Error::OutPointMissing(outpoint))?;
+        let assessed_bitcoin_fee =
+            tx_info
+                .assess_input_fee(&outpoint)
+                .map_err(|error| match error {
+                    FeeAssessmentError::InputNotFound => Error::OutPointMissing(outpoint),
+                    FeeAssessmentError::MissingTransactionFee => {
+                        Error::BitcoinTxMissingFields(tx_info.compute_txid())
+                    }
+                    FeeAssessmentError::InvalidOpReturn => Error::SbtcTxOpReturnFormatError,
+                    FeeAssessmentError::InvalidOutputIndex => Error::SbtcTxMalformed,
+                })?;
 
         // TODO: we should validate the contract call before asking others
         // to sign it.
@@ -1388,9 +1397,19 @@ where
         let outpoint = req.withdrawal_outpoint();
         let qualified_id = req.qualified_id();
 
-        let assessed_bitcoin_fee = tx_info
-            .assess_output_fee(outpoint.vout as usize)
-            .ok_or_else(|| Error::VoutMissing(outpoint.txid, outpoint.vout))?;
+        let assessed_bitcoin_fee =
+            tx_info
+                .assess_output_fee(outpoint.vout as usize)
+                .map_err(|error| match error {
+                    FeeAssessmentError::InvalidOutputIndex => {
+                        Error::VoutMissing(outpoint.txid, outpoint.vout)
+                    }
+                    FeeAssessmentError::MissingTransactionFee => {
+                        Error::BitcoinTxMissingFields(tx_info.compute_txid())
+                    }
+                    FeeAssessmentError::InvalidOpReturn => Error::SbtcTxOpReturnFormatError,
+                    FeeAssessmentError::InputNotFound => Error::SbtcTxMalformed,
+                })?;
 
         let accept_withdrawal_v1 = AcceptWithdrawalV1 {
             id: qualified_id,

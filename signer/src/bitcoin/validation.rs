@@ -931,7 +931,7 @@ impl DepositRequestReport {
             }
         }
 
-        let Some(assessed_fee) = tx.assess_input_fee(&self.outpoint, tx_fee) else {
+        let Ok(assessed_fee) = tx.assess_input_fee(&self.outpoint, tx_fee) else {
             return InputValidationResult::Unknown;
         };
 
@@ -1099,7 +1099,7 @@ impl WithdrawalRequestReport {
             return WithdrawalValidationResult::RequestExpired;
         }
 
-        let Some(assessed_fee) = tx.assess_output_fee(output_index, tx_fee) else {
+        let Ok(assessed_fee) = tx.assess_output_fee(output_index, tx_fee) else {
             // If we hit this, then there is a programming error somewhere
             return WithdrawalValidationResult::Unknown;
         };

@@ -98,16 +98,21 @@ pub const SOLO_DEPOSIT_TX_VSIZE: f64 = 249.0;
 /// variability of output sizes. The signers' input is a v1 key-path input.
 pub const BASE_WITHDRAWAL_TX_VSIZE: f64 = 137.0;
 
-/// This constant represents the maximum virtual size (in vBytes) of a BTC
-/// transaction excluding withdrawals outputs and deposit inputs.
+/// The absolute maximum virtual size (in vBytes) of a BTC transaction
+/// excluding withdrawal outputs and deposit inputs.
 ///
-/// The largest signers' input is a v2 script-path input for a 16-of-16
-/// key set, which has a weight of 1788 weight units, or 447 vBytes.
-pub const MAX_BASE_TX_VSIZE: f64 = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + 447.0;
+/// The package-size limiter needs a hard bound for every valid key set. A v2
+/// script-path signer input for a 16-of-16 key set has a weight of 1788 weight
+/// units, or 447 vBytes.
+pub const ABSOLUTE_MAX_BASE_TX_VSIZE: f64 = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + 447.0;
 
-/// The largest virtual-size contribution from a single request. This is a
-/// v2 deposit input for the maximum 16-of-16 signer set.
-const MAX_REQUEST_VSIZE: f64 = 473.0;
+/// The base transaction vsize for the expected largest 11-of-15 signer set.
+#[cfg(test)]
+const REFERENCE_11_OF_15_BASE_TX_VSIZE: f64 = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + 359.0;
+
+/// The deposit-input vsize for the expected largest 11-of-15 signer set.
+#[cfg(test)]
+const REFERENCE_11_OF_15_DEPOSIT_INPUT_VSIZE: u64 = 385;
 
 /// The virtual size (in vBytes) of the parts of a sweep transaction that
 /// don't depend on its requests or its signers' input: the transaction
@@ -221,6 +226,10 @@ pub struct RequestPreprocessor<'a> {
     last_fees: Option<Fees>,
     /// The virtual size of the signers' input.
     signer_input_vsize: f64,
+    /// The largest virtual size of a signer input in the transaction package.
+    max_signer_input_vsize: f64,
+    /// The largest virtual-size contribution from a candidate request.
+    max_request_vsize: u64,
     /// The rule used to apportion transaction fees to requests.
     fee_assessment: FeeAssessmentMethod,
 }
@@ -236,6 +245,8 @@ impl<'a> RequestPreprocessor<'a> {
             // At this time, this function is only used to test v1
             // functionality, so we assume a v1 signers' input.
             signer_input_vsize: BASE_WITHDRAWAL_TX_VSIZE - BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT,
+            max_signer_input_vsize: BASE_WITHDRAWAL_TX_VSIZE - BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT,
+            max_request_vsize: 0,
             fee_assessment: FeeAssessmentMethod::Proportional,
         }
     }
@@ -243,16 +254,20 @@ impl<'a> RequestPreprocessor<'a> {
     /// Return the virtual size used to determine whether a request can pay
     /// its assessed fee.
     ///
-    /// Proportional fees use the request's solo-sweep size. Even fees use
-    /// the largest possible solo sweep because a request can share a
-    /// transaction with a larger request and therefore pay a larger share
-    /// than its own solo-sweep fee.
+    /// Proportional fees use the request's solo-sweep size. Even fees use the
+    /// largest signer input and request among the package candidates because a
+    /// request can share a transaction with a larger request and therefore pay
+    /// a larger share than its own solo-sweep fee.
     fn solo_tx_vsize(&self, request_vsize: u64) -> f64 {
         match self.fee_assessment {
             FeeAssessmentMethod::Proportional => {
                 BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + self.signer_input_vsize + request_vsize as f64
             }
-            FeeAssessmentMethod::Even => MAX_BASE_TX_VSIZE + MAX_REQUEST_VSIZE,
+            FeeAssessmentMethod::Even => {
+                BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT
+                    + self.max_signer_input_vsize
+                    + self.max_request_vsize.max(request_vsize) as f64
+            }
         }
     }
 
@@ -425,11 +440,16 @@ impl SbtcRequests {
             return Ok(Vec::new());
         }
 
+        let signer_input_vsize = self.signer_state.utxo.input_vsize();
+        let max_signer_input_vsize =
+            signer_input_vsize.max(self.signer_state.output_key_set.input_vsize());
         let request_preprocessor = RequestPreprocessor {
             sbtc_limits: &self.sbtc_limits,
             fee_rate: self.signer_state.fee_rate,
             last_fees: self.signer_state.last_fees,
-            signer_input_vsize: self.signer_state.utxo.input_vsize() as f64,
+            signer_input_vsize: signer_input_vsize as f64,
+            max_signer_input_vsize: max_signer_input_vsize as f64,
+            max_request_vsize: self.max_request_vsize(),
             fee_assessment: self.signer_state.fee_assessment,
         };
         let deposits = request_preprocessor
@@ -466,6 +486,17 @@ impl SbtcRequests {
 
     fn reject_capacity(&self) -> u32 {
         self.num_signers.saturating_sub(self.accept_threshold) as u32
+    }
+
+    /// Return the largest virtual-size contribution among all candidate
+    /// deposits and withdrawals.
+    fn max_request_vsize(&self) -> u64 {
+        self.deposits
+            .iter()
+            .map(DepositRequest::vsize)
+            .chain(self.withdrawals.iter().map(WithdrawalRequest::vsize))
+            .max()
+            .unwrap_or_default()
     }
 }
 
@@ -1067,6 +1098,16 @@ impl SignerUtxoKeySet {
             Self::V1(public_key) => PublicKeyXOnly::from(*public_key).into(),
             Self::V2(key_set) => key_set.id().into(),
         }
+    }
+
+    /// Return the virtual size of a signer input controlled by this key set.
+    fn input_vsize(&self) -> u64 {
+        SignerUtxo {
+            outpoint: OutPoint::null(),
+            amount: 0,
+            key_set: self.clone(),
+        }
+        .input_vsize()
     }
 }
 
@@ -1813,7 +1854,7 @@ pub trait BitcoinInputsOutputs {
 /// A trait for figuring out the fees assessed to deposit prevouts and
 /// withdrawal outputs in a bitcoin transaction.
 ///
-/// This trait and the default implementations includes functions for
+/// This trait and its default implementations include functions for
 /// apportioning fees to a bitcoin transaction that has already been
 /// confirmed. This implementation is located in this module because the
 /// assumptions it makes for how the transaction is organized follows the
@@ -1829,25 +1870,35 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
     ///
     /// This function assumes that this transaction is an sBTC transaction,
     /// which implies that the first input and the first two outputs are
-    /// always the signers'. So `None` is returned if there is no input,
-    /// after the first input, with the given `outpoint`.
+    /// always the signers'.
     ///
     /// The logic for the fee assessment is from
     /// <https://github.com/stacks-sbtc/sbtc/issues/182> or
     /// <https://github.com/stacks-sbtc/sbtc/issues/2144>.
-    fn assess_input_fee(&self, outpoint: &OutPoint, tx_fee: Amount) -> Option<Amount> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FeeAssessmentError::InputNotFound`] if no request input has
+    /// the given outpoint, or [`FeeAssessmentError::InvalidOpReturn`] if the
+    /// sweep does not encode a supported fee-assessment method.
+    fn assess_input_fee(
+        &self,
+        outpoint: &OutPoint,
+        tx_fee: Amount,
+    ) -> Result<Amount, FeeAssessmentError> {
         // We skip the first input because it is always the signers' input
         // UTXO.
         let input_weight = self
             .inputs()
             .iter()
             .skip(1)
-            .find(|tx_in| &tx_in.previous_output == outpoint)?
+            .find(|tx_in| &tx_in.previous_output == outpoint)
+            .ok_or(FeeAssessmentError::InputNotFound)?
             .segwit_weight()
             .to_wu();
 
         let fee_sats = self.assess_fee(input_weight, tx_fee)?;
-        Some(Amount::from_sat(fee_sats))
+        Ok(Amount::from_sat(fee_sats))
     }
 
     /// Assess how much of the bitcoin miner fee should be apportioned to
@@ -1860,23 +1911,26 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
     ///
     /// This function assumes that this transaction is an sBTC transaction,
     /// which implies that the first input and the first two outputs are
-    /// always the signers'. So `None` is returned if the given `vout` is 0
-    /// or 1 or if there is no output in the transaction at `vout`.
+    /// always the signers'.
     ///
     /// The logic for the fee assessment is from
     /// <https://github.com/stacks-sbtc/sbtc/issues/182> or
     /// <https://github.com/stacks-sbtc/sbtc/issues/2144> depending on the
     /// version encoded in the OP_RETURN.
-    fn assess_output_fee(&self, vout: usize, tx_fee: Amount) -> Option<Amount> {
+    fn assess_output_fee(&self, vout: usize, tx_fee: Amount) -> Result<Amount, FeeAssessmentError> {
         // We skip the first two outputs because they always belong to the
         // signers.
         if vout < 2 {
-            return None;
+            return Err(FeeAssessmentError::InvalidOutputIndex);
         }
-        let output_weight = self.outputs().get(vout)?.weight().to_wu();
+        let output_weight = self
+            .outputs()
+            .get(vout)
+            .ok_or(FeeAssessmentError::InvalidOutputIndex)?
+            .weight()
+            .to_wu();
 
-        let fee_sats = self.assess_fee(output_weight, tx_fee)?;
-        Some(Amount::from_sat(fee_sats))
+        self.assess_fee(output_weight, tx_fee).map(Amount::from_sat)
     }
 
     /// Computes the total weight of the inputs and the outputs, excluding
@@ -1893,8 +1947,8 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
     }
 
     /// Return a request's assessed share of the transaction fee.
-    fn assess_fee(&self, item_weight: u64, tx_fee: Amount) -> Option<u64> {
-        let fee = match FeeAssessmentMethod::from_transaction(self)? {
+    fn assess_fee(&self, item_weight: u64, tx_fee: Amount) -> Result<u64, FeeAssessmentError> {
+        let fee = match FeeAssessmentMethod::try_from_tx(self.tx_ref())? {
             FeeAssessmentMethod::Proportional => {
                 // The Weight::to_wu function just returns the inner weight
                 // units as an u64, so this is really just the weight.
@@ -1916,11 +1970,25 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
                 tx_fee.to_sat().div_ceil(request_count.max(1))
             }
         };
-        Some(fee)
+        Ok(fee)
     }
 }
 
 impl<T: BitcoinInputsOutputs> FeeAssessment for T {}
+
+/// The reason a request's share of a sweep fee could not be assessed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeeAssessmentError {
+    /// The transaction does not contain the requested deposit input.
+    InputNotFound,
+    /// The index does not identify a withdrawal output in the transaction.
+    InvalidOutputIndex,
+    /// The detailed transaction information does not include its miner fee.
+    MissingTransactionFee,
+    /// The sweep OP_RETURN is missing, malformed, or uses an unsupported
+    /// version.
+    InvalidOpReturn,
+}
 
 /// The rule used to apportion a sweep transaction's miner fee to requests.
 ///
@@ -1964,26 +2032,32 @@ impl FeeAssessmentMethod {
         }
     }
 
-    /// Read the committed fee rule from a sweep transaction's OP_RETURN.
-    fn from_transaction<T>(tx: &T) -> Option<Self>
-    where
-        T: BitcoinInputsOutputs + ?Sized,
-    {
+    /// Read the fee-assessment method encoded in a sweep transaction's
+    /// OP_RETURN.
+    fn try_from_tx(value: &Transaction) -> Result<Self, FeeAssessmentError> {
         // The second output is always the OP_RETURN output.
-        let script = &tx.outputs().get(1)?.script_pubkey;
+        let script = &value
+            .outputs()
+            .get(1)
+            .ok_or(FeeAssessmentError::InvalidOpReturn)?
+            .script_pubkey;
         let mut instructions = script.instructions();
 
         let Some(Ok(Instruction::Op(OP_RETURN))) = instructions.next() else {
-            return None;
+            return Err(FeeAssessmentError::InvalidOpReturn);
         };
         let Some(Ok(Instruction::PushBytes(data))) = instructions.next() else {
-            return None;
+            return Err(FeeAssessmentError::InvalidOpReturn);
         };
         if instructions.next().is_some() {
-            return None;
+            return Err(FeeAssessmentError::InvalidOpReturn);
         }
 
-        Self::from_op_return_version(*data.as_bytes().get(2)?)
+        let version = data
+            .as_bytes()
+            .get(2)
+            .ok_or(FeeAssessmentError::InvalidOpReturn)?;
+        Self::from_op_return_version(*version).ok_or(FeeAssessmentError::InvalidOpReturn)
     }
 }
 
@@ -2008,13 +2082,15 @@ impl BitcoinInputsOutputs for BitcoinTxInfo {
 impl BitcoinTxInfo {
     /// Assess how much of the bitcoin miner fee should be apportioned to
     /// the input associated with the given `outpoint`.
-    pub fn assess_input_fee(&self, outpoint: &OutPoint) -> Option<Amount> {
-        FeeAssessment::assess_input_fee(self, outpoint, self.fee?)
+    pub fn assess_input_fee(&self, outpoint: &OutPoint) -> Result<Amount, FeeAssessmentError> {
+        let fee = self.fee.ok_or(FeeAssessmentError::MissingTransactionFee)?;
+        FeeAssessment::assess_input_fee(self, outpoint, fee)
     }
     /// Assess how much of the bitcoin miner fee should be apportioned to
     /// the output at the given output index `vout`.
-    pub fn assess_output_fee(&self, vout: usize) -> Option<Amount> {
-        FeeAssessment::assess_output_fee(self, vout, self.fee?)
+    pub fn assess_output_fee(&self, vout: usize) -> Result<Amount, FeeAssessmentError> {
+        let fee = self.fee.ok_or(FeeAssessmentError::MissingTransactionFee)?;
+        FeeAssessment::assess_output_fee(self, vout, fee)
     }
 }
 
@@ -2878,25 +2954,43 @@ mod tests {
         );
     }
 
-    /// The maximum-size constants cover v2 inputs for a key set with the
-    /// most signers allowed, where every signer signs.
+    /// The representative large-input sizes use the production 11-of-15
+    /// signer set, the largest expected set closest to a 70% threshold.
     #[test]
-    fn max_vsize_constants_cover_the_largest_v2_inputs() {
-        let max_signers = sbtc::MAX_SIGNERS as u16;
-        let public_keys = (0..max_signers).map(|_| generate_x_only_public_key());
-        let key_set = SignerKeySet::new(public_keys, max_signers).unwrap();
+    fn representative_v2_input_sizes_use_11_of_15() {
+        let public_keys = (0..15).map(|_| generate_x_only_public_key());
+        let key_set = SignerKeySet::new(public_keys, 11).unwrap();
         let utxo = SignerUtxo {
             outpoint: OutPoint::null(),
             amount: 0,
             key_set: SignerUtxoKeySet::V2(key_set.clone()),
         };
 
-        let input_weight = utxo.as_tx_input().segwit_weight();
-        let base_tx_vsize = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + input_weight.to_wu() as f64 / 4.0;
-        assert_eq!(base_tx_vsize, MAX_BASE_TX_VSIZE);
+        assert_eq!(
+            BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + utxo.input_vsize() as f64,
+            REFERENCE_11_OF_15_BASE_TX_VSIZE
+        );
 
         let deposit = v2_deposit(&key_set);
-        assert_eq!(deposit.vsize() as f64, MAX_REQUEST_VSIZE);
+        assert_eq!(deposit.vsize(), REFERENCE_11_OF_15_DEPOSIT_INPUT_VSIZE);
+    }
+
+    /// The package-size bound still covers every valid signer set even though
+    /// fee admission uses the actual key sets in a package.
+    #[test]
+    fn package_size_bound_covers_absolute_maximum_signer_input() {
+        let max_signers = sbtc::MAX_SIGNERS as u16;
+        let public_keys = (0..max_signers).map(|_| generate_x_only_public_key());
+        let key_set = SignerKeySet::new(public_keys, max_signers).unwrap();
+        let utxo = SignerUtxo {
+            outpoint: OutPoint::null(),
+            amount: 0,
+            key_set: SignerUtxoKeySet::V2(key_set),
+        };
+
+        let base_tx_vsize = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT
+            + utxo.as_tx_input().segwit_weight().to_wu() as f64 / 4.0;
+        assert_eq!(base_tx_vsize, ABSOLUTE_MAX_BASE_TX_VSIZE);
     }
 
     /// The pre-filter must only accept a request whose max fee covers the
@@ -2939,8 +3033,8 @@ mod tests {
         requests.deposits[0].max_fee = solo_fee - 1;
         assert!(requests.construct_transactions().unwrap().is_empty());
 
-        // The fixed sizes assume the largest OP_RETURN output, so the
-        // filter asks for a little more than the solo sweep needs.
+        // The base size assumes the largest OP_RETURN output, so the filter
+        // asks for a little more than the solo sweep needs.
         requests.deposits[0].max_fee = solo_fee + 16 * fee_rate as u64;
         assert_eq!(requests.construct_transactions().unwrap().len(), 1);
     }
@@ -2970,14 +3064,16 @@ mod tests {
             fee_assessment: FeeAssessmentMethod::Even,
             magic_bytes: *b"T3",
         };
+        let mut withdrawal = create_withdrawal(100_000, u64::MAX, 0);
         let preprocessor = RequestPreprocessor {
             sbtc_limits: &SbtcLimits::unlimited(),
             fee_rate,
             last_fees: None,
             signer_input_vsize: signer_state.utxo.input_vsize() as f64,
+            max_signer_input_vsize: signer_state.utxo.input_vsize() as f64,
+            max_request_vsize: deposit.vsize().max(withdrawal.vsize()),
             fee_assessment: FeeAssessmentMethod::Proportional,
         };
-        let mut withdrawal = create_withdrawal(100_000, u64::MAX, 0);
         withdrawal.max_fee = compute_transaction_fee(
             preprocessor.solo_tx_vsize(withdrawal.vsize()),
             fee_rate,
@@ -2989,6 +3085,24 @@ mod tests {
                 .len(),
             1
         );
+
+        // With no larger candidate request, even assessment uses this
+        // withdrawal's actual size rather than a protocol-wide maximum.
+        let withdrawal_only = SbtcRequests {
+            deposits: Vec::new(),
+            withdrawals: vec![withdrawal.clone()],
+            signer_state: signer_state.clone(),
+            num_signers: 15,
+            accept_threshold: 11,
+            sbtc_limits: SbtcLimits::unlimited(),
+            max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
+        };
+        let transactions = withdrawal_only.construct_transactions().unwrap();
+        assert_eq!(transactions.len(), 1);
+        assert!(matches!(
+            transactions[0].requests[0],
+            RequestRef::Withdrawal(_)
+        ));
 
         let even_preprocessor = RequestPreprocessor {
             fee_assessment: FeeAssessmentMethod::Even,
@@ -3028,6 +3142,55 @@ mod tests {
             transactions[0].requests[0],
             RequestRef::Deposit(_)
         ));
+    }
+
+    /// Even fee admission accounts for the signer input created by the first
+    /// transaction when the package chains into a larger output key set.
+    #[test]
+    fn even_fee_assessment_accounts_for_chained_signer_input() {
+        let fee_rate = 10.0;
+        let signer_public_key = generate_x_only_public_key();
+        let current_utxo = SignerUtxo {
+            outpoint: generate_outpoint(550_000_000, 0),
+            amount: 550_000_000,
+            key_set: SignerUtxoKeySet::V1(signer_public_key),
+        };
+        let mut deposits = vec![
+            create_deposit(10_000_000, u64::MAX, 0),
+            create_deposit(11_000_000, u64::MAX, 0),
+        ];
+        let v1_solo_tx_vsize = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT
+            + current_utxo.input_vsize() as f64
+            + deposits[0].vsize() as f64;
+        let v1_solo_fee = compute_transaction_fee(v1_solo_tx_vsize, fee_rate, None);
+        for deposit in &mut deposits {
+            deposit.max_fee = v1_solo_fee;
+        }
+
+        let output_key_set = SignerUtxoKeySet::V2(
+            SignerKeySet::new((0..15).map(|_| generate_x_only_public_key()), 11).unwrap(),
+        );
+        let mut requests = SbtcRequests {
+            deposits,
+            withdrawals: Vec::new(),
+            signer_state: SignerBtcState {
+                utxo: current_utxo,
+                fee_rate,
+                output_key_set,
+                last_fees: None,
+                fee_assessment: FeeAssessmentMethod::Even,
+                magic_bytes: *b"T3",
+            },
+            num_signers: 15,
+            accept_threshold: 11,
+            sbtc_limits: SbtcLimits::unlimited(),
+            max_deposits_per_bitcoin_tx: 1,
+        };
+
+        assert!(requests.construct_transactions().unwrap().is_empty());
+
+        requests.signer_state.output_key_set = SignerUtxoKeySet::V1(signer_public_key);
+        assert_eq!(requests.construct_transactions().unwrap().len(), 2);
     }
 
     #[ignore = "this is for generating the MIN_BITCOIN_INPUT_VSIZE constant"]
@@ -3569,7 +3732,7 @@ mod tests {
         more_asserts::assert_gt!(transactions.len(), 1);
         assert!(transactions.iter().all(|tx| {
             tx.signer_utxo.fee_assessment == FeeAssessmentMethod::Even
-                && FeeAssessmentMethod::from_transaction(&tx.tx) == Some(FeeAssessmentMethod::Even)
+                && FeeAssessmentMethod::try_from_tx(&tx.tx) == Ok(FeeAssessmentMethod::Even)
         }));
 
         transactions.windows(2).for_each(|unsigned| {
@@ -4124,19 +4287,51 @@ mod tests {
         assert_eq!(assessed_fee, fee);
     }
 
+    /// Reserved, missing, and out-of-range request locations report the
+    /// appropriate assessment failure.
     #[test]
-    fn first_input_and_first_two_outputs_return_none() {
+    fn invalid_request_locations_return_typed_errors() {
         let tx = base_signer_transaction();
         let fee = Amount::from_sat(500_000);
 
         let tx_info = BitcoinTxInfo::from_tx(tx, fee);
-        assert!(tx_info.assess_output_fee(0).is_none());
-        assert!(tx_info.assess_output_fee(1).is_none());
+        assert_eq!(
+            tx_info.assess_output_fee(0),
+            Err(FeeAssessmentError::InvalidOutputIndex)
+        );
+        assert_eq!(
+            tx_info.assess_output_fee(1),
+            Err(FeeAssessmentError::InvalidOutputIndex)
+        );
+        assert_eq!(
+            tx_info.assess_output_fee(2),
+            Err(FeeAssessmentError::InvalidOutputIndex)
+        );
         // Since we always skip the first input, and
         // `base_signer_transaction()` only adds one input, the search for
         // the given input when `assess_input_fee` executes will always
         // fail, simulating that the specified outpoint wasn't found.
-        assert!(tx_info.assess_input_fee(&OutPoint::null()).is_none());
+        assert_eq!(
+            tx_info.assess_input_fee(&OutPoint::null()),
+            Err(FeeAssessmentError::InputNotFound)
+        );
+    }
+
+    /// Detailed transaction information without a miner fee reports that the
+    /// fee is unavailable before assessing a request.
+    #[test]
+    fn missing_transaction_fee_returns_a_typed_error() {
+        let mut tx_info = BitcoinTxInfo::from_tx(base_signer_transaction(), Amount::ZERO);
+        tx_info.fee = None;
+
+        assert_eq!(
+            tx_info.assess_input_fee(&OutPoint::null()),
+            Err(FeeAssessmentError::MissingTransactionFee)
+        );
+        assert_eq!(
+            tx_info.assess_output_fee(2),
+            Err(FeeAssessmentError::MissingTransactionFee)
+        );
     }
 
     #[test]
@@ -4301,7 +4496,7 @@ mod tests {
         ExtraInstruction,
     }
 
-    /// Fee assessment rejects malformed or unsupported OP_RETURN commitments.
+    /// Fee assessment reports malformed or unsupported sweep OP_RETURN data.
     #[test_case(MalformedFeeAssessmentCommitment::MissingOutput; "missing output")]
     #[test_case(MalformedFeeAssessmentCommitment::MissingOpReturn; "missing OP_RETURN")]
     #[test_case(MalformedFeeAssessmentCommitment::MissingData; "missing data push")]
@@ -4337,7 +4532,10 @@ mod tests {
             }
         }
 
-        assert_eq!(FeeAssessmentMethod::from_transaction(&tx), None);
+        assert_eq!(
+            FeeAssessmentMethod::try_from_tx(&tx),
+            Err(FeeAssessmentError::InvalidOpReturn)
+        );
     }
 
     /// The activation height selects the fee rule at the boundary.
@@ -4381,6 +4579,8 @@ mod tests {
             fee_rate: 1.0,
             last_fees: None,
             signer_input_vsize: utxo.input_vsize() as f64,
+            max_signer_input_vsize: utxo.input_vsize() as f64,
+            max_request_vsize: req.vsize(),
             fee_assessment: FeeAssessmentMethod::Proportional,
         };
         let solo_tx_vsize = preprocessor.solo_tx_vsize(req.vsize());
