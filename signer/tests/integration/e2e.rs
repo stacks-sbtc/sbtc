@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     num::{NonZero, NonZeroUsize},
     sync::{
         Arc,
@@ -65,8 +66,7 @@ use crate::{
     setup::{clean_emily_setup, new_emily_setup},
     stacks::{
         BlockReplay, BlockReplayTransaction, address_to_clarity_arg, block_replay,
-        create_stacks_tx, fund_stx, get_block_by_height, principal_to_address, wait_for_new_nonce,
-        wait_for_stx_balance,
+        create_stacks_tx, fund_stx, principal_to_address, wait_for_new_nonce, wait_for_stx_balance,
     },
     transaction_coordinator::{IntegrationTestContext, wait_for_tenure_completed},
     utxo_construction::make_deposit_request_to,
@@ -237,33 +237,39 @@ pub async fn start_signers(
 async fn simulate_event_observer(ctx: IntegrationTestContext<StacksClient>) {
     let stacks_client = ctx.stacks_client.clone();
 
-    let mut last_block = stacks_client
-        .get_node_info()
-        .await
-        .unwrap()
-        .stacks_tip_height;
+    let start = stacks_client.get_node_info().await.unwrap();
+    // Like `/new_block`, replay new blocks on every fork, not just new heights.
+    let mut replayed = HashSet::from([start.stacks_chain_tip()]);
 
     loop {
-        let current_block = stacks_client
+        let mut block_id = stacks_client
             .get_node_info()
             .await
             .unwrap()
-            .stacks_tip_height;
+            .stacks_chain_tip();
 
-        for block_height in (*last_block + 1)..=(*current_block) {
-            let block_hash = get_block_by_height(&stacks_client, block_height)
+        let mut new_blocks = Vec::new();
+        while !replayed.contains(&block_id) {
+            let block = stacks_client
+                .get_block(&block_id)
                 .await
-                .expect("failed to get block")
-                .block_id();
+                .expect("failed to get block");
+            if block.header.chain_length <= *start.stacks_tip_height {
+                break;
+            }
+            new_blocks.push(block_id);
+            block_id = block.header.parent_block_id.into();
+        }
 
-            let block_replay = block_replay(&stacks_client, block_hash.into())
+        for block_id in new_blocks.into_iter().rev() {
+            let block_replay = block_replay(&stacks_client, block_id)
                 .await
                 .expect("failed to replay block");
 
             new_block_handler(&ctx, block_replay).await;
+            replayed.insert(block_id);
         }
 
-        last_block = current_block;
         tokio::time::sleep(SIMULATED_EVENT_OBSERVER_POLLING).await;
     }
 }
