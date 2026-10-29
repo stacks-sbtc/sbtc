@@ -9,7 +9,9 @@ use std::{
 };
 
 use assert_matches::assert_matches;
-use bitcoin::{AddressType, Amount, consensus::encode::serialize_hex};
+use bitcoin::{
+    AddressType, Amount, BlockHash, OutPoint, consensus::encode::serialize_hex, hashes::Hash as _,
+};
 use bitcoincore_rpc::RpcApi as _;
 use bitcoincore_rpc_json::Utxo;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
@@ -17,7 +19,10 @@ use clarity::{
     types::chainstate::StacksAddress,
     vm::{
         ContractName, Value,
-        types::{PrincipalData, QualifiedContractIdentifier, StacksAddressExtensions as _},
+        types::{
+            BuffData, OptionalData, PrincipalData, QualifiedContractIdentifier, SequenceData,
+            StacksAddressExtensions as _,
+        },
     },
 };
 use emily_client::{apis::deposit_api, models::CreateDepositRequestBody};
@@ -52,7 +57,11 @@ use signer::{
         contracts::{AsContractCall as _, SmartContract},
         wallet::SignerWallet,
     },
-    storage::{DbRead as _, DbWrite as _, model, postgres::PgStore},
+    storage::{
+        DbRead as _, DbWrite as _,
+        model::{self, ToLittleEndianOrder as _},
+        postgres::PgStore,
+    },
     testing::{self, context::*, wallet::InitiateWithdrawalRequest},
     transaction_coordinator::TxCoordinatorEventLoop,
     transaction_signer::{
@@ -761,6 +770,205 @@ async fn deposit_and_withdrawal() {
     let fee_paid = withdrawal_max_fee - sbtc_balance_available.to_sat();
 
     assert_eq!(peg_new_balance, peg_balance - withdrawal_amount - fee_paid);
+
+    for (_, db, _, _) in signers {
+        testing::storage::drop_db(db).await;
+    }
+    clean_emily_setup(emily_tables).await;
+}
+
+/// The sweep block and height the registry recorded for a completed deposit.
+async fn completed_deposit_sweep(
+    stacks_client: &StacksClient,
+    deployer: &StacksAddress,
+    deposit: &OutPoint,
+) -> Option<(BlockHash, u64)> {
+    let txid = BuffData {
+        data: deposit.txid.to_le_bytes().to_vec(),
+    };
+    let arguments = [
+        Value::Sequence(SequenceData::Buffer(txid)),
+        Value::UInt(deposit.vout as u128),
+    ];
+    let result = stacks_client
+        .call_read(
+            deployer,
+            SmartContract::SbtcRegistry,
+            ClarityName("get-completed-deposit"),
+            deployer,
+            &arguments,
+        )
+        .await
+        .unwrap();
+
+    let Value::Optional(OptionalData { data }) = result else {
+        panic!("expected an optional, got {result}");
+    };
+    let Value::Tuple(record) = *data? else {
+        panic!("expected a tuple");
+    };
+    let Value::Sequence(SequenceData::Buffer(burn_hash)) = record.get("sweep-burn-hash").unwrap()
+    else {
+        panic!("expected a buffer");
+    };
+    let Value::UInt(burn_height) = record.get("sweep-burn-height").unwrap() else {
+        panic!("expected a uint");
+    };
+    let mut burn_hash: [u8; 32] = burn_hash.data.clone().try_into().unwrap();
+    burn_hash.reverse();
+    Some((BlockHash::from_byte_array(burn_hash), *burn_height as u64))
+}
+
+/// A minted deposit's sweep block is reorged out, orphaning the mint's tenure.
+/// The sweep is mined again, and the signers must mint again, once, against it.
+#[test_log::test(tokio::test)]
+async fn deposit_minted_again_after_sweep_reorged() {
+    let stack = TestContainersBuilder::start_stacks().await;
+    let bitcoin = stack.bitcoin().await;
+    let stacks = stack.stacks().await;
+
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+    let stacks_client = stacks.get_client();
+    let (emily_client, emily_tables) = new_emily_setup().await;
+    let network = WanNetwork::default();
+
+    faucet.generate_fee_data();
+
+    let bitcoin_chain_tip_poller = bitcoin.start_chain_tip_poller().await;
+    let signers = start_signers(
+        &bitcoin.get_client(),
+        &bitcoin_chain_tip_poller,
+        &stacks_client,
+        &emily_client,
+        &network,
+        3,
+        2,
+        None,
+        Duration::from_millis(500),
+    )
+    .await;
+    let deployer = signers[0].0.config().signer.deployer.clone();
+
+    // Contract deployment, then key rotation.
+    for _ in 0..2 {
+        let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
+        let chain_tip = faucet.generate_block().into();
+        wait_for_tenure_completed(&signers, chain_tip).await;
+        wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
+    }
+
+    let aggregate_key = stacks_client
+        .get_current_signers_aggregate_key(&deployer)
+        .await
+        .unwrap()
+        .expect("no aggregate key in contract")
+        .v1_public_key()
+        .expect("test requires a v1 signer key");
+    let donation = faucet.send_to_script(10_000, aggregate_key.signers_script_pubkey());
+
+    let depositor = Recipient::new(AddressType::P2tr);
+    let deposit_amount = 100_000;
+    let depositor_fund_amount = deposit_amount + BITCOIN_CORE_FALLBACK_FEE.to_sat();
+    let depositor_fund_outpoint = faucet.send_to(depositor_fund_amount, &depositor.address);
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
+
+    let recipient = depositor.stacks_address().to_account_principal();
+    let depositor_utxo = Utxo {
+        txid: depositor_fund_outpoint.txid,
+        vout: depositor_fund_outpoint.vout,
+        script_pub_key: depositor.address.script_pubkey(),
+        descriptor: "".to_string(),
+        amount: Amount::from_sat(depositor_fund_amount),
+        height: 0,
+    };
+    let (deposit_tx, deposit_request, deposit_info) = make_deposit_request_to(
+        &depositor,
+        deposit_amount,
+        depositor_utxo,
+        deposit_amount / 2,
+        aggregate_key.into(),
+        recipient.clone(),
+    );
+    rpc.send_raw_transaction(&deposit_tx)
+        .expect("cannot submit deposit tx");
+    let emily_request = CreateDepositRequestBody {
+        bitcoin_tx_output_index: deposit_request.outpoint.vout,
+        bitcoin_txid: deposit_request.outpoint.txid.to_string(),
+        deposit_script: deposit_request.deposit_script.to_hex_string(),
+        reclaim_script: deposit_info.reclaim_script.to_hex_string(),
+        transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
+    };
+    deposit_api::create_deposit(emily_client.config(), emily_request)
+        .await
+        .expect("cannot create emily deposit");
+
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
+    let sweep_txid = *bitcoin
+        .get_client()
+        .get_tx_spending_prevout(&donation)
+        .unwrap()
+        .first()
+        .expect("the signers did not sweep the deposit");
+
+    let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
+    let sweep_block = faucet.generate_block();
+    wait_for_tenure_completed(&signers, sweep_block.into()).await;
+    wait_for_new_nonce(&stacks_client, &deployer, old_nonce).await;
+
+    let deposit = deposit_request.outpoint;
+    let sweep_height = rpc.get_block_header_info(&sweep_block).unwrap().height as u64;
+    assert_eq!(
+        completed_deposit_sweep(&stacks_client, &deployer, &deposit).await,
+        Some((sweep_block, sweep_height))
+    );
+    let minted = get_sbtc_balance(&stacks_client, &deployer, &recipient, SbtcBalance::Total)
+        .await
+        .unwrap();
+    assert_ne!(minted, Amount::ZERO);
+
+    // The marker keeps the new branch's first block distinct.
+    rpc.invalidate_block(&sweep_block).unwrap();
+    faucet.send_to(1_000, &faucet.address);
+    // The orphaned mint can return to the stacks mempool and must be mined,
+    // and fail, before the new one, so give the miner time each tenure.
+    let mut minted_again = None;
+    for _ in 0..6 {
+        let chain_tip = faucet.generate_block();
+        wait_for_tenure_completed(&signers, chain_tip.into()).await;
+        let poll = async {
+            loop {
+                let record = completed_deposit_sweep(&stacks_client, &deployer, &deposit).await;
+                if let Some(record) = record.filter(|(burn_hash, _)| *burn_hash != sweep_block) {
+                    return record;
+                }
+                Sleep::for_millis(500).await;
+            }
+        };
+        if let Ok(record) = poll.with_timeout(Duration::from_secs(10)).await {
+            minted_again = Some(record);
+            break;
+        }
+    }
+
+    let header = rpc.get_block_header_info(&sweep_block).unwrap();
+    assert_eq!(header.confirmations, -1);
+    let new_sweep_block = rpc
+        .get_raw_transaction_info(&sweep_txid, None)
+        .unwrap()
+        .blockhash
+        .expect("the sweep was not mined again");
+    let new_sweep_height = rpc.get_block_header_info(&new_sweep_block).unwrap().height as u64;
+    assert_eq!(minted_again, Some((new_sweep_block, new_sweep_height)));
+
+    let balance = get_sbtc_balance(&stacks_client, &deployer, &recipient, SbtcBalance::Total)
+        .await
+        .unwrap();
+    assert_eq!(balance, minted);
 
     for (_, db, _, _) in signers {
         testing::storage::drop_db(db).await;
