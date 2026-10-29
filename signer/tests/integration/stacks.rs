@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::str::FromStr as _;
 use std::time::Duration;
 
-use blockstack_lib::chainstate::nakamoto::NakamotoBlock;
 use blockstack_lib::chainstate::stacks::SinglesigHashMode;
 use blockstack_lib::chainstate::stacks::SinglesigSpendingCondition;
 use blockstack_lib::chainstate::stacks::StacksTransaction;
@@ -15,7 +14,6 @@ use blockstack_lib::chainstate::stacks::TransactionSpendingCondition;
 use blockstack_lib::chainstate::stacks::TransactionVersion;
 use blockstack_lib::chainstate::stacks::address::PoxAddressType20;
 use blockstack_lib::chainstate::stacks::address::PoxAddressType32;
-use clarity::codec::StacksMessageCodec as _;
 use clarity::consts::CHAIN_ID_TESTNET;
 use clarity::types::chainstate::StacksAddress;
 use clarity::util::secp256k1::MessageSignature;
@@ -81,32 +79,6 @@ pub async fn wait_for_new_nonce(
         .with_timeout(STACKS_NODE_TIMEOUT)
         .await
         .expect("failed to wait for new nonce");
-}
-
-/// Get a Nakamoto Stacks block by block height
-pub async fn get_block_by_height(
-    stacks_client: &StacksClient,
-    block_height: u64,
-) -> Result<NakamotoBlock, Error> {
-    let path = format!("/v3/blocks/height/{block_height}");
-    let endpoint = stacks_client.endpoint.clone();
-    let url = endpoint
-        .join(&path)
-        .map_err(|err| Error::PathJoin(err, Box::new(endpoint), Cow::Owned(path)))?;
-
-    let block_bytes = stacks_client
-        .client
-        .get(url)
-        .send()
-        .await
-        .map_err(Error::StacksNodeRequest)?
-        .error_for_status()
-        .map_err(Error::StacksNodeResponse)?
-        .bytes()
-        .await
-        .map_err(Error::UnexpectedStacksResponse)?;
-
-    NakamotoBlock::consensus_deserialize(&mut &*block_bytes).map_err(Error::StacksCodec)
 }
 
 /// Response model for `/v3/blocks/replay/{block_id}`, omitting unused fields
