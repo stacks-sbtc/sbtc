@@ -1875,12 +1875,6 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
     /// The logic for the fee assessment is from
     /// <https://github.com/stacks-sbtc/sbtc/issues/182> or
     /// <https://github.com/stacks-sbtc/sbtc/issues/2144>.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`FeeAssessmentError::InputNotFound`] if no request input has
-    /// the given outpoint, or [`FeeAssessmentError::InvalidOpReturn`] if the
-    /// sweep does not encode a supported fee-assessment method.
     fn assess_input_fee(
         &self,
         outpoint: &OutPoint,
