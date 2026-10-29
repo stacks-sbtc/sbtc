@@ -2556,6 +2556,209 @@ async fn get_swept_withdrawal_requests_returns_swept_withdrawal_requests(
     signer::testing::storage::drop_db(db).await;
 }
 
+/// A sweep confirmed only on a fork must not count as a sweep of the
+/// canonical chain, and a sweep mined on both branches must count once,
+/// against the canonical block.
+#[tokio::test]
+async fn get_swept_deposit_requests_ignores_sweeps_on_other_forks() {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    let test_params = testing::storage::model::Params {
+        num_bitcoin_blocks: 10,
+        num_stacks_blocks_per_bitcoin_block: 1,
+        num_deposit_requests_per_block: 0,
+        num_withdraw_requests_per_block: 0,
+        num_signers_per_request: 3,
+        consecutive_blocks: false,
+    };
+    let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 3);
+    TestData::generate(&mut rng, &signer_set, &test_params)
+        .write_to(&db)
+        .await;
+
+    let bitcoin_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let tip_block = db.get_bitcoin_block(&bitcoin_tip).await.unwrap().unwrap();
+    let stacks_tip = db
+        .get_stacks_chain_tip(&bitcoin_tip)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let deposit_request: model::DepositRequest = Faker.fake_with_rng(&mut rng);
+    db.write_deposit_request(&deposit_request).await.unwrap();
+    let deposit_tx_ref = model::BitcoinTxRef {
+        txid: deposit_request.txid,
+        block_hash: bitcoin_tip,
+    };
+    db.write_bitcoin_transaction(&deposit_tx_ref).await.unwrap();
+
+    // Two blocks compete at the next height; `fork` loses.
+    let [canonical, fork] = [(); 2].map(|_| model::BitcoinBlock {
+        block_hash: Faker.fake_with_rng(&mut rng),
+        block_height: tip_block.block_height + 1,
+        parent_hash: bitcoin_tip,
+    });
+    db.write_bitcoin_block(&canonical).await.unwrap();
+    db.write_bitcoin_block(&fork).await.unwrap();
+    db.set_canonical_bitcoin_blockchain(&canonical.block_hash)
+        .await
+        .unwrap();
+
+    let mut sweep_input: model::TxPrevout = Faker.fake_with_rng(&mut rng);
+    sweep_input.prevout_txid = deposit_request.txid;
+    sweep_input.prevout_output_index = deposit_request.output_index;
+    db.write_tx_prevout(&sweep_input).await.unwrap();
+    let sweep_in = |block_hash| model::BitcoinTxRef {
+        txid: sweep_input.txid,
+        block_hash,
+    };
+    db.write_bitcoin_transaction(&sweep_in(fork.block_hash))
+        .await
+        .unwrap();
+
+    let swept = |chain_tip: model::BitcoinBlockHash| {
+        let db = db.clone();
+        async move {
+            db.get_swept_deposit_requests(&chain_tip, &stacks_tip.block_hash, 20)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|req| req.sweep_block_hash)
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(swept(fork.block_hash).await, [fork.block_hash]);
+    assert_eq!(swept(canonical.block_hash).await, []);
+
+    db.write_bitcoin_transaction(&sweep_in(canonical.block_hash))
+        .await
+        .unwrap();
+    assert_eq!(swept(canonical.block_hash).await, [canonical.block_hash]);
+
+    signer::testing::storage::drop_db(db).await;
+}
+
+/// The withdrawal version of
+/// `get_swept_deposit_requests_ignores_sweeps_on_other_forks`, for each
+/// table that can link a sweep to a withdrawal.
+#[test_case(SetupTables::PreSign; "bitcoin_withdrawal_outputs")]
+#[test_case(SetupTables::WithdrawalIds; "bitcoin_withdrawal_tx_outputs")]
+#[tokio::test]
+async fn get_swept_withdrawal_requests_ignores_sweeps_on_other_forks(setup_tables: SetupTables) {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    let test_params = testing::storage::model::Params {
+        num_bitcoin_blocks: 10,
+        num_stacks_blocks_per_bitcoin_block: 1,
+        num_deposit_requests_per_block: 0,
+        num_withdraw_requests_per_block: 0,
+        num_signers_per_request: 3,
+        consecutive_blocks: false,
+    };
+    let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 3);
+    TestData::generate(&mut rng, &signer_set, &test_params)
+        .write_to(&db)
+        .await;
+
+    let bitcoin_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
+    let tip_block = db.get_bitcoin_block(&bitcoin_tip).await.unwrap().unwrap();
+    let stacks_tip = db
+        .get_stacks_chain_tip(&bitcoin_tip)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let withdrawal_request = model::WithdrawalRequest {
+        request_id: 1,
+        txid: Faker.fake_with_rng(&mut rng),
+        block_hash: stacks_tip.block_hash,
+        recipient: Faker.fake_with_rng(&mut rng),
+        amount: 1_000,
+        max_fee: 1_000,
+        sender_address: Faker.fake_with_rng(&mut rng),
+        bitcoin_block_height: tip_block.block_height,
+    };
+    db.write_withdrawal_request(&withdrawal_request)
+        .await
+        .unwrap();
+
+    // Two blocks compete at the next height; `fork` loses.
+    let [canonical, fork] = [(); 2].map(|_| model::BitcoinBlock {
+        block_hash: Faker.fake_with_rng(&mut rng),
+        block_height: tip_block.block_height + 1,
+        parent_hash: bitcoin_tip,
+    });
+    db.write_bitcoin_block(&canonical).await.unwrap();
+    db.write_bitcoin_block(&fork).await.unwrap();
+    db.set_canonical_bitcoin_blockchain(&canonical.block_hash)
+        .await
+        .unwrap();
+
+    let sweep_txid: model::BitcoinTxId = Faker.fake_with_rng(&mut rng);
+    let output_index = 2;
+    match setup_tables {
+        SetupTables::PreSign => {
+            let output = BitcoinWithdrawalOutput {
+                request_id: withdrawal_request.request_id,
+                stacks_txid: withdrawal_request.txid,
+                stacks_block_hash: withdrawal_request.block_hash,
+                bitcoin_chain_tip: bitcoin_tip,
+                output_index,
+                bitcoin_txid: sweep_txid,
+                ..Faker.fake_with_rng(&mut rng)
+            };
+            db.write_bitcoin_withdrawals_outputs(&[output])
+                .await
+                .unwrap();
+        }
+        SetupTables::WithdrawalIds | SetupTables::Both => {
+            let tx_output = model::TxOutput {
+                txid: sweep_txid,
+                output_index,
+                script_pubkey: Faker.fake_with_rng(&mut rng),
+                amount: withdrawal_request.amount,
+                output_type: model::TxOutputType::Withdrawal,
+            };
+            let withdrawal_output = model::WithdrawalTxOutput {
+                request_id: withdrawal_request.request_id,
+                txid: sweep_txid,
+                output_index,
+            };
+            db.write_tx_output(&tx_output).await.unwrap();
+            db.write_withdrawal_tx_output(&withdrawal_output)
+                .await
+                .unwrap();
+        }
+    }
+    let sweep_in = |block_hash| model::BitcoinTxRef { txid: sweep_txid, block_hash };
+    db.write_bitcoin_transaction(&sweep_in(fork.block_hash))
+        .await
+        .unwrap();
+
+    let swept = |chain_tip: model::BitcoinBlockHash| {
+        let db = db.clone();
+        async move {
+            db.get_swept_withdrawal_requests(&chain_tip, &stacks_tip.block_hash, 20)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|req| req.sweep_block_hash)
+                .collect::<Vec<_>>()
+        }
+    };
+    assert_eq!(swept(fork.block_hash).await, [fork.block_hash]);
+    assert_eq!(swept(canonical.block_hash).await, []);
+
+    db.write_bitcoin_transaction(&sweep_in(canonical.block_hash))
+        .await
+        .unwrap();
+    assert_eq!(swept(canonical.block_hash).await, [canonical.block_hash]);
+
+    signer::testing::storage::drop_db(db).await;
+}
+
 /// This tests that withdrawal requests that do not have a confirmed
 /// response (sweep) bitcoin transaction are not returned from
 /// [`DbRead::get_swept_withdrawal_requests`].
