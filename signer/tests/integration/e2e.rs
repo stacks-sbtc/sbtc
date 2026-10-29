@@ -931,6 +931,36 @@ async fn deposit_minted_again_after_sweep_reorged() {
         .unwrap();
     assert_ne!(minted, Amount::ZERO);
 
+    // The reorg must orphan a completion every signer has recorded.
+    let recorded = async {
+        for (_, db, _, _) in &signers {
+            loop {
+                let found = sqlx::query_scalar::<_, bool>(
+                    "SELECT EXISTS (
+                        SELECT 1 FROM sbtc_signer.completed_deposit_events
+                        WHERE bitcoin_txid = $1
+                          AND output_index = $2
+                          AND sweep_block_hash = $3
+                    )",
+                )
+                .bind(model::BitcoinTxId::from(deposit.txid))
+                .bind(i64::from(deposit.vout))
+                .bind(model::BitcoinBlockHash::from(sweep_block))
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+                if found {
+                    break;
+                }
+                Sleep::for_millis(100).await;
+            }
+        }
+    };
+    recorded
+        .with_timeout(Duration::from_secs(10))
+        .await
+        .expect("a signer did not record the original completed-deposit event");
+
     // The marker keeps the new branch's first block distinct.
     rpc.invalidate_block(&sweep_block).unwrap();
     faucet.send_to(1_000, &faucet.address);
