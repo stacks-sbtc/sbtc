@@ -1100,15 +1100,14 @@ pub mod test {
         let result = feedback_messages_with_errors(&mut coordinators, &mut signers, &messages);
         assert!(result.is_ok());
 
-        // test request with NonceResponse having zero nonce
+        // Test a request with one NonceResponse having a zero nonce. Only
+        // mutate one response so this exercises nonce validity rather than
+        // the duplicate-nonce check.
         let mut packet = outbound_messages[0].clone();
         if let Message::SignatureShareRequest(ref mut request) = packet {
-            for nonce_response in &mut request.nonce_responses {
-                for nonce in &mut nonce_response.nonces {
-                    nonce.D = Point::new();
-                    nonce.E = Point::new();
-                }
-            }
+            let nonce = &mut request.nonce_responses[0].nonces[0];
+            nonce.D = Point::new();
+            nonce.E = Point::new();
         } else {
             panic!("failed to match message");
         }
@@ -1123,15 +1122,14 @@ pub mod test {
             panic!("Should have received signer invalid nonce response error, got {result:?}");
         }
 
-        // test request with NonceResponse having generator nonce
+        // Test a request with one NonceResponse having the generator as its
+        // nonce. As above, keep the other responses unique so the resulting
+        // invalid share reaches the coordinator's nonce validation.
         let mut packet = outbound_messages[0].clone();
         if let Message::SignatureShareRequest(ref mut request) = packet {
-            for nonce_response in &mut request.nonce_responses {
-                for nonce in &mut nonce_response.nonces {
-                    nonce.D = G;
-                    nonce.E = G;
-                }
-            }
+            let nonce = &mut request.nonce_responses[0].nonces[0];
+            nonce.D = G;
+            nonce.E = G;
         } else {
             panic!("failed to match message");
         }

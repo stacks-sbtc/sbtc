@@ -64,7 +64,7 @@ pub async fn get_deposit(
     ) -> Result<impl warp::reply::Reply, Error> {
         // Make key.
         let key = DepositEntryKey {
-            bitcoin_txid,
+            bitcoin_txid: bitcoin_txid.to_ascii_lowercase(),
             bitcoin_tx_output_index,
         };
         // Get deposit.
@@ -118,7 +118,7 @@ pub async fn get_deposits_for_transaction(
         // in ascending index order.
         let (entries, next_token) = accessors::get_deposit_entries_for_transaction(
             &context,
-            &bitcoin_txid,
+            &bitcoin_txid.to_ascii_lowercase(),
             query.next_token,
             query.page_size,
         )

@@ -2169,7 +2169,9 @@ impl PgRead {
                 FROM sbtc_signer.bitcoin_tx_sighashes AS bts
                 WHERE bts.prevout_txid = $1
 
-                UNION ALL
+                -- A transaction may have been approved under more than one
+                -- chain tip, so we use UNION to drop the duplicate rows.
+                UNION
 
                 SELECT
                     bts.txid
@@ -2495,6 +2497,7 @@ impl PgRead {
     async fn will_sign_bitcoin_tx_sighash<'e, E>(
         executor: &'e mut E,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -2505,11 +2508,14 @@ impl PgRead {
                 will_sign
               , key_set_id
               , prevout_type
+              , validation_result
             FROM sbtc_signer.bitcoin_tx_sighashes
             WHERE sighash = $1
+              AND chain_tip = $2
             "#,
         )
         .bind(sighash)
+        .bind(chain_tip)
         .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -3016,8 +3022,10 @@ impl DbRead for PgStore {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
-        PgRead::will_sign_bitcoin_tx_sighash(self.get_connection().await?.as_mut(), sighash).await
+        let mut executor = self.get_connection().await?;
+        PgRead::will_sign_bitcoin_tx_sighash(executor.as_mut(), sighash, chain_tip).await
     }
 
     async fn get_withdrawal_signer_decisions(
@@ -3485,9 +3493,10 @@ impl DbRead for PgTransaction<'_> {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
         let mut tx = self.tx.lock().await;
-        PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
+        PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash, chain_tip).await
     }
 
     async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {

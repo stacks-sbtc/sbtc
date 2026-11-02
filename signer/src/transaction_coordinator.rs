@@ -462,10 +462,7 @@ where
             );
             return match result_fut.await {
                 Ok(txid) => Ok(Some(txid)),
-                Err(error) => {
-                    tracing::error!(%error, "failed to sign or submit rotate-key transaction");
-                    Ok(None)
-                }
+                Err(_) => Ok(None),
             };
         }
 
@@ -520,21 +517,21 @@ where
                 "our aggregate key differs from the one in the registry contract; a key rotation may be necessary"
             );
 
-            // Construct, sign and submit the rotate key transaction.
+            // Construct, sign and submit the rotate key transaction. A
+            // rotation can fail for a number of reasons in this case, one
+            // being Stacks mempool congested with our transactions. We
+            // return Ok(None) to continue with the tenure.
             tracing::info!("preparing to submit a rotate-key transaction");
-            let txid = self
-                .construct_and_sign_rotate_key_transaction(
-                    &bitcoin_chain_tip.block_hash,
-                    RotateKeysV1::load(&self.context, bitcoin_chain_tip).await?,
-                    wallet,
-                )
-                .await
-                .inspect_err(
-                    |error| tracing::error!(%error, "failed to sign or submit rotate-key transaction"),
-                )?;
+            let result_fut = self.construct_and_sign_rotate_key_transaction(
+                &bitcoin_chain_tip.block_hash,
+                RotateKeysV1::load(&self.context, bitcoin_chain_tip).await?,
+                wallet,
+            );
 
-            tracing::info!(%txid, "rotate-key transaction submitted successfully");
-            return Ok(Some(txid));
+            return match result_fut.await {
+                Ok(txid) => Ok(Some(txid)),
+                Err(_) => Ok(None),
+            };
         }
 
         Ok(None)
@@ -1245,8 +1242,20 @@ where
             txid: tx.txid().into(),
         };
 
-        self.process_sign_request(sign_request, bitcoin_chain_tip, multi_tx, wallet)
-            .await
+        let process_request_fut =
+            self.process_sign_request(sign_request, bitcoin_chain_tip, multi_tx, wallet);
+
+        match process_request_fut.await {
+            Ok(txid) => {
+                tracing::info!(%txid, "successfully submitted rotate-keys transaction");
+                Ok(txid)
+            }
+            Err(error) => {
+                tracing::warn!(%error, "failed to sign or submit rotate-keys transaction");
+                adjust_nonce(wallet, &error);
+                Err(error)
+            }
+        }
     }
 
     /// Sign and broadcast the stacks transaction
