@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: 22.1.0
+  NODE_VERSION: 24.15.0
   BUF_VERSION: 1.42.0
   PYTHON_VERSION: 3.13
   NEXTEST_VERSION: 0.9.88

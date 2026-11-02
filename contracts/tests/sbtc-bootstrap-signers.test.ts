@@ -6,8 +6,9 @@ import {
   AddressVersion,
   addressFromPublicKeys,
   addressToString,
-  pubKeyfromPrivKey,
-  serializePublicKey,
+  createStacksPublicKey,
+  privateKeyToPublic,
+  serializePublicKeyBytes,
 } from "@stacks/transactions";
 import { b58ToC32 } from "c32check";
 import { describe, expect, test } from "vitest";
@@ -156,21 +157,25 @@ describe("sBTC bootstrap signers contract", () => {
   describe("Constructing a multisig from a list of keys", () => {
     describe("constructing a multisig from two fixed keys", () => {
       const stacksPubkeys = [
-        pubKeyfromPrivKey(
-          "6d430bb91222408e7706c9001cfaeb91b08c2be6d5ac95779ab52c6b431950e001"
+        createStacksPublicKey(
+          privateKeyToPublic(
+            "6d430bb91222408e7706c9001cfaeb91b08c2be6d5ac95779ab52c6b431950e001"
+          )
         ),
-        pubKeyfromPrivKey(
-          "530d9f61984c888536871c6573073bdfc0058896dc1adfe9a6a10dfacadc209101"
+        createStacksPublicKey(
+          privateKeyToPublic(
+            "530d9f61984c888536871c6573073bdfc0058896dc1adfe9a6a10dfacadc209101"
+          )
         ),
       ];
-      const pubkeys = stacksPubkeys.map((pk) => serializePublicKey(pk));
+      const pubkeys = stacksPubkeys.map((pk) => serializePublicKeyBytes(pk));
 
       test("principal created is the same as stacks.js", () => {
         const addr = rov(signers.pubkeysToPrincipal(pubkeys, 2));
         const stacksJsAddr = addressToString(
           addressFromPublicKeys(
             AddressVersion.TestnetMultiSig,
-            AddressHashMode.SerializeP2SH,
+            AddressHashMode.P2SH,
             2,
             stacksPubkeys
           )

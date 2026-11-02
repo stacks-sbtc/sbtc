@@ -2,7 +2,6 @@
 
 use secp256k1::ecdsa::RecoverableSignature;
 
-use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::validation::TxRequestIds;
 use crate::keys::PublicKey;
 use crate::stacks::contracts::ContractCall;
@@ -38,6 +37,10 @@ pub enum Payload {
     BitcoinPreSignRequest(BitcoinPreSignRequest),
     /// An acknowledgment of a BitconPreSignRequest
     BitcoinPreSignAck(BitcoinPreSignAck),
+    /// A request for one independent BIP340 signature.
+    BitcoinSignatureRequest(BitcoinSignatureRequest),
+    /// A signer's independent BIP340 signature.
+    BitcoinSignatureResponse(BitcoinSignatureResponse),
 }
 
 impl std::fmt::Display for Payload {
@@ -69,6 +72,8 @@ impl std::fmt::Display for Payload {
             }
             Self::BitcoinPreSignRequest(_) => write!(f, "BitcoinPreSignRequest(..)"),
             Self::BitcoinPreSignAck(_) => write!(f, "BitcoinPreSignAck(..)"),
+            Self::BitcoinSignatureRequest(_) => write!(f, "BitcoinSignatureRequest(..)"),
+            Self::BitcoinSignatureResponse(_) => write!(f, "BitcoinSignatureResponse(..)"),
         }
     }
 }
@@ -122,6 +127,18 @@ impl From<BitcoinPreSignRequest> for Payload {
 impl From<BitcoinPreSignAck> for Payload {
     fn from(value: BitcoinPreSignAck) -> Self {
         Self::BitcoinPreSignAck(value)
+    }
+}
+
+impl From<BitcoinSignatureRequest> for Payload {
+    fn from(value: BitcoinSignatureRequest) -> Self {
+        Self::BitcoinSignatureRequest(value)
+    }
+}
+
+impl From<BitcoinSignatureResponse> for Payload {
+    fn from(value: BitcoinSignatureResponse) -> Self {
+        Self::BitcoinSignatureResponse(value)
     }
 }
 
@@ -181,10 +198,6 @@ impl From<model::WithdrawalSigner> for SignerWithdrawalDecision {
 /// Represents a request to sign a Stacks transaction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StacksTransactionSignRequest {
-    /// **Deprecated**. This is the aggregate key that was output from DKG.
-    /// It was used to identify the signing set for the transaction, but is
-    /// unnecessary now.
-    pub aggregate_key: Option<PublicKey>,
     /// The contract call transaction to sign.
     pub contract_tx: StacksTx,
     /// The nonce to use for the transaction.
@@ -230,7 +243,9 @@ pub struct BitcoinPreSignRequest {
     pub fee_rate: f64,
     /// The total fee amount and the fee rate for the last transaction that
     /// used this UTXO as an input.
-    pub last_fees: Option<Fees>,
+    ///
+    /// This field is deprecated and will be removed in a future release.
+    pub last_fees: Option<crate::proto::Fees>,
 }
 
 impl std::fmt::Display for BitcoinPreSignRequest {
@@ -253,6 +268,22 @@ impl std::fmt::Display for BitcoinPreSignRequest {
 /// An acknowledgment of a [`BitcoinPreSignRequest`].
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BitcoinPreSignAck;
+
+/// A request for an independent BIP340 signature over a Bitcoin sighash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BitcoinSignatureRequest {
+    /// The sighash to sign.
+    pub sighash: model::SigHash,
+}
+
+/// An independent BIP340 signature produced by one signer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BitcoinSignatureResponse {
+    /// The sighash that was signed.
+    pub sighash: model::SigHash,
+    /// The signature over `sighash`.
+    pub signature: secp256k1::schnorr::Signature,
+}
 
 /// The identifier for a WSTS message.
 #[derive(Debug, Clone, Copy, PartialEq)]

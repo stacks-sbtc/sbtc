@@ -3,4 +3,7 @@ packages:
   - 'emily/cdk'
   - 'blocklist-openapi-gen'
   - 'emily/openapi-gen'
-  - 'devenv/local/docker-compose/stacking'
+  - 'docker/stacker/stacking'
+  - 'web/deposit-address-verifier'
+
+minimumReleaseAge: 10080 # 1 week

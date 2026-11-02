@@ -16,6 +16,38 @@ use bitcoin::hashes::Hash as _;
 pub struct PgWrite;
 
 impl PgWrite {
+    /// Persist a signer key set unless its stable identifier already exists.
+    async fn write_signer_key_set<'e, E>(
+        executor: &'e mut E,
+        key_set: &model::SignerKeySet,
+    ) -> Result<(), Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query(
+            r#"
+            INSERT INTO sbtc_signer.signer_key_sets (
+                key_set_id
+              , script_version
+              , script_pubkey
+              , signer_public_keys
+              , signatures_required
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (key_set_id) DO NOTHING
+            "#,
+        )
+        .bind(key_set.key_set_id)
+        .bind(key_set.version)
+        .bind(&key_set.script_pubkey)
+        .bind(key_set.public_keys.iter().collect::<Vec<_>>())
+        .bind(i32::from(key_set.signatures_required))
+        .execute(executor)
+        .await
+        .map_err(Error::SqlxQuery)?;
+        Ok(())
+    }
+
     async fn write_bitcoin_block<'e, E>(
         executor: &'e mut E,
         block: &model::BitcoinBlock,
@@ -89,7 +121,7 @@ impl PgWrite {
               , amount
               , max_fee
               , lock_time
-              , signers_public_key
+              , key_set_id
               , sender_script_pub_keys
               )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -103,7 +135,7 @@ impl PgWrite {
         .bind(i64::try_from(deposit_request.amount).map_err(Error::ConversionDatabaseInt)?)
         .bind(deposit_request.max_fee.to_be_bytes())
         .bind(i64::from(deposit_request.lock_time))
-        .bind(deposit_request.signers_public_key)
+        .bind(deposit_request.key_set_id)
         .bind(&deposit_request.sender_script_pub_keys)
         .execute(executor)
         .await
@@ -131,7 +163,7 @@ impl PgWrite {
         let mut amount = Vec::with_capacity(deposit_requests.len());
         let mut max_fee = Vec::with_capacity(deposit_requests.len());
         let mut lock_time = Vec::with_capacity(deposit_requests.len());
-        let mut signers_public_key = Vec::with_capacity(deposit_requests.len());
+        let mut key_set_id = Vec::with_capacity(deposit_requests.len());
         let mut sender_script_pubkeys = Vec::with_capacity(deposit_requests.len());
 
         for req in deposit_requests {
@@ -144,7 +176,7 @@ impl PgWrite {
             amount.push(i64::try_from(req.amount).map_err(Error::ConversionDatabaseInt)?);
             max_fee.push(req.max_fee.to_be_bytes());
             lock_time.push(i64::from(req.lock_time));
-            signers_public_key.push(req.signers_public_key);
+            key_set_id.push(req.key_set_id);
             // We need to join the addresses like this (and later split
             // them), because handling of multidimensional arrays in
             // postgres is tough. The naive approach of doing
@@ -168,7 +200,7 @@ impl PgWrite {
             , amount              AS (SELECT ROW_NUMBER() OVER (), amount FROM UNNEST($6::BIGINT[]) AS amount)
             , max_fee             AS (SELECT ROW_NUMBER() OVER (), max_fee FROM UNNEST($7::BYTEA[]) AS max_fee)
             , lock_time           AS (SELECT ROW_NUMBER() OVER (), lock_time FROM UNNEST($8::BIGINT[]) AS lock_time)
-            , signer_pub_keys     AS (SELECT ROW_NUMBER() OVER (), signers_public_key FROM UNNEST($9::BYTEA[]) AS signers_public_key)
+            , key_set_ids         AS (SELECT ROW_NUMBER() OVER (), key_set_id FROM UNNEST($9::BYTEA[]) AS key_set_id)
             , script_pub_keys     AS (SELECT ROW_NUMBER() OVER (), senders FROM UNNEST($10::VARCHAR[]) AS senders)
             INSERT INTO sbtc_signer.deposit_requests (
                   txid
@@ -179,7 +211,7 @@ impl PgWrite {
                 , amount
                 , max_fee
                 , lock_time
-                , signers_public_key
+                , key_set_id
                 , sender_script_pub_keys)
             SELECT
                 txid
@@ -190,7 +222,7 @@ impl PgWrite {
               , amount
               , max_fee
               , lock_time
-              , signers_public_key
+              , key_set_id
               , ARRAY(SELECT decode(UNNEST(regexp_split_to_array(senders, ',')), 'hex'))
             FROM tx_ids
             JOIN output_index USING (row_number)
@@ -200,7 +232,7 @@ impl PgWrite {
             JOIN amount USING (row_number)
             JOIN max_fee USING (row_number)
             JOIN lock_time USING (row_number)
-            JOIN signer_pub_keys USING (row_number)
+            JOIN key_set_ids USING (row_number)
             JOIN script_pub_keys USING (row_number)
             ON CONFLICT DO NOTHING"#,
         )
@@ -212,7 +244,7 @@ impl PgWrite {
         .bind(amount)
         .bind(max_fee)
         .bind(lock_time)
-        .bind(signers_public_key)
+        .bind(key_set_id)
         .bind(sender_script_pubkeys)
         .execute(executor)
         .await
@@ -466,10 +498,17 @@ impl PgWrite {
     {
         let started_at_bitcoin_block_height = i64::try_from(shares.started_at_bitcoin_block_height)
             .map_err(Error::ConversionDatabaseInt)?;
+        let key_set_id = model::KeySetId::from(PublicKeyXOnly::from(shares.aggregate_key));
+        let signer_public_keys: Vec<PublicKeyXOnly> = shares
+            .signer_set_public_keys
+            .iter()
+            .map(|key| model::KeySetVersion::V1.member_key(key))
+            .collect();
 
         sqlx::query(
             r#"
-            INSERT INTO sbtc_signer.dkg_shares (
+            WITH inserted_dkg AS (
+              INSERT INTO sbtc_signer.dkg_shares (
                 aggregate_key
               , tweaked_aggregate_key
               , encrypted_private_shares
@@ -480,9 +519,18 @@ impl PgWrite {
               , dkg_shares_status
               , started_at_bitcoin_block_hash
               , started_at_bitcoin_block_height
+              )
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              ON CONFLICT DO NOTHING
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            ON CONFLICT DO NOTHING"#,
+            INSERT INTO sbtc_signer.signer_key_sets (
+                key_set_id
+              , script_version
+              , script_pubkey
+              , signer_public_keys
+              , signatures_required
+            ) VALUES ($11, 'v1', $12, $13, $14)
+            ON CONFLICT (key_set_id) DO NOTHING"#,
         )
         .bind(shares.aggregate_key)
         .bind(shares.tweaked_aggregate_key)
@@ -494,6 +542,10 @@ impl PgWrite {
         .bind(shares.dkg_shares_status)
         .bind(shares.started_at_bitcoin_block_hash)
         .bind(started_at_bitcoin_block_height)
+        .bind(key_set_id)
+        .bind(&shares.script_pubkey)
+        .bind(&signer_public_keys)
+        .bind(i32::from(shares.signature_share_threshold))
         .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
@@ -752,7 +804,7 @@ impl PgWrite {
         let mut validation_result = Vec::with_capacity(sighashes.len());
         let mut is_valid_tx = Vec::with_capacity(sighashes.len());
         let mut will_sign = Vec::with_capacity(sighashes.len());
-        let mut aggregate_key = Vec::with_capacity(sighashes.len());
+        let mut key_set_id = Vec::with_capacity(sighashes.len());
 
         for tx_sighash in sighashes {
             txid.push(tx_sighash.txid);
@@ -767,7 +819,7 @@ impl PgWrite {
             validation_result.push(tx_sighash.validation_result);
             is_valid_tx.push(tx_sighash.is_valid_tx);
             will_sign.push(tx_sighash.will_sign);
-            aggregate_key.push(tx_sighash.aggregate_key);
+            key_set_id.push(tx_sighash.key_set_id);
         }
 
         sqlx::query(
@@ -781,7 +833,7 @@ impl PgWrite {
             , validation_result     AS (SELECT ROW_NUMBER() OVER (), validation_result FROM UNNEST($7::TEXT[]) AS validation_result)
             , is_valid_tx           AS (SELECT ROW_NUMBER() OVER (), is_valid_tx FROM UNNEST($8::BOOLEAN[]) AS is_valid_tx)
             , will_sign             AS (SELECT ROW_NUMBER() OVER (), will_sign FROM UNNEST($9::BOOLEAN[]) AS will_sign)
-            , x_only_public_key     AS (SELECT ROW_NUMBER() OVER (), x_only_public_key FROM UNNEST($10::BYTEA[]) AS x_only_public_key)
+            , key_set_id            AS (SELECT ROW_NUMBER() OVER (), key_set_id FROM UNNEST($10::BYTEA[]) AS key_set_id)
             INSERT INTO sbtc_signer.bitcoin_tx_sighashes (
                   txid
                 , chain_tip
@@ -792,7 +844,7 @@ impl PgWrite {
                 , validation_result
                 , is_valid_tx
                 , will_sign
-                , x_only_public_key
+                , key_set_id
             )
             SELECT
                 txid
@@ -804,7 +856,7 @@ impl PgWrite {
               , validation_result
               , is_valid_tx
               , will_sign
-              , x_only_public_key
+              , key_set_id
             FROM tx_ids
             JOIN chain_tip USING (row_number)
             JOIN prevout_txid USING (row_number)
@@ -814,7 +866,7 @@ impl PgWrite {
             JOIN validation_result USING (row_number)
             JOIN is_valid_tx USING (row_number)
             JOIN will_sign USING (row_number)
-            JOIN x_only_public_key USING (row_number)
+            JOIN key_set_id USING (row_number)
             ON CONFLICT DO NOTHING"#,
         )
         .bind(txid)
@@ -826,7 +878,7 @@ impl PgWrite {
         .bind(validation_result)
         .bind(is_valid_tx)
         .bind(will_sign)
-        .bind(aggregate_key)
+        .bind(key_set_id)
         .execute(executor)
         .await
         .map_err(Error::SqlxQuery)?;
@@ -1072,6 +1124,9 @@ impl PgWrite {
 }
 
 impl DbWrite for PgStore {
+    async fn write_signer_key_set(&self, key_set: &model::SignerKeySet) -> Result<(), Error> {
+        PgWrite::write_signer_key_set(self.get_connection().await?.as_mut(), key_set).await
+    }
     async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
         PgWrite::write_bitcoin_block(self.get_connection().await?.as_mut(), block).await
     }
@@ -1240,6 +1295,10 @@ impl DbWrite for PgStore {
 }
 
 impl DbWrite for PgTransaction<'_> {
+    async fn write_signer_key_set(&self, key_set: &model::SignerKeySet) -> Result<(), Error> {
+        let mut tx = self.tx.lock().await;
+        PgWrite::write_signer_key_set(tx.as_mut(), key_set).await
+    }
     async fn write_bitcoin_block(&self, block: &model::BitcoinBlock) -> Result<(), Error> {
         let mut tx = self.tx.lock().await;
         PgWrite::write_bitcoin_block(tx.as_mut(), block).await

@@ -92,6 +92,7 @@ Class | Method | HTTP request | Description
  - [DepositParameters](docs/DepositParameters.md)
  - [DepositStatus](docs/DepositStatus.md)
  - [DepositUpdate](docs/DepositUpdate.md)
+ - [DepositVersion](docs/DepositVersion.md)
  - [DepositWithStatus](docs/DepositWithStatus.md)
  - [ErrorResponse](docs/ErrorResponse.md)
  - [ExpectedFulfillmentInfo](docs/ExpectedFulfillmentInfo.md)

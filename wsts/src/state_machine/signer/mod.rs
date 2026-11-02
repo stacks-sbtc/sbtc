@@ -2,7 +2,7 @@ use core::num::TryFromIntError;
 use rand_core::{CryptoRng, RngCore};
 use std::collections::{BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::errors::AggregatorError;
 use crate::{
@@ -77,6 +77,18 @@ pub enum Error {
     /// A nonce response was invalid
     #[error("InvalidNonceResponse")]
     InvalidNonceResponse,
+    /// The same signer sent two different nonce responses for one round.
+    #[error("ConflictingNonceResponse")]
+    ConflictingNonceResponse,
+    /// Two signers claimed the same public nonce.
+    #[error("DuplicateNonce")]
+    DuplicateNonce,
+    /// A nonce request was invalid
+    #[error("InvalidNonceRequest")]
+    InvalidNonceRequest,
+    /// A signature share request was invalid
+    #[error("InvalidSignatureShareRequest")]
+    InvalidSignatureShareRequest,
     /// A signature share was invalid
     #[error("InvalidSignatureShare")]
     InvalidSignatureShare,
@@ -92,6 +104,12 @@ pub enum Error {
     /// An aggregator error occurred
     #[error("Aggregator error: {0}")]
     Aggregator(#[from] AggregatorError),
+    /// This happens when either the signer's private polynomial is not
+    /// set, or the polynomial commitment could not be constructed for this
+    /// signer because the private polynomial was degenerate (it had no
+    /// coefficients).
+    #[error("no polynomial commitment could be constructed for this signer")]
+    NoPolynomialCommitment,
 }
 
 impl From<TryFromIntError> for Error {
@@ -149,6 +167,32 @@ pub struct Signer {
     pub dkg_private_begin_msg: Option<DkgPrivateBegin>,
     /// the DKG end begin message received in this round
     pub dkg_end_begin_msg: Option<DkgEndBegin>,
+    /// Whether signature shares must use nonce responses received locally.
+    use_nonce_response_cache: bool,
+    /// The nonce request for the current signing round.
+    nonce_request: Option<NonceRequest>,
+    /// Nonce responses received for the current signing round.
+    nonce_responses: BTreeMap<u32, NonceResponse>,
+    /// The nonce conflict that invalidated the current signing round.
+    nonce_response_conflict: Option<NonceResponseConflict>,
+}
+
+/// Why a signing round was invalidated by its nonce responses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NonceResponseConflict {
+    /// The same signer sent two different nonce responses.
+    ConflictingResponse,
+    /// Two signers claimed the same public nonce.
+    DuplicateNonce,
+}
+
+impl From<NonceResponseConflict> for Error {
+    fn from(conflict: NonceResponseConflict) -> Self {
+        match conflict {
+            NonceResponseConflict::ConflictingResponse => Error::ConflictingNonceResponse,
+            NonceResponseConflict::DuplicateNonce => Error::DuplicateNonce,
+        }
+    }
 }
 
 impl Signer {
@@ -223,7 +267,21 @@ impl Signer {
             dkg_private_shares: Default::default(),
             dkg_private_begin_msg: Default::default(),
             dkg_end_begin_msg: Default::default(),
+            use_nonce_response_cache: true,
+            nonce_request: None,
+            nonce_responses: Default::default(),
+            nonce_response_conflict: None,
         })
+    }
+
+    /// Use the nonce responses in a signature share request rather than
+    /// the ones received from signer peers. The cache is enabled by
+    /// default.
+    pub fn disable_nonce_response_cache(&mut self) {
+        self.use_nonce_response_cache = false;
+        self.nonce_request = None;
+        self.nonce_responses.clear();
+        self.nonce_response_conflict = None;
     }
 
     /// Reset internal state
@@ -239,6 +297,9 @@ impl Signer {
         self.dkg_private_shares.clear();
         self.dkg_private_begin_msg = None;
         self.dkg_end_begin_msg = None;
+        self.nonce_request = None;
+        self.nonce_responses.clear();
+        self.nonce_response_conflict = None;
         self.state = State::Idle;
     }
 
@@ -274,7 +335,14 @@ impl Signer {
             Message::SignatureShareRequest(sign_share_request) => {
                 self.sign_share_request(sign_share_request)
             }
+            Message::NonceRequest(nonce_request) if self.use_nonce_response_cache => {
+                self.process_nonce_request_with_cache(nonce_request, rng)
+            }
             Message::NonceRequest(nonce_request) => self.nonce_request(nonce_request, rng),
+            Message::NonceResponse(nonce_response) if self.use_nonce_response_cache => {
+                self.cache_nonce_response(nonce_response)?;
+                Ok(vec![])
+            }
             _ => Ok(vec![]), // TODO
         };
 
@@ -550,10 +618,145 @@ impl Signer {
         Ok(msgs)
     }
 
+    /// Process a nonce request while preserving the nonce responses that we
+    /// received directly from the other signers.
+    ///
+    /// An exact duplicate request is a retransmission, so return the same
+    /// response without generating a new nonce or clearing peer responses. A
+    /// request for a later iteration starts a new attempt and therefore gets a
+    /// fresh nonce-response set.
+    fn process_nonce_request_with_cache<R: RngCore + CryptoRng>(
+        &mut self,
+        nonce_request: &NonceRequest,
+        rng: &mut R,
+    ) -> Result<Vec<Message>, Error> {
+        if let Some(current_request) = &self.nonce_request {
+            let same_round = current_request.dkg_id == nonce_request.dkg_id
+                && current_request.sign_id == nonce_request.sign_id
+                && current_request.sign_iter_id == nonce_request.sign_iter_id;
+
+            if same_round {
+                if let Some(conflict) = self.nonce_response_conflict {
+                    return Err(conflict.into());
+                }
+
+                if current_request != nonce_request {
+                    tracing::warn!("received conflicting NonceRequests for the same signing round");
+                    return Err(Error::InvalidNonceRequest);
+                }
+
+                let response = self
+                    .nonce_responses
+                    .get(&self.signer_id)
+                    .ok_or(Error::InvalidNonceResponse)?;
+                return Ok(vec![Message::NonceResponse(response.clone())]);
+            }
+
+            // FIRE increments the iteration ID when it retries a signing
+            // round. A delayed request from an earlier iteration must not
+            // discard nonce responses collected for the current iteration.
+            if current_request.dkg_id == nonce_request.dkg_id
+                && current_request.sign_id == nonce_request.sign_id
+                && nonce_request.sign_iter_id < current_request.sign_iter_id
+            {
+                tracing::warn!(
+                    current_sign_iter_id = %current_request.sign_iter_id,
+                    received_sign_iter_id = %nonce_request.sign_iter_id,
+                    "ignoring a stale NonceRequest"
+                );
+                return Ok(vec![]);
+            }
+        }
+
+        self.nonce_responses.clear();
+        self.nonce_response_conflict = None;
+        self.nonce_request = Some(nonce_request.clone());
+        self.nonce_request(nonce_request, rng)
+    }
+
+    fn cache_nonce_response(&mut self, response: &NonceResponse) -> Result<(), Error> {
+        if let Some(conflict) = self.nonce_response_conflict {
+            return Err(conflict.into());
+        }
+
+        let Some(request) = &self.nonce_request else {
+            return Err(Error::InvalidNonceResponse);
+        };
+        let Some(expected_key_ids) = self.public_keys.signer_key_ids.get(&response.signer_id)
+        else {
+            tracing::warn!(signer_id = %response.signer_id, "unknown signer ID");
+            return Err(Error::InvalidNonceResponse);
+        };
+
+        let response_key_ids = response.key_ids.iter().copied().collect::<HashSet<_>>();
+        let wrong_round = response.dkg_id != request.dkg_id
+            || response.sign_id != request.sign_id
+            || response.sign_iter_id != request.sign_iter_id
+            || response.message != request.message;
+        let invalid_ownership = response.key_ids.len() != expected_key_ids.len()
+            || response_key_ids != *expected_key_ids
+            || response.nonces.len() != 1
+            || !response.nonces[0].is_valid();
+
+        let signer_id = response.signer_id;
+        if wrong_round || invalid_ownership {
+            tracing::warn!(%signer_id, %wrong_round, %invalid_ownership, "received an invalid NonceResponse");
+            return Err(Error::InvalidNonceResponse);
+        }
+
+        match self.nonce_responses.get(&response.signer_id) {
+            // Exact duplicates are harmless retransmissions. A signer must
+            // not send two different nonces for the same signing round.
+            Some(cached_response) if cached_response == response => return Ok(()),
+            Some(_) => {
+                tracing::warn!(
+                    signer_id = %response.signer_id,
+                    "received conflicting NonceResponses for the same signing round"
+                );
+                return Err(self.record_nonce_conflict(NonceResponseConflict::ConflictingResponse));
+            }
+            None => {}
+        };
+
+        let responses = self
+            .nonce_responses
+            .values()
+            .chain(std::iter::once(response));
+
+        if Self::has_duplicate_nonces(responses) {
+            tracing::warn!(
+                signer_id = %response.signer_id,
+                "received a NonceResponse containing a nonce already claimed by another signer"
+            );
+            return Err(self.record_nonce_conflict(NonceResponseConflict::DuplicateNonce));
+        }
+
+        self.nonce_responses
+            .insert(response.signer_id, response.clone());
+        Ok(())
+    }
+
+    fn has_duplicate_nonces<'a>(responses: impl IntoIterator<Item = &'a NonceResponse>) -> bool {
+        let mut nonces = HashSet::new();
+        responses
+            .into_iter()
+            .flat_map(|response| response.nonces.iter())
+            .any(|nonce| !nonces.insert(nonce))
+    }
+
+    fn record_nonce_conflict(&mut self, conflict: NonceResponseConflict) -> Error {
+        self.nonce_response_conflict = Some(conflict);
+        conflict.into()
+    }
+
     fn sign_share_request(
         &mut self,
         sign_request: &SignatureShareRequest,
     ) -> Result<Vec<Message>, Error> {
+        if let Some(conflict) = self.nonce_response_conflict {
+            return Err(conflict.into());
+        }
+
         let signer_id_set = sign_request
             .nonce_responses
             .iter()
@@ -573,8 +776,15 @@ impl Signer {
             return Err(Error::InvalidNonceResponse);
         }
 
-        let nonces = sign_request
-            .nonce_responses
+        if Self::has_duplicate_nonces(&sign_request.nonce_responses) {
+            warn!("received a SignatureShareRequest containing duplicate nonces");
+            return Err(self.record_nonce_conflict(NonceResponseConflict::DuplicateNonce));
+        }
+
+        let nonce_responses =
+            self.nonce_responses_for_signature_share_request(sign_request, &signer_id_set)?;
+
+        let nonces = nonce_responses
             .iter()
             .flat_map(|nr| nr.nonces.clone())
             .collect::<Vec<PublicNonce>>();
@@ -592,18 +802,18 @@ impl Signer {
         debug!(signer_id = %self.signer_id, "received a valid SignatureShareRequest");
 
         if signer_id_set.contains(&self.signer_id) {
-            let key_ids: Vec<u32> = sign_request
-                .nonce_responses
+            let key_ids: Vec<u32> = signer_id_set
                 .iter()
-                .flat_map(|nr| nr.key_ids.iter().copied())
-                .collect::<Vec<u32>>();
+                .filter_map(|signer_id| self.public_keys.signer_key_ids.get(signer_id).cloned())
+                .flatten()
+                .collect();
 
             let signer_ids = signer_id_set.into_iter().collect::<Vec<_>>();
             let msg = &sign_request.message;
             let signature_shares = match sign_request.signature_type {
-                SignatureType::Taproot(merkle_root) => {
+                SignatureType::Taproot => {
                     self.signer
-                        .sign_taproot(msg, &signer_ids, &key_ids, &nonces, merkle_root)?
+                        .sign_taproot(msg, &signer_ids, &key_ids, &nonces, None)?
                 }
                 SignatureType::Schnorr => {
                     self.signer
@@ -637,6 +847,69 @@ impl Signer {
         }
     }
 
+    fn nonce_responses_for_signature_share_request<'a>(
+        &'a self,
+        sign_request: &'a SignatureShareRequest,
+        signer_ids: &BTreeSet<u32>,
+    ) -> Result<Vec<&'a NonceResponse>, Error> {
+        if self.use_nonce_response_cache {
+            let Some(nonce_request) = &self.nonce_request else {
+                return Err(Error::InvalidSignatureShareRequest);
+            };
+            if sign_request.dkg_id != nonce_request.dkg_id
+                || sign_request.sign_id != nonce_request.sign_id
+                || sign_request.sign_iter_id != nonce_request.sign_iter_id
+                || sign_request.message != nonce_request.message
+                || sign_request.signature_type != nonce_request.signature_type
+            {
+                return Err(Error::InvalidSignatureShareRequest);
+            }
+
+            let nonce_responses = signer_ids
+                .iter()
+                .map(|signer_id| {
+                    self.nonce_responses
+                        .get(signer_id)
+                        .ok_or(Error::InvalidSignatureShareRequest)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // We have a cached response for every signer in the request, so
+            // the coordinator's copies should match ours exactly. A mismatch
+            // means that either the coordinator or the signer is misbehaving,
+            // and a signature share computed from our view would not verify
+            // against theirs anyway.
+            for response in &sign_request.nonce_responses {
+                let cached_response = self.nonce_responses.get(&response.signer_id);
+                if cached_response != Some(response) {
+                    tracing::warn!(
+                        signer_id = %response.signer_id,
+                        "received a SignatureShareRequest with a NonceResponse that differs from the one we received"
+                    );
+                    return Err(Error::InvalidSignatureShareRequest);
+                }
+            }
+
+            let num_key_ids = nonce_responses
+                .iter()
+                .map(|response| response.key_ids.len())
+                .sum::<usize>();
+
+            if num_key_ids < self.threshold as usize {
+                tracing::warn!(
+                    %num_key_ids,
+                    threshold = %self.threshold,
+                    "received a SignatureShareRequest with insufficient key IDs"
+                );
+                return Err(Error::InvalidSignatureShareRequest);
+            }
+
+            Ok(nonce_responses)
+        } else {
+            Ok(sign_request.nonce_responses.iter().collect())
+        }
+    }
+
     fn dkg_begin<R: RngCore + CryptoRng>(
         &mut self,
         dkg_begin: &DkgBegin,
@@ -667,7 +940,28 @@ impl Signer {
         };
 
         if let Some(poly) = self.signer.get_poly_commitment(rng) {
-            public_share.comms.push((poly.id.id.get_u32(), poly));
+            public_share.comms.push((poly.id().id.get_u32(), poly));
+        } else {
+            // There are two cases where this can happen:
+            // 1. The signer's private polynomial is not set. This should
+            //    never be the case, since v2::Party sets the private
+            //    polynomial when it is created and the private polynomial
+            //    is never cleared in production code.
+            // 2. The signers private polynomial is degenerate, leading to
+            //    a failure to construct a PolyCommitment. While a
+            //    degenerate private polynomial is allowed in the
+            //    `polynomial::Polynomial` type, we do not construct such
+            //    polynomials here.
+            //
+            // So with current code, this should never happen. A TODO is to
+            // change the code to make it a compile time guarantee.
+
+            error!(
+                signer_id = %self.signer_id,
+                dkg_id = %self.dkg_id,
+                "no polynomial commitment for this signer, programmer error!",
+            );
+            return Err(Error::NoPolynomialCommitment);
         }
 
         let public_share = Message::DkgPublicShares(public_share);
@@ -920,17 +1214,468 @@ impl StateMachine<State, Error> for Signer {
 pub mod test {
     use crate::{
         common::PolyCommitment,
-        curve::{ecdsa, scalar::Scalar},
-        net::{DkgBegin, DkgEndBegin, DkgPrivateBegin, DkgPublicShares, DkgStatus, Message},
+        curve::{ecdsa, point::Point, scalar::Scalar},
+        net::{
+            DkgBegin, DkgEndBegin, DkgPrivateBegin, DkgPublicShares, DkgStatus, Message,
+            NonceRequest, NonceResponse, SignatureShareRequest, SignatureType,
+        },
         schnorr::ID,
         state_machine::{
-            signer::{ConfigError, Error, Signer, State as SignerState},
+            coordinator::{
+                fire::Coordinator as FireCoordinator,
+                test::{run_dkg, run_sign},
+            },
+            signer::{ConfigError, Error, NonceResponseConflict, Signer, State as SignerState},
             PublicKeys,
         },
         util::create_rng,
     };
 
-    use std::collections::HashSet;
+    use std::collections::{BTreeSet, HashSet};
+
+    fn signing_test_signers(
+        num_signers: u32,
+        threshold: u32,
+    ) -> (Vec<Signer>, impl rand_core::RngCore + rand_core::CryptoRng) {
+        let mut rng = create_rng();
+        let private_keys = (0..num_signers)
+            .map(|_| Scalar::random(&mut rng))
+            .collect::<Vec<_>>();
+        let mut public_keys = PublicKeys::default();
+
+        for (signer_id, private_key) in private_keys.iter().enumerate() {
+            let signer_id = signer_id as u32;
+            let key_id = signer_id + 1;
+            let public_key = ecdsa::PublicKey::new(private_key).unwrap();
+            public_keys.signers.insert(signer_id, public_key);
+            public_keys.key_ids.insert(key_id, public_key);
+            public_keys
+                .signer_key_ids
+                .insert(signer_id, HashSet::from([key_id]));
+        }
+
+        let signers = private_keys
+            .into_iter()
+            .enumerate()
+            .map(|(signer_id, private_key)| {
+                let signer_id = signer_id as u32;
+                Signer::new(
+                    threshold,
+                    num_signers,
+                    num_signers,
+                    num_signers,
+                    signer_id,
+                    vec![signer_id + 1],
+                    private_key,
+                    public_keys.clone(),
+                    &mut rng,
+                )
+                .unwrap()
+            })
+            .collect();
+
+        (signers, rng)
+    }
+
+    fn nonce_response(messages: &[Message]) -> NonceResponse {
+        let [Message::NonceResponse(response)] = messages else {
+            panic!("expected one nonce response")
+        };
+        response.clone()
+    }
+
+    #[test]
+    fn signature_share_request_uses_cached_nonce_responses() {
+        let (mut signers, mut rng) = signing_test_signers(3, 2);
+        let nonce_request = NonceRequest {
+            dkg_id: 1,
+            sign_id: 2,
+            sign_iter_id: 3,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+        let responses = signers
+            .iter_mut()
+            .map(|signer| {
+                let messages = signer
+                    .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                    .unwrap();
+                nonce_response(&messages)
+            })
+            .collect::<Vec<_>>();
+
+        signers[0]
+            .process_inbound_messages(
+                &[
+                    Message::NonceResponse(responses[0].clone()),
+                    Message::NonceResponse(responses[1].clone()),
+                ],
+                &mut rng,
+            )
+            .unwrap();
+
+        let share_request = SignatureShareRequest {
+            dkg_id: nonce_request.dkg_id,
+            sign_id: nonce_request.sign_id,
+            sign_iter_id: nonce_request.sign_iter_id,
+            nonce_responses: vec![responses[0].clone(), responses[1].clone()],
+            message: nonce_request.message.clone(),
+            signature_type: nonce_request.signature_type,
+        };
+        let signer_ids = share_request
+            .nonce_responses
+            .iter()
+            .map(|response| response.signer_id)
+            .collect::<BTreeSet<_>>();
+        let used_responses = signers[0]
+            .nonce_responses_for_signature_share_request(&share_request, &signer_ids)
+            .unwrap();
+
+        assert_eq!(used_responses, vec![&responses[0], &responses[1]]);
+
+        // If the coordinator tampers with a nonce response then the
+        // request is rejected rather than silently using our copy.
+        let mut coordinator_response = responses[1].clone();
+        coordinator_response
+            .nonces
+            .push(responses[2].nonces[0].clone());
+        let tampered_request = SignatureShareRequest {
+            nonce_responses: vec![responses[0].clone(), coordinator_response],
+            ..share_request.clone()
+        };
+        assert!(matches!(
+            signers[0].nonce_responses_for_signature_share_request(&tampered_request, &signer_ids),
+            Err(Error::InvalidSignatureShareRequest)
+        ));
+
+        let missing_response_request = SignatureShareRequest {
+            nonce_responses: vec![responses[0].clone(), responses[2].clone()],
+            ..share_request
+        };
+        let signer_ids = missing_response_request
+            .nonce_responses
+            .iter()
+            .map(|response| response.signer_id)
+            .collect::<BTreeSet<_>>();
+        assert!(matches!(
+            signers[0].nonce_responses_for_signature_share_request(
+                &missing_response_request,
+                &signer_ids
+            ),
+            Err(Error::InvalidSignatureShareRequest)
+        ));
+    }
+
+    #[test]
+    fn nonce_response_rejects_a_second_response_from_the_same_signer() {
+        let (mut signers, mut rng) = signing_test_signers(3, 2);
+        let nonce_request = NonceRequest {
+            dkg_id: 1,
+            sign_id: 2,
+            sign_iter_id: 3,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+        let first = nonce_response(
+            &signers[0]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let other = nonce_response(
+            &signers[1]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let conflicting = NonceResponse {
+            nonces: other.nonces,
+            ..first.clone()
+        };
+
+        signers[0]
+            .process(&Message::NonceResponse(first), &mut rng)
+            .unwrap();
+        assert!(matches!(
+            signers[0].process(&Message::NonceResponse(conflicting), &mut rng),
+            Err(Error::ConflictingNonceResponse)
+        ));
+        assert_eq!(
+            signers[0].nonce_response_conflict,
+            Some(NonceResponseConflict::ConflictingResponse)
+        );
+        assert!(matches!(
+            signers[0].process(&Message::NonceRequest(nonce_request), &mut rng),
+            Err(Error::ConflictingNonceResponse)
+        ));
+    }
+
+    #[test]
+    fn nonce_response_rejects_nonce_claimed_by_another_signer() {
+        let (mut signers, mut rng) = signing_test_signers(3, 2);
+        let nonce_request = NonceRequest {
+            dkg_id: 1,
+            sign_id: 2,
+            sign_iter_id: 3,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+        let own_response = nonce_response(
+            &signers[0]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let mut copied_response = nonce_response(
+            &signers[1]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        copied_response.nonces = own_response.nonces.clone();
+
+        signers[0]
+            .process(&Message::NonceResponse(own_response), &mut rng)
+            .unwrap();
+        assert!(matches!(
+            signers[0].process(&Message::NonceResponse(copied_response), &mut rng),
+            Err(Error::DuplicateNonce)
+        ));
+        assert_eq!(
+            signers[0].nonce_response_conflict,
+            Some(NonceResponseConflict::DuplicateNonce)
+        );
+        assert!(matches!(
+            signers[0].process(&Message::NonceRequest(nonce_request.clone()), &mut rng),
+            Err(Error::DuplicateNonce)
+        ));
+
+        let next_request = NonceRequest {
+            sign_iter_id: nonce_request.sign_iter_id + 1,
+            ..nonce_request
+        };
+        signers[0]
+            .process(&Message::NonceRequest(next_request), &mut rng)
+            .unwrap();
+        assert!(signers[0].nonce_response_conflict.is_none());
+    }
+
+    #[test]
+    fn signature_share_request_rejects_duplicate_nonces() {
+        let (mut signers, mut rng) = signing_test_signers(3, 2);
+        let nonce_request = NonceRequest {
+            dkg_id: 1,
+            sign_id: 2,
+            sign_iter_id: 3,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+        let own_response = nonce_response(
+            &signers[0]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let mut copied_response = nonce_response(
+            &signers[1]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        copied_response.nonces = own_response.nonces.clone();
+
+        signers[0].disable_nonce_response_cache();
+        let share_request = SignatureShareRequest {
+            dkg_id: nonce_request.dkg_id,
+            sign_id: nonce_request.sign_id,
+            sign_iter_id: nonce_request.sign_iter_id,
+            nonce_responses: vec![own_response, copied_response],
+            message: nonce_request.message,
+            signature_type: nonce_request.signature_type,
+        };
+
+        assert!(matches!(
+            signers[0].sign_share_request(&share_request),
+            Err(Error::DuplicateNonce)
+        ));
+        assert_eq!(
+            signers[0].nonce_response_conflict,
+            Some(NonceResponseConflict::DuplicateNonce)
+        );
+    }
+
+    #[test]
+    fn duplicate_nonce_request_preserves_cached_responses() {
+        let (mut signers, mut rng) = signing_test_signers(3, 2);
+        let nonce_request = NonceRequest {
+            dkg_id: 1,
+            sign_id: 2,
+            sign_iter_id: 3,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+
+        let own_response = nonce_response(
+            &signers[0]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let peer_response = nonce_response(
+            &signers[1]
+                .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        signers[0]
+            .process_inbound_messages(
+                &[
+                    Message::NonceResponse(own_response.clone()),
+                    Message::NonceResponse(peer_response.clone()),
+                ],
+                &mut rng,
+            )
+            .unwrap();
+
+        let duplicate_response = nonce_response(
+            &signers[0]
+                .process(&Message::NonceRequest(nonce_request), &mut rng)
+                .unwrap(),
+        );
+
+        assert_eq!(duplicate_response, own_response);
+        assert_eq!(signers[0].nonce_responses.len(), 2);
+        assert_eq!(
+            signers[0].nonce_responses.get(&peer_response.signer_id),
+            Some(&peer_response)
+        );
+    }
+
+    #[test]
+    fn stale_nonce_request_preserves_current_iteration() {
+        let (mut signers, mut rng) = signing_test_signers(3, 2);
+        let stale_request = NonceRequest {
+            dkg_id: 1,
+            sign_id: 2,
+            sign_iter_id: 3,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+        let current_request = NonceRequest {
+            sign_iter_id: stale_request.sign_iter_id + 1,
+            ..stale_request.clone()
+        };
+
+        for signer in &mut signers {
+            signer
+                .process(&Message::NonceRequest(stale_request.clone()), &mut rng)
+                .unwrap();
+        }
+
+        let own_response = nonce_response(
+            &signers[0]
+                .process(&Message::NonceRequest(current_request.clone()), &mut rng)
+                .unwrap(),
+        );
+        let peer_response = nonce_response(
+            &signers[1]
+                .process(&Message::NonceRequest(current_request), &mut rng)
+                .unwrap(),
+        );
+        signers[0]
+            .process_inbound_messages(
+                &[
+                    Message::NonceResponse(own_response.clone()),
+                    Message::NonceResponse(peer_response.clone()),
+                ],
+                &mut rng,
+            )
+            .unwrap();
+
+        let messages = signers[0]
+            .process(&Message::NonceRequest(stale_request), &mut rng)
+            .unwrap();
+
+        assert!(messages.is_empty());
+        assert_eq!(signers[0].nonce_responses.len(), 2);
+        assert_eq!(
+            signers[0].nonce_responses.get(&own_response.signer_id),
+            Some(&own_response)
+        );
+        assert_eq!(
+            signers[0].nonce_responses.get(&peer_response.signer_id),
+            Some(&peer_response)
+        );
+    }
+
+    #[test]
+    fn signing_with_cached_nonce_responses() {
+        let (mut coordinators, mut signers) = run_dkg::<FireCoordinator>(5, 1);
+
+        run_sign(
+            &mut coordinators,
+            &mut signers,
+            b"message",
+            SignatureType::Taproot,
+        );
+    }
+
+    #[test]
+    fn duplicate_nonce_request_after_signing_does_not_reuse_nonce() {
+        let (_, mut signers) = run_dkg::<FireCoordinator>(5, 1);
+        let mut rng = create_rng();
+
+        // 1. Receive a nonce request.
+        let nonce_request = NonceRequest {
+            dkg_id: signers[0].dkg_id,
+            sign_id: 1,
+            sign_iter_id: 1,
+            message: vec![4; 32],
+            signature_type: SignatureType::Taproot,
+        };
+        let responses = signers
+            .iter_mut()
+            .map(|signer| {
+                let messages = signer
+                    .process(&Message::NonceRequest(nonce_request.clone()), &mut rng)
+                    .unwrap();
+                nonce_response(&messages)
+            })
+            .collect::<Vec<_>>();
+
+        // 2. Receive the required peer responses.
+        let response_messages = responses
+            .iter()
+            .cloned()
+            .map(Message::NonceResponse)
+            .collect::<Vec<_>>();
+        signers[0]
+            .process_inbound_messages(&response_messages, &mut rng)
+            .unwrap();
+
+        // 3. Produce one signature share.
+        let share_request = Message::SignatureShareRequest(SignatureShareRequest {
+            dkg_id: nonce_request.dkg_id,
+            sign_id: nonce_request.sign_id,
+            sign_iter_id: nonce_request.sign_iter_id,
+            nonce_responses: responses.clone(),
+            message: nonce_request.message.clone(),
+            signature_type: nonce_request.signature_type,
+        });
+        let messages = signers[0].process(&share_request, &mut rng).unwrap();
+        assert!(matches!(
+            messages.as_slice(),
+            [Message::SignatureShareResponse(_)]
+        ));
+
+        // 4. Receive the duplicate nonce request and retransmit the same
+        //    public response.
+        let messages = signers[0]
+            .process(&Message::NonceRequest(nonce_request), &mut rng)
+            .unwrap();
+        assert_eq!(nonce_response(&messages), responses[0]);
+
+        // 5. Another signature share request fails because the private
+        //    nonce was consumed when producing the first share.
+        assert!(matches!(
+            signers[0].process(&share_request, &mut rng),
+            Err(Error::Aggregator(
+                crate::errors::AggregatorError::MissingNonce
+            ))
+        ));
+    }
 
     #[test]
     fn bad_config_v2() {
@@ -1092,7 +1837,7 @@ pub mod test {
         let mut signer =
             Signer::new(1, 1, 1, 1, 0, vec![1], private_key, public_keys, &mut rng).unwrap();
         let comms = if let Some(comm) = signer.signer.get_poly_commitment(&mut rng) {
-            vec![(comm.id.id.get_u32(), comm.clone())]
+            vec![(comm.id().id.get_u32(), comm.clone())]
         } else {
             vec![]
         };
@@ -1127,10 +1872,11 @@ pub mod test {
         signer.state = SignerState::DkgPublicGather;
         signer.commitments.insert(
             1,
-            PolyCommitment {
-                id: ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
-                poly: vec![],
-            },
+            PolyCommitment::new(
+                ID::new(&Scalar::new(), &Scalar::new(), &mut rng),
+                vec![Point::new()],
+            )
+            .expect("test commitment has one point"),
         );
 
         // public_shares_done should be true

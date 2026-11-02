@@ -28,6 +28,8 @@ use signer::network::libp2p::SignerSwarmBuilder;
 use signer::request_decider::RequestDeciderEventLoop;
 use signer::stacks::api::StacksClient;
 use signer::storage::DbRead as _;
+use signer::storage::DbWrite as _;
+use signer::storage::model;
 use signer::storage::postgres::PgStore;
 use signer::transaction_coordinator;
 use signer::transaction_signer;
@@ -37,12 +39,6 @@ use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument as _;
 use tracing::Span;
-
-/// This is how many seconds the P2P swarm will wait before attempting to
-/// bootstrap (i.e. connect to other peers). Three seconds is a sane default
-/// value, giving the swarm a few seconds to start up and bind listener(s)
-/// before proceeding.
-const INITIAL_BOOTSTRAP_DELAY_SECS: u64 = 3;
 
 // Timeout after which signer info logger will print new log.
 // Currently chosen to be 1 hour.
@@ -126,6 +122,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing::error!(%err, "failed to apply database migrations");
         })?;
     }
+
+    // This row is entirely config-derived, so persist it before starting any
+    // signer event loops.
+    let v2_key_set = settings.signer.v2_signer_key_set()?;
+    db.write_signer_key_set(&model::SignerKeySet::from(v2_key_set))
+        .await?;
 
     // Initialize the signer context.
     let context = SignerContext::<
@@ -261,18 +263,6 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
     tracing::debug!("building the libp2p swarm");
     let config = ctx.config();
 
-    let enable_quic = config.signer.p2p.is_quic_used();
-
-    // Limit the number of signers to the maximum number of signer pubkeys we
-    // can support. Note that this value is used as a base value for swarm
-    // connection limit calculations.
-    let num_signers = ctx
-        .state()
-        .current_signer_set()
-        .num_signers()
-        .try_into()
-        .unwrap_or(signer::MAX_KEYS);
-
     // Look for known peers in the database which will be included as part of
     // the bootstrapping process. We will only include peers that have been
     // dialed within the KNOWN_PEER_WINDOW, and we will limit the number of
@@ -297,7 +287,7 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
             .unwrap_or_default();
 
         // Sort the peers by last successful dialed time, duration-descending.
-        db_peers.sort_unstable_by(|a, b| b.last_dialed_at.cmp(&a.last_dialed_at));
+        db_peers.sort_unstable_by_key(|a| std::cmp::Reverse(a.last_dialed_at));
 
         // Create a list of known peers, filtering out those that have not been
         // dialed within the KNOWN_PEER_WINDOW or are already included as seed
@@ -325,15 +315,8 @@ async fn run_libp2p_swarm(ctx: impl Context) -> Result<(), Error> {
     };
 
     // Build the swarm.
-    let mut swarm = SignerSwarmBuilder::new(&config.signer.private_key)
-        .add_listen_endpoints(&ctx.config().signer.p2p.listen_on)
-        .add_seed_addrs(&ctx.config().signer.p2p.seeds)
+    let mut swarm = SignerSwarmBuilder::from(&ctx)
         .add_known_peers(&known_peers)
-        .add_external_addresses(&ctx.config().signer.p2p.public_endpoints)
-        .enable_mdns(config.signer.p2p.enable_mdns)
-        .enable_quic_transport(enable_quic)
-        .with_initial_bootstrap_delay(Duration::from_secs(INITIAL_BOOTSTRAP_DELAY_SECS))
-        .with_num_signers(num_signers)
         .build()?;
 
     // Start the libp2p swarm. This will run until either the shutdown signal is
@@ -357,7 +340,7 @@ async fn run_api(ctx: impl Context + 'static) -> Result<(), Error> {
     let request_id = Arc::new(AtomicU64::new(0));
 
     // Build the signer API application
-    let app = api::get_router()
+    let app = api::get_router(signer::NEW_BLOCK_BODY_LIMIT)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(|request: &Request<_>| {

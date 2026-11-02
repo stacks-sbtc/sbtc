@@ -9,9 +9,9 @@ sources:
       - http://sbtc-signer:9184
 
 transforms:
-  # Parse the JSON log messages from the signer's stdout.
-  # The fluentd driver sends the log line in the "log" field.
-  # If it parses as JSON, merge it into the top-level event.
+  # The fluentd driver sends JSON with the service's log line in the "log"
+  # field. On AWS, we expect the logs to be in a "message" field, so we
+  # just need to rename the "log" field to "message".
   sbtc_signer_logs:
     type: remap
     inputs:
@@ -23,12 +23,7 @@ transforms:
       .docker_host = del(.host)
       .docker_source = del(.source)
       .docker_source_type = del(.source_type)
-
-      parsed, err = parse_json(.log)
-      if err == null && is_object(parsed) {
-        . = merge(., object!(parsed))
-        del(.log)
-      }
+      .message = del(.log)
 
   # This is required because Cloudwatch is picky about empty tags ("dimensions")
   # And our `build` metric has an empty revision.

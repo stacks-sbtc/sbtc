@@ -38,15 +38,6 @@ use super::SBTC_REGISTRY_CONTRACT_NAME;
 /// See https://github.com/stacks-network/sbtc/issues/501.
 static SBTC_REGISTRY_IDENTIFIER: OnceLock<QualifiedContractIdentifier> = OnceLock::new();
 
-/// Maximum request body size for the event observer endpoint.
-///
-/// Stacks blocks have a limit of 2 MB, which is enforced at the p2p level, but
-/// event observer events can be larger than that since they contain the
-/// subscribed sbtc events. Luckily, the size of the sbtc events themselves are
-/// bounded by the size of the transactions that create them, so a limit of 8 MB
-/// will be fine since it is twice as high as required.
-pub const EVENT_OBSERVER_BODY_LIMIT: usize = 8 * 1024 * 1024;
-
 /// A handler of `POST /new_block` webhook events.
 ///
 /// # Notes
@@ -190,7 +181,7 @@ pub async fn new_block_handler(state: State<ApiState<impl Context>>, body: Strin
     bitcoin_outpoint = %event.outpoint,
     stacks_txid = %event.txid
 ))]
-async fn handle_completed_deposit(
+pub async fn handle_completed_deposit(
     ctx: &impl Context,
     event: CompletedDepositEvent,
 ) -> Result<(), Error> {
@@ -214,7 +205,7 @@ async fn handle_completed_deposit(
     stacks_txid = %event.txid,
     request_id = %event.request_id
 ))]
-async fn handle_withdrawal_accept(
+pub async fn handle_withdrawal_accept(
     ctx: &impl Context,
     event: WithdrawalAcceptEvent,
 ) -> Result<(), Error> {
@@ -239,7 +230,7 @@ async fn handle_withdrawal_accept(
     stacks_txid = %event.txid,
     request_id = %event.request_id
 ))]
-async fn handle_withdrawal_create(
+pub async fn handle_withdrawal_create(
     ctx: &impl Context,
     event: WithdrawalRequest,
 ) -> Result<(), Error> {
@@ -264,7 +255,7 @@ async fn handle_withdrawal_create(
     stacks_txid = %event.txid,
     request_id = %event.request_id
 ))]
-async fn handle_withdrawal_reject(
+pub async fn handle_withdrawal_reject(
     ctx: &impl Context,
     event: WithdrawalRejectEvent,
 ) -> Result<(), Error> {
@@ -277,12 +268,13 @@ async fn handle_withdrawal_reject(
     Ok(())
 }
 
+/// Processes a key rotation event.
 #[tracing::instrument(skip_all, fields(
     stacks_txid = %event.txid,
     address = %event.address,
     aggregate_key = %event.aggregate_key
 ))]
-async fn handle_key_rotation(ctx: &impl Context, event: KeyRotationEvent) -> Result<(), Error> {
+pub async fn handle_key_rotation(ctx: &impl Context, event: KeyRotationEvent) -> Result<(), Error> {
     ctx.get_storage_mut()
         .write_rotate_keys_transaction(&event)
         .await?;
@@ -317,6 +309,9 @@ mod tests {
     use crate::testing::context::*;
     use crate::testing::get_rng;
     use crate::testing::storage::model::TestData;
+
+    /// The maximum request body size for the new block endpoint.
+    const TEST_NEW_BLOCK_LIMIT: usize = u16::MAX as usize;
 
     /// These were generated from a stacks node after running the
     /// "complete-deposit standard recipient", "accept-withdrawal",
@@ -658,7 +653,7 @@ mod tests {
         let event = KeyRotationEvent {
             block_id: block_id.clone(),
             txid: sbtc::events::StacksTxid(fake::Faker.fake_with_rng(&mut rng)),
-            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1,
+            new_aggregate_pubkey: SECP256K1.generate_keypair(&mut rng).1.into(),
             new_keys: (0..3)
                 .map(|_| SECP256K1.generate_keypair(&mut rng).1)
                 .collect(),
@@ -677,8 +672,8 @@ mod tests {
         assert_eq!(stored_events, &vec![event]);
     }
 
-    #[test_case(EVENT_OBSERVER_BODY_LIMIT, true; "event within limit")]
-    #[test_case(EVENT_OBSERVER_BODY_LIMIT + 1, false; "event over limit")]
+    #[test_case(TEST_NEW_BLOCK_LIMIT, true; "event within limit")]
+    #[test_case(TEST_NEW_BLOCK_LIMIT + 1, false; "event over limit")]
     #[tokio::test]
     async fn test_big_event(event_size: usize, success: bool) {
         let ctx = TestContext::builder()
@@ -687,11 +682,14 @@ mod tests {
             .build();
 
         let state = ApiState { ctx: ctx.clone() };
-        let app = get_router().with_state(state);
+        let app = get_router(TEST_NEW_BLOCK_LIMIT).with_state(state);
 
         let db = ctx.inner_storage();
         // We don't have anything here yet
         assert!(db.lock().await.rotate_keys_transactions.is_empty());
+
+        // Sanity check that the limit is larger than the event.
+        more_asserts::assert_gt!(TEST_NEW_BLOCK_LIMIT, ROTATE_KEYS_WEBHOOK.len());
 
         let mut event: String = " ".repeat(event_size - ROTATE_KEYS_WEBHOOK.len());
         event.push_str(ROTATE_KEYS_WEBHOOK);

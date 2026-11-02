@@ -64,7 +64,7 @@ pub async fn get_deposit(
     ) -> Result<impl warp::reply::Reply, Error> {
         // Make key.
         let key = DepositEntryKey {
-            bitcoin_txid,
+            bitcoin_txid: bitcoin_txid.to_ascii_lowercase(),
             bitcoin_tx_output_index,
         };
         // Get deposit.
@@ -118,7 +118,7 @@ pub async fn get_deposits_for_transaction(
         // in ascending index order.
         let (entries, next_token) = accessors::get_deposit_entries_for_transaction(
             &context,
-            &bitcoin_txid,
+            &bitcoin_txid.to_ascii_lowercase(),
             query.next_token,
             query.page_size,
         )
@@ -178,28 +178,7 @@ pub async fn get_deposits(
         )
         .await?;
         // Convert data into resource types.
-        let deposits: Vec<DepositInfo> = entries
-            .into_iter()
-            .filter_map(|entry| {
-                // These deposits have all been validated, so we are okay
-                // with "bailing" here.
-                let info: DepositInfo = entry.into();
-                let deposit_script = ScriptBuf::from_hex(&info.deposit_script).ok()?;
-                let deposit_inputs =
-                    sbtc::deposits::DepositScriptInputs::parse(&deposit_script).ok()?;
-                if deposit_inputs.max_fee <= i64::MAX as u64 {
-                    Some(info)
-                } else {
-                    tracing::warn!(
-                        max_fee = %deposit_inputs.max_fee,
-                        txid = %info.bitcoin_txid,
-                        output_index = %info.bitcoin_tx_output_index,
-                        "ignoring deposit with max fee that is too high"
-                    );
-                    None
-                }
-            })
-            .collect();
+        let deposits: Vec<DepositInfo> = entries.into_iter().map(|entry| entry.into()).collect();
         // Create response.
         let response = GetDepositsResponse { deposits, next_token };
         // Respond.
@@ -358,12 +337,15 @@ pub async fn create_deposit(
 
         let deposit_info = body.validate(context.settings.is_mainnet)?;
 
+        let bitcoin_txid = deposit_info.outpoint.txid.to_string();
+        let bitcoin_tx_output_index = deposit_info.outpoint.vout;
+
         // Check if deposit with such txid and outindex already exists.
         let entry = accessors::get_deposit_entry(
             &context,
             &DepositEntryKey {
-                bitcoin_txid: body.bitcoin_txid.clone(),
-                bitcoin_tx_output_index: body.bitcoin_tx_output_index,
+                bitcoin_txid: bitcoin_txid.clone(),
+                bitcoin_tx_output_index,
             },
         )
         .await;
@@ -380,16 +362,17 @@ pub async fn create_deposit(
         let reclaim_pubkeys_hash = extract_reclaim_pubkeys_hash(&deposit_info.reclaim_script);
         if reclaim_pubkeys_hash.is_none() {
             tracing::warn!(
-                bitcoin_txid = %body.bitcoin_txid,
-                bitcoin_tx_output_index = %body.bitcoin_tx_output_index,
+                %bitcoin_txid,
+                %bitcoin_tx_output_index,
                 "unknown reclaim script"
             );
         }
         // Make table entry.
         let deposit_entry: DepositEntry = DepositEntry {
+            deposit_version: deposit_info.version().into(),
             key: DepositEntryKey {
-                bitcoin_txid: body.bitcoin_txid,
-                bitcoin_tx_output_index: body.bitcoin_tx_output_index,
+                bitcoin_txid,
+                bitcoin_tx_output_index,
             },
             recipient: hex::encode(deposit_info.recipient.serialize_to_vec()),
             parameters: DepositParametersEntry {
@@ -406,8 +389,8 @@ pub async fn create_deposit(
             last_update_block_hash: stacks_block_hash,
             last_update_height: stacks_block_height,
             amount: deposit_info.amount,
-            reclaim_script: body.reclaim_script,
-            deposit_script: body.deposit_script,
+            reclaim_script: deposit_info.reclaim_script.to_hex_string(),
+            deposit_script: deposit_info.deposit_script.to_hex_string(),
             reclaim_pubkeys_hash,
             ..Default::default()
         };
@@ -698,6 +681,11 @@ fn extract_reclaim_pubkeys_hash(reclaim_script: &ScriptBuf) -> Option<String> {
                     _ => return None,                         // Unexpected opcode
                 }
             }
+            // If the script continues or doesn't have pubkeys, it wasn't a simple multi-sig.
+            if data_iter.next().is_some() || pubkeys.is_empty() {
+                return None;
+            }
+
             Some(pubkeys)
         }
         _ => None,
@@ -760,8 +748,8 @@ mod tests {
         script.into_script()
     }
 
-    #[tokio::test]
-    async fn test_parse_bridge_reclaim_pubkey_two_ways() {
+    #[test]
+    fn test_parse_bridge_reclaim_pubkey_two_ways() {
         let secret_key = SecretKey::new(&mut OsRng);
         let pubkey = secret_key.x_only_public_key(SECP256K1).0.serialize();
         let reclaim_script = ReclaimScriptInputs::try_new(14, make_reclaim_script(&pubkey))
@@ -771,8 +759,8 @@ mod tests {
         assert_eq!(pubkey_from_script, hex::encode(Sha256::digest(pubkey)));
     }
 
-    #[tokio::test]
-    async fn test_parse_asigna_reclaim_pubkey_two_ways() {
+    #[test]
+    fn test_parse_asigna_reclaim_pubkey_two_ways() {
         let mut pubkeys: Vec<[u8; 32]> = (0..3)
             .map(|_| {
                 SecretKey::new(&mut OsRng)
@@ -796,6 +784,43 @@ mod tests {
         assert_eq!(expected_hash, pubkey_from_script);
     }
 
+    #[test]
+    fn test_parse_unknown_reclaim_pubkey() {
+        let pubkeys: Vec<[u8; 32]> = (0..3)
+            .map(|_| {
+                SecretKey::new(&mut OsRng)
+                    .x_only_public_key(SECP256K1)
+                    .0
+                    .serialize()
+            })
+            .collect();
+
+        let mut script = make_asigna_reclaim_script(&pubkeys);
+        // Add some trailing script
+        script.push_opcode(opcodes::OP_HASH256);
+        script.push_opcode(opcodes::OP_NUMEQUAL);
+
+        let reclaim_script = ReclaimScriptInputs::try_new(14, script)
+            .unwrap()
+            .reclaim_script();
+        assert!(extract_reclaim_pubkeys_hash(&reclaim_script).is_none());
+    }
+
+    #[test]
+    fn test_parse_no_reclaim_pubkey() {
+        let script = ScriptBuf::builder()
+            .push_opcode(opcodes::OP_DROP)
+            .push_opcode(opcodes::OP_PUSHNUM_1)
+            .push_opcode(opcodes::OP_NUMEQUAL)
+            .into_script();
+
+        let reclaim_script = ReclaimScriptInputs::try_new(14, script)
+            .unwrap()
+            .reclaim_script();
+
+        assert!(extract_reclaim_pubkeys_hash(&reclaim_script).is_none());
+    }
+
     #[test_case(""; "empty")]
     #[test_case("-"; "empty-dash")]
     #[test_case("invalid"; "invalid-pubkey")]
@@ -803,8 +828,7 @@ mod tests {
     #[test_case("a66963a375a1b994fbf695ddfa161954ffecdf67d80397650dcb4985f6a09c"; "key-too-short")]
     #[test_case("035da66963a375a1b994fbf695ddfa161954ffecdf67d80397650dcb4985f6a09c"; "key-too-long")]
     #[test_case("5da66963a375a1b994fbf695ddfa161954ffecdf67d80397650dcb4985f6a09c-invalid"; "multi-keys-one-too-long")]
-    #[tokio::test]
-    async fn validate_reclaim_pubkeys_errors(input: &str) {
+    fn validate_reclaim_pubkeys_errors(input: &str) {
         let result = validate_reclaim_pubkeys(input);
         assert_eq!(
             result.unwrap_err().to_string(),
@@ -814,8 +838,7 @@ mod tests {
 
     #[test_case("5da66963a375a1b994fbf695ddfa161954ffecdf67d80397650dcb4985f6a09c", 1; "single-key")]
     #[test_case("5da66963a375a1b994fbf695ddfa161954ffecdf67d80397650dcb4985f6a09c-883a1b3f430eefac5bed7aa0d428e267a558736346363cbfec6b0e321e31f453",2; "multi-keys")]
-    #[tokio::test]
-    async fn validate_reclaim_pubkeys_happy_path(input: &str, num_keys: usize) {
+    fn validate_reclaim_pubkeys_happy_path(input: &str, num_keys: usize) {
         let result = validate_reclaim_pubkeys(input);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), num_keys);
@@ -824,8 +847,7 @@ mod tests {
     #[test_case(vec![]; "empty")]
     #[test_case(vec![[1u8; 32]]; "single-key")]
     #[test_case(vec![[1u8; 32], [2u8; 32]]; "multi-keys")]
-    #[tokio::test]
-    async fn test_sorted_sha256(pubkeys: Vec<[u8; 32]>) {
+    fn test_sorted_sha256(pubkeys: Vec<[u8; 32]>) {
         let mut expected = Sha256::new();
         for pubkey in &pubkeys {
             expected.update(pubkey);
@@ -834,8 +856,8 @@ mod tests {
         assert_eq!(result, hex::encode(expected.finalize()));
     }
 
-    #[tokio::test]
-    async fn test_sorted_sha256_multiple_keys_order_independant() {
+    #[test]
+    fn test_sorted_sha256_multiple_keys_order_independent() {
         let pubkeys1: Vec<[u8; 32]> = vec![[2u8; 32], [1u8; 32]];
         let pubkeys2: Vec<[u8; 32]> = vec![[1u8; 32], [2u8; 32]];
         assert_eq!(sorted_sha256(pubkeys1), sorted_sha256(pubkeys2));
@@ -843,8 +865,7 @@ mod tests {
 
     #[test_case(vec![[1u8; 32]]; "single-key")]
     #[test_case(vec![[2u8; 32], [1u8; 32]]; "multi-keys")]
-    #[tokio::test]
-    async fn test_validate_reclaim_pubkeys_hash_matches_extract_reclaim_pubkeys_hash(
+    fn test_validate_reclaim_pubkeys_hash_matches_extract_reclaim_pubkeys_hash(
         pubkeys: Vec<[u8; 32]>,
     ) {
         let pubkeys_hex: String = pubkeys

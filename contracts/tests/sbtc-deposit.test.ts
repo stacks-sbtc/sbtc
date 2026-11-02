@@ -338,5 +338,5 @@ describe("optimization tests", () => {
       }),
       deployer
     );
-  });
+  }, 10_000);
 });

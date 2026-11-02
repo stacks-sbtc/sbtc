@@ -1,4 +1,4 @@
-FROM rust:1.94.1-slim-trixie AS builder
+FROM rust:1.98.1-slim-trixie AS builder
 
 # Install dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     npm \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-RUN npm install -g pnpm@9
+RUN npm install -g pnpm@10
 
 # Build the codebase from the local sources.
 # -------------------------------------------
@@ -32,6 +32,11 @@ RUN make install-pnpm && make emily-cdk-synth
 # Create Docker image to run the signer.
 # ---------------------------------------
 FROM debian:trixie-slim AS signer
+# The devenv healthcheck uses curl
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /code/sbtc/target/debug/signer /usr/local/bin/signer
 ENTRYPOINT ["/usr/local/bin/signer", "--config", "/signer-config.toml", "--migrate-db"]

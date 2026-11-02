@@ -1,0 +1,42 @@
+x-sbtc-signer-seed: &sbtc-signer-seed
+  image: postgres:16.6-bookworm@sha256:c965017e1d29eb03e18a11abc25f5e3cd78cb5ac799d495922264b8489d5a3a1
+  restart: "no"
+  entrypoint:
+    - /bin/bash
+    - -c
+    - |
+      set -e
+      PGPASSWORD=postgres psql -h $${TARGET} -U postgres -d signer -v ON_ERROR_STOP=1 -f /seed/signer.sql
+
+services:
+  sbtc-signer-seed-1:
+    <<: *sbtc-signer-seed
+    environment:
+      TARGET: postgres-1
+    volumes:
+      - ../devenv/deterministic-dkg/signer-1.sql:/seed/signer.sql
+    depends_on:
+      sbtc-signer-1:
+        condition: service_healthy
+
+  sbtc-signer-seed-2:
+    <<: *sbtc-signer-seed
+    environment:
+      TARGET: postgres-2
+    volumes:
+      - ../devenv/deterministic-dkg/signer-2.sql:/seed/signer.sql
+    depends_on:
+      sbtc-signer-2:
+        condition: service_healthy
+      
+
+  sbtc-signer-seed-3:
+    <<: *sbtc-signer-seed
+    environment:
+      TARGET: postgres-3
+    volumes:
+      - ../devenv/deterministic-dkg/signer-3.sql:/seed/signer.sql
+    depends_on:
+      sbtc-signer-3:
+        condition: service_healthy
+      

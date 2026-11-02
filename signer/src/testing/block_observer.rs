@@ -35,7 +35,6 @@ use crate::bitcoin::utxo;
 use crate::context::SbtcLimits;
 use crate::emily_client::EmilyInteract;
 use crate::error::Error;
-use crate::keys::PublicKey;
 use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
 use crate::stacks::api::GetNodeInfoResponse;
@@ -50,6 +49,7 @@ use crate::stacks::wallet::SignerWallet;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::ConsensusHash;
+use crate::storage::model::RegistryKey;
 use crate::storage::model::StacksBlockHash;
 use crate::testing::block_observer::model::BitcoinBlockHash;
 use crate::testing::dummy;
@@ -349,7 +349,7 @@ impl StacksInteract for TestHarness {
     async fn get_current_signers_aggregate_key(
         &self,
         _contract_principal: &StacksAddress,
-    ) -> Result<Option<PublicKey>, Error> {
+    ) -> Result<Option<RegistryKey>, Error> {
         // issue #118
         todo!()
     }

@@ -282,6 +282,7 @@ impl Context {
         self.stacks_client
             .get_current_signers_aggregate_key(&self.deployer)
             .await
+            .map(|key| key.and_then(|key| key.v1_public_key()))
             .map_err(Error::from)
     }
 }
@@ -379,6 +380,8 @@ async fn exec_deposit(ctx: &Context, args: DepositArgs) -> Result<(), Error> {
             deposit_script: deposit_script.deposit_script().to_hex_string(),
             reclaim_script: reclaim_script.reclaim_script().to_hex_string(),
             transaction_hex: serialize_hex(&unsigned_tx),
+            recipient: None,
+            max_fee: None,
         },
     )
     .await

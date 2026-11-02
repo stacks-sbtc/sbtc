@@ -240,6 +240,8 @@ where
         outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
         deposit_script,
         reclaim_script,
+        recipient: None,
+        max_fee: None,
     };
 
     let dep = create_req.validate_tx(&deposit_tx, false).unwrap();
@@ -251,7 +253,10 @@ where
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script_hash,
-        signers_public_key: dep.signers_public_key,
+        signers_public_key: signer::bitcoin::utxo::DepositSigningKey::V1(match &dep.signing_info {
+            sbtc::deposits::DepositSigningInfo::V1 { public_key } => *public_key,
+            sbtc::deposits::DepositSigningInfo::V2 { .. } => unreachable!("v1 test deposit"),
+        }),
     };
     (deposit_tx, req, dep)
 }
@@ -364,7 +369,9 @@ async fn orphaned_deposit() {
         .get_current_signers_aggregate_key(&deployer)
         .await
         .unwrap()
-        .expect("no signers aggregate key");
+        .expect("no signers aggregate key")
+        .v1_public_key()
+        .expect("test requires a v1 signer key");
     let signers_address = Address::from_script(
         &aggregate_key.signers_script_pubkey(),
         bitcoin::Network::Regtest,
@@ -410,6 +417,8 @@ async fn orphaned_deposit() {
         deposit_script: deposit_request.deposit_script.to_hex_string(),
         reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
     };
 
     deposit_api::create_deposit(emily_client.config(), emily_request.clone())

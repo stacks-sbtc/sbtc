@@ -1,7 +1,8 @@
 //! Handlers for the blocklist client API
 
+use crate::client::sanctions_file::SanctionsState;
 use crate::client::{risk_client, sanctions};
-use crate::common::error::ErrorResponse;
+use crate::common::error::{Error, ErrorResponse};
 use crate::config::{AssessmentMethod, Settings};
 use reqwest::Client;
 use std::convert::Infallible;
@@ -24,7 +25,8 @@ use warp::{Rejection, Reply, http::StatusCode};
     (status = 400, description = "Invalid request body"),
     (status = 404, description = "Address not found"),
     (status = 405, description = "Method not allowed"),
-    (status = 500, description = "Internal server error")
+    (status = 500, description = "Internal server error"),
+    (status = 503, description = "Sanctions list not loaded yet")
     )
 )]
 
@@ -32,15 +34,23 @@ pub async fn check_address_handler(
     address: String,
     client: Client,
     config: Settings,
+    sanctions_state: SanctionsState,
 ) -> impl Reply {
     let result = (async {
-        match config.assessment.assessment_method {
-            AssessmentMethod::Sanctions => {
-                sanctions::check_address(&client, &config.risk_analysis, &address).await
+        if let Some(risk_analysis) = &config.risk_analysis {
+            match risk_analysis.assessment_method {
+                AssessmentMethod::Sanctions => {
+                    sanctions::check_address(&client, risk_analysis, &address).await
+                }
+                AssessmentMethod::RiskAnalysis => {
+                    risk_client::check_address(&client, risk_analysis, &address).await
+                }
             }
-            AssessmentMethod::RiskAnalysis => {
-                risk_client::check_address(&client, &config.risk_analysis, &address).await
-            }
+        } else if config.sanctions.is_some() {
+            sanctions_state.check_address(&address).await
+        } else {
+            // This shouldn't happen since we validate the config
+            Err(Error::InternalServer)
         }
     })
     .await

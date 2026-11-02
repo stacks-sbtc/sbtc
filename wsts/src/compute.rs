@@ -119,7 +119,7 @@ pub fn id(i: u32) -> Scalar {
 
 /// Evaluate the public polynomial `f` at scalar `x` using multi-exponentiation
 #[allow(clippy::ptr_arg)]
-pub fn poly(x: &Scalar, f: &Vec<Point>) -> Result<Point, PointError> {
+pub fn poly(x: &Scalar, f: &[Point]) -> Result<Point, PointError> {
     let mut s = Vec::with_capacity(f.len());
     let mut pow = Scalar::one();
     for _ in 0..f.len() {
@@ -127,7 +127,7 @@ pub fn poly(x: &Scalar, f: &Vec<Point>) -> Result<Point, PointError> {
         pow *= x;
     }
 
-    Point::multimult(s, f.clone())
+    Point::multimult(s, f.to_vec())
 }
 
 /// Create a BIP340 compliant tagged hash by double hashing the tag

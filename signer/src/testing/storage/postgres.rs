@@ -23,7 +23,7 @@ impl PgStore {
               , dr.amount
               , dr.max_fee
               , dr.lock_time
-              , dr.signers_public_key
+              , dr.key_set_id
               , dr.sender_script_pub_keys
             FROM sbtc_signer.bitcoin_blockchain_of($1, $2)
             JOIN sbtc_signer.bitcoin_transactions USING (block_hash)

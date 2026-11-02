@@ -18,14 +18,13 @@ async fn new_attachment_handler() -> StatusCode {
 }
 
 /// Return the default router
-pub fn get_router<C: Context + 'static>() -> Router<ApiState<C>> {
+pub fn get_router<C: Context + 'static>(new_block_limit: usize) -> Router<ApiState<C>> {
     Router::new()
         .route("/", get(status::status_handler))
         .route("/info", get(info::info_handler))
         .route(
             "/new_block",
-            post(new_block::new_block_handler)
-                .layer(DefaultBodyLimit::max(new_block::EVENT_OBSERVER_BODY_LIMIT)),
+            post(new_block::new_block_handler).layer(DefaultBodyLimit::max(new_block_limit)),
         )
         // TODO: remove this once https://github.com/stacks-network/stacks-core/issues/5558
         // is addressed
@@ -51,7 +50,7 @@ mod tests {
         let context = TestContext::default_mocked();
 
         let state = ApiState { ctx: context.clone() };
-        let app: Router = get_router().with_state(state);
+        let app: Router = get_router(crate::NEW_BLOCK_BODY_LIMIT).with_state(state);
 
         let request = Request::builder()
             .uri("/attachments/new")

@@ -3,6 +3,7 @@ use std::borrow::Cow;
 
 use bitcoin::script::PushBytesError;
 
+use crate::bitcoin::validation::InputValidationResult;
 use crate::bitcoin::validation::WithdrawalCapContext;
 use crate::blocklist_client::BlocklistClientError;
 use crate::codec;
@@ -47,7 +48,16 @@ pub enum Error {
 
     /// Unexpected [`StateMachineId`] in the given context.
     #[error("unexpected state machine id in the given context: {0:?}")]
-    UnexpectedStateMachineId(crate::wsts_state_machine::StateMachineId),
+    UnexpectedStateMachineId(Box<crate::wsts_state_machine::StateMachineId>),
+
+    /// Common error from WSTS, usually raised when a polynomial is invalid.
+    #[error("common WSTS error: {0}")]
+    WstsCommonError(#[from] wsts::errors::CommonError),
+
+    /// The saved signer state did not have correct number of PartyState
+    /// objects, which is always exactly one.
+    #[error("the saved signer state did not have correct number of PartyState objects")]
+    InvalidSignerState,
 
     /// An IO error was returned from the [`bitcoin`] library. This is usually an
     /// error that occurred during encoding/decoding of bitcoin types.
@@ -89,10 +99,6 @@ pub enum Error {
         /// The expected aggregate key.
         expected: Box<PublicKeyXOnly>,
     },
-
-    /// The aggregate key for the given block hash could not be determined.
-    #[error("the signer set aggregate key could not be determined for bitcoin block {0}")]
-    MissingAggregateKey(bitcoin::BlockHash),
 
     /// Indicates an error when decoding a protobuf
     #[error("could not decode protobuf {0}")]
@@ -228,13 +234,38 @@ pub enum Error {
 
     /// This happens when the tx-signer is validating the sighash and it is
     /// known but has failed validation.
-    #[error("the given sighash is known and failed validation: {0}")]
-    InvalidSigHash(SigHash),
+    #[error("the given sighash is known and failed validation: {0}, reason: {1}")]
+    InvalidSigHash(SigHash, InputValidationResult),
 
     /// This happens when the tx-signer is validating the sighash and it
     /// does not have a row for it in the database.
     #[error("the given sighash is unknown: {0}")]
     UnknownSigHash(SigHash),
+
+    /// A v1 WSTS signing round has already been started for this sighash at
+    /// the given Bitcoin chain tip.
+    #[error("a bitcoin signing round for sighash {0} was already started at chain tip {1}")]
+    BitcoinSigningRoundAlreadyStarted(SigHash, BitcoinBlockHash),
+
+    /// This happens when the coordinator requested a WSTS signature type
+    /// that does not match the prevout type this sighash was approved for.
+    #[error(
+        "signature type {signature_type:?} does not match prevout type {prevout_type} for sighash {sighash}"
+    )]
+    SignatureTypeMismatch {
+        /// The sighash the coordinator asked this signer to participate in.
+        sighash: SigHash,
+        /// The prevout type stored when this signer approved the sighash.
+        prevout_type: crate::storage::model::TxPrevoutType,
+        /// The signature type in the coordinator's WSTS request.
+        signature_type: wsts::net::SignatureType,
+    },
+
+    /// The coordinator requested a non-Taproot signature during DKG
+    /// verification. DKG verification always signs the known mock transaction
+    /// using the Taproot signature type.
+    #[error("signature type {0:?} is not valid for DKG verification; expected Taproot")]
+    InvalidDkgVerificationSignatureType(wsts::net::SignatureType),
 
     /// This should never happen
     #[error("observed a tenure identified by a StacksBlockId with with no blocks")]
@@ -277,9 +308,15 @@ pub enum Error {
     #[error("the change amounts for the transaction is negative: {0}")]
     InvalidAmount(i64),
 
-    /// Old fee estimate
-    #[error("got an old fee estimate")]
-    OldFeeEstimate,
+    /// Getting this error means a programming error or an error in
+    /// bitcoin-core.
+    #[error("the Fees object was invalid: total: {total}, vsize: {vsize}")]
+    InvalidLastFee {
+        /// The total fees passed into Fees::new.
+        total: u64,
+        /// The vsize passed into Fees::new.
+        vsize: u64,
+    },
 
     /// No good fee estimate
     #[error("failed to get fee estimates from all fee estimate sources")]
@@ -337,7 +374,7 @@ pub enum Error {
 
     /// Could not parse the path part of a URL
     #[error("failed to construct a valid URL from {1} and {2}: {0}")]
-    PathJoin(#[source] url::ParseError, url::Url, Cow<'static, str>),
+    PathJoin(#[source] url::ParseError, Box<url::Url>, Cow<'static, str>),
 
     /// This occurs when combining many public keys would result in a
     /// "public key" that is the point at infinity.
@@ -387,6 +424,10 @@ pub enum Error {
     /// The given signature was invalid
     #[error("could not convert the given compact bytes into an ECDSA signature: {0}")]
     InvalidEcdsaSignatureBytes(#[source] secp256k1::Error),
+
+    /// The given BIP340 signature bytes were invalid.
+    #[error("could not convert the given bytes into a Schnorr signature: {0}")]
+    InvalidSchnorrSignatureBytes(#[source] secp256k1::Error),
 
     /// This happens when we attempt to convert a `[u8; 65]` into a
     /// recoverable ECDSA signature.
@@ -554,7 +595,7 @@ pub enum Error {
 
     /// Missing state machine
     #[error("missing state machine: {0}")]
-    MissingStateMachine(StateMachineId),
+    MissingStateMachine(Box<StateMachineId>),
 
     /// Missing key rotation
     #[error("missing key rotation")]
@@ -607,9 +648,18 @@ pub enum Error {
     #[error("invalid signature")]
     InvalidSignature,
 
+    /// A signature was offered for a key outside the key set being signed
+    /// for.
+    #[error("public key {0} is not in the signing key set")]
+    SigningKeyNotInKeySet(secp256k1::XOnlyPublicKey),
+
     /// Invalid ECDSA signature
     #[error("invalid ECDSA signature")]
     InvalidEcdsaSignature(#[source] secp256k1::Error),
+
+    /// A Schnorr signature failed to verify against the expected message.
+    #[error("invalid Schnorr signature failed verification")]
+    SchnorrSignatureFailedVerification(#[source] secp256k1::Error),
 
     /// Codec error
     #[error("codec error: {0}")]
@@ -730,7 +780,7 @@ pub enum Error {
     /// current signer is not a member of the signer set indicated by the
     /// aggregate key.
     #[error("current signer not part of signer set indicated by: {0}")]
-    ValidationSignerSet(crate::keys::PublicKey),
+    ValidationSignerSet(crate::storage::model::RegistryKey),
 
     /// Transaction coordinator timed out
     #[error("coordinator timed out after {0} seconds")]
@@ -757,14 +807,35 @@ pub enum Error {
     #[error("the BitcoinPreSignRequest object does not contain deposit or withdrawal requests")]
     PreSignContainsNoRequests,
 
+    /// Indicates that a Bitcoin pre-sign request contains too many deposits.
+    #[error("the BitcoinPreSignRequest contains {count} deposits, exceeding the maximum of {max}")]
+    PreSignTooManyDeposits {
+        /// Number of deposits in the request.
+        count: usize,
+        /// Maximum number of deposits allowed in one request package.
+        max: usize,
+    },
+
+    /// Indicates that a Bitcoin pre-sign request contains too many transactions.
+    #[error(
+        "the BitcoinPreSignRequest contains {count} transactions, exceeding the maximum of {max}"
+    )]
+    PreSignTooManyTransactions {
+        /// Number of transactions in the request package.
+        count: usize,
+        /// Maximum number of transactions allowed in one request package.
+        max: usize,
+    },
+
     /// Indicates that we tried to create an UnsignedTransaction object
     /// without any deposit or withdrawal requests.
     #[error("the UnsignedTransaction must contain deposit or withdrawal requests")]
     BitcoinNoRequests,
 
     /// Indicates that the BitcoinPreSignRequest object contains a fee rate
-    /// that is less than or equal to zero.
-    #[error("the fee rate in the BitcoinPreSignRequest object is not greater than zero: {0}")]
+    /// that is outside of the allowed range defined as the range between
+    /// `MIN_BITCOIN_FEE_RATE` and `MAX_BITCOIN_FEE_RATE`.
+    #[error("the fee rate in the BitcoinPreSignRequest object is out of bounds: {0}")]
     PreSignInvalidFeeRate(f64),
 
     /// Error when deposit requests would exceed sBTC supply cap
@@ -808,6 +879,18 @@ pub enum Error {
     #[cfg(any(test, feature = "testing"))]
     #[error("Test utility error: {0}")]
     TestUtility(crate::testing::TestUtilityError),
+
+    /// We do not use it in production code so getting this error probably
+    /// means a programming error when converting a protobuf Fees object
+    /// into its local counterpart.
+    #[cfg(any(test, feature = "testing"))]
+    #[error("the Fees object received from the network was invalid: total: {total}, rate: {rate}")]
+    InvalidProtobufLastFee {
+        /// The total fees passed into Fees::new.
+        total: u64,
+        /// The fee rate sent over the network.
+        rate: f64,
+    },
 }
 
 impl From<std::convert::Infallible> for Error {

@@ -147,10 +147,34 @@ pub fn get_or_create_wallet(rpc: &Client, wallet: &str) {
         Err(_) => {
             // We want a wallet that is watch only, since we manage keys
             let disable_private_keys = Some(true);
-            rpc.create_wallet(wallet, disable_private_keys, None, None, None)
-                .unwrap();
+            match rpc.create_wallet(wallet, disable_private_keys, None, None, None) {
+                Ok(_) => (),
+                // Another test process may have created the wallet after our
+                // initial attempt to load it. In that case, load the newly
+                // created wallet and continue.
+                Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError { code: -4, .. }))) => {
+                    match rpc.load_wallet(wallet) {
+                        Ok(_) => (),
+                        Err(BtcRpcError::JsonRpc(JsonRpcError::Rpc(RpcError {
+                            code: -35,
+                            ..
+                        }))) => (),
+                        Err(error) => panic!("failed to load concurrently created wallet: {error}"),
+                    }
+                }
+                Err(error) => panic!("failed to create wallet: {error}"),
+            }
         }
     };
+}
+
+/// Get the total amount of UTXOs controlled by an address.
+pub fn get_btc_balance(rpc: &Client, public_key: &PublicKey, kind: AddressType) -> Amount {
+    let desc = descriptor_base(public_key, kind);
+    let descriptor = ScanTxOutRequest::Single(desc);
+    rpc.scan_tx_out_set_blocking(&[descriptor])
+        .unwrap()
+        .total_amount
 }
 
 /// Struct representing the bitcoin miner, all coins are usually generated
@@ -367,7 +391,12 @@ impl<'a> Faucet<'a> {
     /// Note: only P2TR and P2WPKH addresses are supported.
     pub fn send_to_script(&self, amount: u64, script_pubkey: ScriptBuf) -> OutPoint {
         let fee = BITCOIN_CORE_FALLBACK_FEE.to_sat();
-        let utxo = self.get_utxos(Some(amount + fee)).pop().unwrap();
+        // bitcoind ignores txs with unconfirmed parents for fee estimation.
+        let utxo = self
+            .get_utxos(Some(amount + fee))
+            .into_iter()
+            .max_by_key(|utxo| utxo.confirmations)
+            .unwrap();
 
         let mut tx = Transaction {
             version: Version::ONE,

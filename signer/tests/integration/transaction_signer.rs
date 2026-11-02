@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
@@ -21,13 +20,14 @@ use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead as _;
 use signer::storage::DbWrite as _;
 use signer::storage::postgres::PgStore;
-use signer::testing::IterTestExt as _;
 use signer::testing::btc::get_canonical_chain_tip;
+use signer::transaction_signer::BITCOIN_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use test_case::test_case;
 
 use signer::bitcoin::utxo::RequestRef;
 use signer::bitcoin::utxo::Requests;
+use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::bitcoin::utxo::UnsignedTransaction;
 use signer::bitcoin::validation::TxRequestIds;
 use signer::context::Context as _;
@@ -35,6 +35,7 @@ use signer::context::SbtcLimits;
 use signer::error::Error;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
+use signer::keys::PublicKeyXOnly;
 use signer::message::BitcoinPreSignRequest;
 use signer::message::StacksTransactionSignRequest;
 use signer::message::WstsMessage;
@@ -142,11 +143,11 @@ async fn signing_set_validation_check_for_stacks_transactions() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     // Let's create a proper sign request.
     let request = StacksTransactionSignRequest {
-        aggregate_key: None,
         contract_tx: ContractCall::CompleteDepositV1(Box::new(req)).into(),
         // The nonce and tx_fee aren't really validated against anything at
         // the moment.
@@ -180,108 +181,6 @@ async fn signing_set_validation_check_for_stacks_transactions() {
         .await
         .unwrap_err();
     assert!(matches!(validation, Error::ValidationSignerSet(_)));
-
-    testing::storage::drop_db(db).await;
-}
-
-/// Test that [`TxSignerEventLoop::assert_valid_stacks_tx_sign_request`]
-/// ignores the `aggregate_key` field in the
-/// [`StacksTransactionSignRequest`].
-#[tokio::test]
-async fn signing_set_validation_ignores_aggregate_key_in_request() {
-    let db = testing::storage::new_test_database().await;
-
-    let mut rng = get_rng();
-
-    let stack = TestContainersBuilder::start_bitcoin().await;
-    let bitcoin = stack.bitcoin().await;
-    let rpc = bitcoin.rpc();
-    let faucet = &bitcoin.get_faucet();
-
-    let mut ctx = TestContext::builder()
-        .with_storage(db.clone())
-        .with_bitcoin_client(bitcoin.get_client())
-        .with_mocked_emily_client()
-        .with_mocked_stacks_client()
-        .modify_settings(|settings| {
-            settings.signer.bootstrap_signatures_required = 2;
-        })
-        .build();
-
-    // This confirms a deposit transaction, and has a nice helper function
-    // for storing a real deposit.
-    let mut setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
-
-    // Let's get the blockchain data into the database.
-    let chain_tip = BitcoinBlockRef {
-        block_hash: setup.sweep_block_hash.into(),
-        block_height: setup.sweep_block_height,
-    };
-    backfill_bitcoin_blocks(&db, rpc, &chain_tip.block_hash).await;
-
-    // This is all normal things that need to happen in order to pass
-    // validation.
-    setup.store_happy_path_data(&db).await;
-
-    let stacks_chain_tip = db
-        .get_stacks_chain_tip(&chain_tip.block_hash)
-        .await
-        .unwrap()
-        .unwrap();
-    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
-
-    let (mut req, _) = crate::complete_deposit::make_complete_deposit(&setup);
-
-    req.deployer = ctx.config().signer.deployer.clone();
-    let network = InMemoryNetwork::new();
-    let mut tx_signer = TxSignerEventLoop {
-        network: network.connect(),
-        context: ctx.clone(),
-        context_window: 10000,
-        wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
-        signer_private_key: setup.aggregated_signer.keypair.secret_key().into(),
-        last_presign_block: None,
-        dkg_begin_pause: None,
-        dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
-        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
-    };
-
-    // Let's create a proper sign request.
-    let mut request = StacksTransactionSignRequest {
-        aggregate_key: None,
-        contract_tx: ContractCall::CompleteDepositV1(Box::new(req)).into(),
-        // The nonce and tx_fee aren't really validated against anything at
-        // the moment.
-        nonce: 1,
-        tx_fee: 100_000,
-        txid: Faker.fake_with_rng::<StacksTxId, _>(&mut rng),
-    };
-
-    // We need this or the contract call will fail validation with an
-    // unrelated error, since we mock reaching out to the stacks node.
-    set_deposit_incomplete(&mut ctx).await;
-
-    // We can sign a transaction generated by a coordinator who is not in
-    // the signer set, so the origin doesn't matter much for this function
-    // call.
-    let origin_public_key: PublicKey = Faker.fake_with_rng(&mut rng);
-    // This is all happy path, there shouldn't be any errors here
-    tx_signer
-        .assert_valid_stacks_tx_sign_request(&request, &chain_tip, &origin_public_key)
-        .await
-        .unwrap();
-
-    // Now we make sure that the aggregate key is not one that the
-    // signer knows about.
-    request.aggregate_key = Some(PublicKey::from_private_key(&PrivateKey::new(&mut rng)));
-
-    // Okay now that we have changed the request to include a bogus
-    // aggregate key, but this should still validate because we should
-    // ignore the aggregate key field.
-    tx_signer
-        .assert_valid_stacks_tx_sign_request(&request, &chain_tip, &origin_public_key)
-        .await
-        .unwrap();
 
     testing::storage::drop_db(db).await;
 }
@@ -352,6 +251,7 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     // Setup the transaction fee to be the maximum fee configured plus one, so that it
@@ -361,7 +261,6 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
 
     // Let's create a proper sign request.
     let request = StacksTransactionSignRequest {
-        aggregate_key: None,
         contract_tx: ContractCall::CompleteDepositV1(Box::new(req)).into(),
         // The nonce isn't really validated against anything at the moment.
         nonce: 1,
@@ -450,6 +349,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     // We need this so that there is a live "network". Otherwise will error when
@@ -466,7 +366,6 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
 
     // Let's create a proper sign request.
     let mut request = StacksTransactionSignRequest {
-        aggregate_key: None,
         contract_tx: ContractCall::CompleteDepositV1(Box::new(req.clone())).into(),
         nonce: 1,
         tx_fee: 100_000,
@@ -486,7 +385,6 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
 
     // Now create a different sign request for the same deposit
     let mut new_request = StacksTransactionSignRequest {
-        aggregate_key: None,
         contract_tx: ContractCall::CompleteDepositV1(Box::new(req)).into(),
         nonce: 2,
         tx_fee: 123_000,
@@ -536,15 +434,6 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
 
     let mut rng = get_rng();
     let fee_rate = 1.3;
-    // Build the test context with mocked clients
-    let ctx = TestContext::builder()
-        .with_storage(db.clone())
-        .with_mocked_clients()
-        .modify_settings(|settings| {
-            settings.signer.bootstrap_signatures_required = 2;
-        })
-        .build();
-    ctx.state().update_current_limits(SbtcLimits::unlimited());
 
     let stack = TestContainersBuilder::start_bitcoin().await;
     let bitcoin = stack.bitcoin().await;
@@ -553,6 +442,19 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
 
     // Create a test setup with a confirmed deposit transaction
     let setup = TestSweepSetup::new_setup(bitcoin.get_client(), faucet, 10000, &mut rng);
+
+    // Build the test context with mocked clients. The signer is the
+    // setup's aggregated signer, whose votes the setup stores.
+    let signer_private_key = setup.aggregated_signer.keypair.secret_key().into();
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+            settings.signer.private_key = signer_private_key;
+        })
+        .build();
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
     // Backfill the blockchain data into the database
     let chain_tip = BitcoinBlockRef {
         block_hash: setup.sweep_block_hash.into(),
@@ -601,6 +503,7 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
@@ -615,6 +518,7 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
     };
 
     let sbtc_state = signer::bitcoin::utxo::SignerBtcState {
+        output_key_set: SignerUtxoKeySet::V1(setup.aggregated_signer.keypair.public_key().into()),
         utxo: ctx
             .get_storage()
             .get_signer_utxo(&chain_tip.block_hash)
@@ -623,8 +527,7 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
             .unwrap(),
         fee_rate,
         last_fees: None,
-        public_key: setup.aggregated_signer.keypair.public_key().into(),
-        magic_bytes: [b'T', b'3'],
+        magic_bytes: *b"T3",
     };
 
     // Create an unsigned transaction with the deposit request
@@ -658,20 +561,28 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
 
     // Check that the intentions to sign the requests sighashes
     // are stored in the database
-    let (will_sign, _) = db
-        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into())
+    let signing_info = db
+        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into(), &chain_tip.block_hash)
         .await
         .expect("query to check if signer sighash is stored failed")
         .expect("signer sighash not stored");
 
-    assert!(will_sign);
-    let (will_sign, _) = db
-        .will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into())
+    assert!(signing_info.will_sign);
+    let signing_info = db
+        .will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into(), &chain_tip.block_hash)
         .await
         .expect("query to check if deposit sighash is stored failed")
         .expect("deposit sighash not stored");
 
-    assert!(will_sign);
+    assert!(signing_info.will_sign);
+
+    // The approvals only apply to the chain tip of the pre-sign request.
+    let other_chain_tip: BitcoinBlockHash = Faker.fake_with_rng(&mut rng);
+    let result = db
+        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into(), &other_chain_tip)
+        .await
+        .expect("query to check if signer sighash is stored failed");
+    assert!(result.is_none());
 
     testing::storage::drop_db(db).await;
 }
@@ -760,6 +671,7 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
@@ -864,6 +776,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
@@ -932,12 +845,19 @@ mod serial {
 
         let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
-        let signers = TestSignerSet::new(&mut rng);
+        let mut signers = TestSignerSet::new(&mut rng);
+        // This test drives one transaction signer, so store a one-party WSTS
+        // fixture whose key ownership matches the production one-key-per-signer
+        // mapping. TestSignerSet normally models its one private key as owning
+        // every synthetic signer key, which is intentionally rejected by the
+        // nonce-response ownership check.
+        signers.keys = vec![signers.aggregate_key()];
         // Create a test setup object so that we can easily create proper DKG
         // shares in the database. Note that calling TestSweepSetup2::new_setup
         // creates two bitcoin blocks.
-        let setup =
+        let mut setup =
             TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
+        setup.signatures_required = 1;
 
         setup.store_dkg_shares(&db).await;
 
@@ -957,6 +877,7 @@ mod serial {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
 
         // We need to convince the signer event loop that it should accept the
@@ -985,7 +906,10 @@ mod serial {
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
             is_valid_tx: true,
             will_sign: true,
-            aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
+            key_set_id: PublicKeyXOnly::from(PublicKey::from_private_key(
+                &tx_signer.signer_private_key,
+            ))
+            .into(),
         };
 
         db.write_bitcoin_txs_sighashes(&[row]).await.unwrap();
@@ -1013,9 +937,20 @@ mod serial {
 
         // We should have a state machine associated with the sighash nonce
         // request message that we just received.
-        let id1 = StateMachineId::BitcoinSign(sighash);
+        let id1 = StateMachineId::BitcoinSign(sighash, report.chain_tip);
         assert!(tx_signer.wsts_state_machines.contains(&id1));
         assert_eq!(tx_signer.wsts_state_machines.len(), 1);
+
+        let other_chain_tip = BitcoinBlockRef {
+            block_hash: BitcoinBlockHash::from([1; 32]),
+            block_height: 1u64.into(),
+        };
+        let id_at_other_chain_tip = StateMachineId::BitcoinSign(sighash, other_chain_tip);
+        assert!(
+            !tx_signer
+                .wsts_state_machines
+                .contains(&id_at_other_chain_tip)
+        );
 
         // Now let's see what happens when we receive a nonce request message
         // for a sighash that we do not know about. Since the nonce request is
@@ -1033,7 +968,7 @@ mod serial {
             .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
             .await;
 
-        let id2 = StateMachineId::BitcoinSign(random_sighash);
+        let id2 = StateMachineId::BitcoinSign(random_sighash, report.chain_tip);
         assert!(response.is_err());
         assert!(tx_signer.wsts_state_machines.contains(&id1));
         assert!(!tx_signer.wsts_state_machines.contains(&id2));
@@ -1042,10 +977,9 @@ mod serial {
         testing::storage::drop_db(db).await;
     }
 
-    /// Let's check that we always generate unique nonces for each sign
-    /// request.
+    /// Check that an approved sighash can start only one signing round.
     #[test_log::test(tokio::test)]
-    async fn nonce_response_unique_nonces() {
+    async fn bitcoin_signing_round_is_one_shot_per_sighash() {
         let db = testing::storage::new_test_database().await;
 
         let mut rng = get_rng();
@@ -1057,12 +991,19 @@ mod serial {
 
         let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
-        let signers = TestSignerSet::new(&mut rng);
+        let mut signers = TestSignerSet::new(&mut rng);
+        // This test drives one transaction signer, so store a one-party WSTS
+        // fixture whose key ownership matches the production one-key-per-signer
+        // mapping. TestSignerSet normally models its one private key as owning
+        // every synthetic signer key, which is intentionally rejected by the
+        // nonce-response ownership check.
+        signers.keys = vec![signers.aggregate_key()];
         // Create a test setup object so that we can simply create proper DKG
         // shares in the database. Note that calling TestSweepSetup2::new_setup
         // creates two bitcoin blocks.
-        let setup =
+        let mut setup =
             TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
+        setup.signatures_required = 1;
 
         setup.store_dkg_shares(&db).await;
 
@@ -1082,6 +1023,7 @@ mod serial {
             last_presign_block: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
 
         // We need to convince the signer event loop that it should accept the
@@ -1110,13 +1052,16 @@ mod serial {
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
             is_valid_tx: true,
             will_sign: true,
-            aggregate_key: PublicKey::from_private_key(&tx_signer.signer_private_key).into(),
+            key_set_id: PublicKeyXOnly::from(PublicKey::from_private_key(
+                &tx_signer.signer_private_key,
+            ))
+            .into(),
         };
 
         db.write_bitcoin_txs_sighashes(&[row]).await.unwrap();
 
         // Now for the nonce request message
-        let nonce_request_msg = WstsMessage {
+        let mut nonce_request_msg = WstsMessage {
             id: WstsMessageId::Sweep(*txid),
             inner: wsts::net::Message::NonceRequest(NonceRequest {
                 dkg_id: 1,
@@ -1156,62 +1101,65 @@ mod serial {
             .unwrap();
 
         // Let's listen for the nonce response.
-        let response1 = tokio::time::timeout(Duration::from_secs(2), func(handle))
+        tokio::time::timeout(Duration::from_secs(2), func(handle))
             .await
             .unwrap();
 
-        // Okay, let's try this again using the same message. This checks the
-        // case where we may be using a state machine stored in the
-        // TxSignerEventLoop. Although we currently do not reuse an existing
-        // state machine when we receive a nonce request, this is a check for
-        // any future code.
-        let handle = network.connect(&ctx).spawn();
-        tx_signer
+        // Even an exact retransmission is rejected. The signer must never
+        // emit a second nonce response for this authorization.
+        let result = tx_signer
             .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
-            .await
-            .unwrap();
+            .await;
+        assert!(matches!(
+            result,
+            Err(Error::BitcoinSigningRoundAlreadyStarted(
+                error_sighash,
+                error_chain_tip,
+            )) if error_sighash == sighash && error_chain_tip == report.chain_tip.block_hash
+        ));
 
-        // Okay this one could be using the same signer state machine as the
-        // previous call; although, as mentioned above, it shouldn't.
-        let response2 = tokio::time::timeout(Duration::from_secs(2), func(handle))
-            .await
-            .unwrap();
+        // A different iteration would cause WSTS to generate fresh nonces for
+        // the same approved sighash, so reject it even while the original
+        // state machine is active.
+        let WstsNetMessage::NonceRequest(request) = &mut nonce_request_msg.inner else {
+            panic!("expected a NonceRequest")
+        };
+        request.sign_iter_id += 1;
 
-        // Let's clear all state machines so that we know that a new one is
-        // being created.
+        let result = tx_signer
+            .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
+            .await;
+        assert!(matches!(
+            result,
+            Err(Error::BitcoinSigningRoundAlreadyStarted(
+                error_sighash,
+                error_chain_tip,
+            )) if error_sighash == sighash && error_chain_tip == report.chain_tip.block_hash
+        ));
+
+        // Sweep signature-share handling removes its state machine after the
+        // signer produces a share. Simulate that completed lifecycle here;
+        // this fixture intentionally only contains enough DKG material to
+        // exercise nonce generation.
         tx_signer.wsts_state_machines.clear();
+        assert!(tx_signer.wsts_state_machines.is_empty());
 
-        let handle = network.connect(&ctx).spawn();
-        tx_signer
+        // Replaying even the exact original request after completion must not
+        // load a fresh state machine and generate another nonce response.
+        let WstsNetMessage::NonceRequest(request) = &mut nonce_request_msg.inner else {
+            panic!("expected a NonceRequest")
+        };
+        request.sign_iter_id -= 1;
+        let result = tx_signer
             .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
-            .await
-            .unwrap();
-
-        // This one is for nonces generated by a fresh state machine.
-        let response3 = tokio::time::timeout(Duration::from_secs(2), func(handle))
-            .await
-            .unwrap();
-
-        // The signer has only one key ID for their DKG shares, so they should
-        // only generate one nonce in their nonce response.
-        let nonces1 = response1.nonces.single();
-        let nonces2 = response2.nonces.single();
-        let nonces3 = response3.nonces.single();
-        // All of these nonces should be unique, so let's check. We compress
-        // the public nonces so that we can easily hash them in a set.
-        let nonces_list: [[u8; 33]; 6] = [
-            nonces1.D.compress().data,
-            nonces1.E.compress().data,
-            nonces2.D.compress().data,
-            nonces2.E.compress().data,
-            nonces3.D.compress().data,
-            nonces3.E.compress().data,
-        ];
-        let nonces_set = nonces_list.iter().copied().collect::<BTreeSet<[u8; 33]>>();
-
-        // If we have duplicates then we should have fewer entries in the set
-        // than in the list.
-        assert_eq!(nonces_set.len(), nonces_list.len());
+            .await;
+        assert!(matches!(
+            result,
+            Err(Error::BitcoinSigningRoundAlreadyStarted(
+                error_sighash,
+                error_chain_tip,
+            )) if error_sighash == sighash && error_chain_tip == report.chain_tip.block_hash
+        ));
 
         testing::storage::drop_db(db).await;
     }
@@ -1261,6 +1209,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     // We need to convince the signer event loop that it should accept the
@@ -1315,8 +1264,12 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
     assert_eq!(tx_signer.wsts_state_machines.len(), 1);
 
     // If we say the current chain tip is something else, a new state
-    // machine will be created associated with that chain tip
-    report.chain_tip = Faker.fake_with_rng(&mut rng);
+    // machine will be created associated with that chain tip. We keep the
+    // height, since DKG does not run at or after the v2 activation height.
+    report.chain_tip = BitcoinBlockRef {
+        block_hash: Faker.fake_with_rng(&mut rng),
+        block_height: chain_tip.block_height,
+    };
 
     tx_signer
         .handle_wsts_message(&dkg_begin_msg, msg_public_key, &report)
@@ -1352,6 +1305,7 @@ mod validate_dkg_verification_message {
         pub dkg_verification_window: u16,
         pub bitcoin_chain_tip: BitcoinBlockRef,
         pub message: Option<Vec<u8>>,
+        pub signature_type: Option<wsts::net::SignatureType>,
     }
 
     impl Default for TestParams {
@@ -1365,6 +1319,7 @@ mod validate_dkg_verification_message {
                     block_height: 0u64.into(),
                 },
                 message: None,
+                signature_type: None,
             }
         }
     }
@@ -1383,6 +1338,7 @@ mod validate_dkg_verification_message {
                 db,
                 &self.new_aggregate_key,
                 self.message.as_deref(),
+                self.signature_type,
                 self.dkg_verification_window,
                 &self.bitcoin_chain_tip,
             )
@@ -1574,6 +1530,72 @@ mod validate_dkg_verification_message {
     }
 
     #[tokio::test]
+    async fn non_taproot_signature_type_fails() {
+        let db = testing::storage::new_test_database().await;
+        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+
+        let shares = EncryptedDkgShares {
+            aggregate_key,
+            dkg_shares_status: DkgSharesStatus::Unverified,
+            started_at_bitcoin_block_height: 0u64.into(),
+            ..Faker.fake()
+        };
+        db.write_encrypted_dkg_shares(&shares).await.unwrap();
+
+        let sighash = UnsignedMockTransaction::new(aggregate_key.into())
+            .compute_sighash()
+            .unwrap();
+        for signature_type in [
+            wsts::net::SignatureType::Schnorr,
+            wsts::net::SignatureType::Frost,
+        ] {
+            let params = TestParams {
+                new_aggregate_key: aggregate_key.into(),
+                message: Some(sighash.as_byte_array().to_vec()),
+                signature_type: Some(signature_type),
+                ..Default::default()
+            };
+
+            let result = params.execute(&db).await.unwrap_err();
+            assert!(matches!(
+                result,
+                Error::InvalidDkgVerificationSignatureType(rejected)
+                    if rejected == signature_type
+            ));
+        }
+
+        testing::storage::drop_db(db).await;
+    }
+
+    #[tokio::test]
+    async fn taproot_signature_type_succeeds() {
+        let db = testing::storage::new_test_database().await;
+        let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
+
+        let shares = EncryptedDkgShares {
+            aggregate_key,
+            dkg_shares_status: DkgSharesStatus::Unverified,
+            started_at_bitcoin_block_height: 0u64.into(),
+            ..Faker.fake()
+        };
+        db.write_encrypted_dkg_shares(&shares).await.unwrap();
+
+        let sighash = UnsignedMockTransaction::new(aggregate_key.into())
+            .compute_sighash()
+            .unwrap();
+        let params = TestParams {
+            new_aggregate_key: aggregate_key.into(),
+            message: Some(sighash.as_byte_array().to_vec()),
+            signature_type: Some(wsts::net::SignatureType::Taproot),
+            ..Default::default()
+        };
+
+        params.execute(&db).await.unwrap();
+
+        testing::storage::drop_db(db).await;
+    }
+
+    #[tokio::test]
     async fn unexpected_sighash_fails() {
         let db = testing::storage::new_test_database().await;
         let aggregate_key: PublicKey = Keypair::new_global(&mut OsRng).public_key().into();
@@ -1598,11 +1620,12 @@ mod validate_dkg_verification_message {
                 block_height: 10u64.into(),
             },
             message: Some(Faker.fake()),
+            signature_type: None,
         };
 
         let result = params.execute(&db).await.unwrap_err();
 
-        assert!(matches!(result, Error::InvalidSigHash(_)));
+        std::assert_matches!(result, Error::InvalidSigHash(_, _));
 
         testing::storage::drop_db(db).await;
     }

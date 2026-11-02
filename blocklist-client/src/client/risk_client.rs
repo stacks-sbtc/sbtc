@@ -151,7 +151,10 @@ fn risk_assessment_path(base_url: &str, address: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::RiskSeverity::{Low, Severe};
+    use crate::{
+        common::RiskSeverity::{Low, Severe},
+        config::AssessmentMethod,
+    };
     use mockito::{Server, ServerGuard};
 
     const TEST_ADDRESS: &str = "test_address";
@@ -163,6 +166,7 @@ mod tests {
         let config = RiskAnalysisConfig {
             api_url: m.url(),
             api_key: "dummy_api_key".to_string(),
+            assessment_method: AssessmentMethod::RiskAnalysis,
         };
         (client, config)
     }

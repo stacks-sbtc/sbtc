@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use bitcoin::OutPoint;
+use bitcoin::hashes::Hash as _;
 use clarity::codec::StacksMessageCodec as _;
 use clarity::vm::types::PrincipalData;
 use p256k1::point::Point;
@@ -47,6 +48,8 @@ use crate::error::Error;
 use crate::keys::PublicKey;
 use crate::message::BitcoinPreSignAck;
 use crate::message::BitcoinPreSignRequest;
+use crate::message::BitcoinSignatureRequest;
+use crate::message::BitcoinSignatureResponse;
 use crate::message::Payload;
 use crate::message::SignerDepositDecision;
 use crate::message::SignerMessage;
@@ -66,6 +69,7 @@ use crate::stacks::contracts::StacksTx;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::QualifiedRequestId;
+use crate::storage::model::RegistryKey;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksPrincipal;
 use crate::storage::model::StacksTxId;
@@ -461,11 +465,16 @@ impl TryFrom<proto::RejectWithdrawal> for RejectWithdrawalV1 {
 
 impl From<RotateKeysV1> for proto::RotateKeys {
     fn from(value: RotateKeysV1) -> Self {
+        let (aggregate_key, bitcoin_block_hash) = match value.aggregate_key {
+            RegistryKey::V1(public_key) => (Some(public_key.into()), None),
+            RegistryKey::V2(block_hash) => (None, Some(block_hash.into())),
+        };
         proto::RotateKeys {
             new_keys: value.new_keys.into_iter().map(|v| v.into()).collect(),
-            aggregate_key: Some(value.aggregate_key.into()),
+            aggregate_key,
             deployer: Some(value.deployer.into()),
             signatures_required: value.signatures_required.into(),
+            bitcoin_block_hash,
         }
     }
 }
@@ -479,7 +488,11 @@ impl TryFrom<proto::RotateKeys> for RotateKeysV1 {
                 .into_iter()
                 .map(|v| v.try_into())
                 .collect::<Result<BTreeSet<_>, Error>>()?,
-            aggregate_key: value.aggregate_key.required()?.try_into()?,
+            aggregate_key: match (value.aggregate_key, value.bitcoin_block_hash) {
+                (Some(public_key), None) => RegistryKey::V1(public_key.try_into()?),
+                (None, Some(block_hash)) => RegistryKey::V2(block_hash.try_into()?),
+                _ => return Err(Error::TypeConversion),
+            },
             deployer: value.deployer.required()?.try_into()?,
             signatures_required: value
                 .signatures_required
@@ -545,7 +558,6 @@ impl From<StacksTransactionSignRequest> for proto::StacksTransactionSignRequest 
             }
         };
         proto::StacksTransactionSignRequest {
-            aggregate_key: value.aggregate_key.map(Into::into),
             nonce: value.nonce,
             tx_fee: value.tx_fee,
             txid: Some(value.txid.into()),
@@ -577,7 +589,6 @@ impl TryFrom<proto::StacksTransactionSignRequest> for StacksTransactionSignReque
             ),
         };
         Ok(StacksTransactionSignRequest {
-            aggregate_key: None,
             nonce: value.nonce,
             tx_fee: value.tx_fee,
             txid: StacksTxId::try_from(value.txid.required()?)?,
@@ -841,9 +852,9 @@ impl From<SignatureType> for proto::SignatureType {
             SignatureType::Schnorr => {
                 proto::signature_type::SignatureType::Schnorr(proto::SchnorrSignatureType {})
             }
-            SignatureType::Taproot(root) => {
+            SignatureType::Taproot => {
                 proto::signature_type::SignatureType::Taproot(proto::TaprootSignatureType {
-                    merkle_root: root.map(|v| proto::MerkleRoot { root: Some(v.into()) }),
+                    merkle_root: None,
                 })
             }
         };
@@ -859,12 +870,7 @@ impl TryFrom<proto::SignatureType> for SignatureType {
         Ok(match value.signature_type.required()? {
             proto::signature_type::SignatureType::Frost(_) => SignatureType::Frost,
             proto::signature_type::SignatureType::Schnorr(_) => SignatureType::Schnorr,
-            proto::signature_type::SignatureType::Taproot(taproot) => SignatureType::Taproot(
-                taproot
-                    .merkle_root
-                    .map(|v| Ok::<_, Error>(v.root.required()?.into()))
-                    .transpose()?,
-            ),
+            proto::signature_type::SignatureType::Taproot(_) => SignatureType::Taproot,
         })
     }
 }
@@ -1205,20 +1211,25 @@ impl TryFrom<proto::TxRequestIds> for TxRequestIds {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
+impl TryFrom<proto::Fees> for Fees {
+    type Error = Error;
+    fn try_from(proto::Fees { total, rate }: proto::Fees) -> Result<Self, Self::Error> {
+        let vsize = (total as f64 / rate).round();
+
+        if vsize <= 0.0 || vsize > crate::MAX_BITCOIN_BLOCK_VSIZE as f64 || vsize.is_nan() {
+            return Err(Error::InvalidProtobufLastFee { total, rate });
+        }
+
+        Fees::new(total, vsize as u64)
+    }
+}
+
 impl From<Fees> for proto::Fees {
     fn from(value: Fees) -> Self {
         proto::Fees {
             total: value.total,
-            rate: value.rate,
-        }
-    }
-}
-
-impl From<proto::Fees> for Fees {
-    fn from(value: proto::Fees) -> Self {
-        Fees {
-            total: value.total,
-            rate: value.rate,
+            rate: value.rate(),
         }
     }
 }
@@ -1232,7 +1243,9 @@ impl From<BitcoinPreSignRequest> for proto::BitcoinPreSignRequest {
                 .map(|v| v.into())
                 .collect(),
             fee_rate: value.fee_rate,
-            last_fees: value.last_fees.map(|v| v.into()),
+            // We compute the last fees ourselves. In the next release,
+            // there will be no need to require the sender include them.
+            last_fees: value.last_fees,
         }
     }
 }
@@ -1247,7 +1260,10 @@ impl TryFrom<proto::BitcoinPreSignRequest> for BitcoinPreSignRequest {
                 .map(|v| v.try_into())
                 .collect::<Result<Vec<_>, _>>()?,
             fee_rate: value.fee_rate,
-            last_fees: value.last_fees.map(|v| v.into()),
+            // We compute the last fees ourselves. In the next release,
+            // there will be no need to require the sender include them,
+            // and we can then remove this field.
+            last_fees: value.last_fees,
         })
     }
 }
@@ -1261,6 +1277,74 @@ impl From<BitcoinPreSignAck> for proto::BitcoinPreSignAck {
 impl From<proto::BitcoinPreSignAck> for BitcoinPreSignAck {
     fn from(_: proto::BitcoinPreSignAck) -> Self {
         BitcoinPreSignAck {}
+    }
+}
+
+impl From<secp256k1::schnorr::Signature> for proto::SchnorrSignature {
+    fn from(value: secp256k1::schnorr::Signature) -> Self {
+        let bytes = value.as_ref();
+        let mut lower = [0; 32];
+        let mut upper = [0; 32];
+        lower.copy_from_slice(&bytes[..32]);
+        upper.copy_from_slice(&bytes[32..]);
+        Self {
+            lower_bits: Some(proto::Uint256::from(lower)),
+            upper_bits: Some(proto::Uint256::from(upper)),
+        }
+    }
+}
+
+impl TryFrom<proto::SchnorrSignature> for secp256k1::schnorr::Signature {
+    type Error = Error;
+
+    fn try_from(value: proto::SchnorrSignature) -> Result<Self, Self::Error> {
+        let lower: [u8; 32] = value.lower_bits.required()?.into();
+        let upper: [u8; 32] = value.upper_bits.required()?.into();
+        let mut bytes = [0; 64];
+        bytes[..32].copy_from_slice(&lower);
+        bytes[32..].copy_from_slice(&upper);
+        secp256k1::schnorr::Signature::from_slice(&bytes)
+            .map_err(Error::InvalidSchnorrSignatureBytes)
+    }
+}
+
+impl From<BitcoinSignatureRequest> for proto::BitcoinSignatureRequest {
+    fn from(value: BitcoinSignatureRequest) -> Self {
+        Self {
+            sighash: Some(proto::Uint256::from(value.sighash.to_byte_array())),
+        }
+    }
+}
+
+impl TryFrom<proto::BitcoinSignatureRequest> for BitcoinSignatureRequest {
+    type Error = Error;
+
+    fn try_from(value: proto::BitcoinSignatureRequest) -> Result<Self, Self::Error> {
+        let bytes: [u8; 32] = value.sighash.required()?.into();
+        Ok(Self {
+            sighash: bitcoin::TapSighash::from_byte_array(bytes).into(),
+        })
+    }
+}
+
+impl From<BitcoinSignatureResponse> for proto::BitcoinSignatureResponse {
+    fn from(value: BitcoinSignatureResponse) -> Self {
+        Self {
+            sighash: Some(proto::Uint256::from(value.sighash.to_byte_array())),
+            signature: Some(value.signature.into()),
+        }
+    }
+}
+
+impl TryFrom<proto::BitcoinSignatureResponse> for BitcoinSignatureResponse {
+    type Error = Error;
+
+    fn try_from(value: proto::BitcoinSignatureResponse) -> Result<Self, Self::Error> {
+        let bytes: [u8; 32] = value.sighash.required()?.into();
+        Ok(Self {
+            sighash: bitcoin::TapSighash::from_byte_array(bytes).into(),
+            signature: value.signature.required()?.try_into()?,
+        })
     }
 }
 
@@ -1307,6 +1391,12 @@ impl From<Payload> for proto::Payload {
             Payload::BitcoinPreSignAck(inner) => {
                 proto::signer_message::Payload::BitcoinPreSignAck(inner.into())
             }
+            Payload::BitcoinSignatureRequest(inner) => {
+                proto::signer_message::Payload::BitcoinSignatureRequest(inner.into())
+            }
+            Payload::BitcoinSignatureResponse(inner) => {
+                proto::signer_message::Payload::BitcoinSignatureResponse(inner.into())
+            }
         }
     }
 }
@@ -1335,6 +1425,12 @@ impl TryFrom<proto::Payload> for Payload {
             }
             proto::signer_message::Payload::BitcoinPreSignAck(inner) => {
                 Payload::BitcoinPreSignAck(inner.into())
+            }
+            proto::signer_message::Payload::BitcoinSignatureRequest(inner) => {
+                Payload::BitcoinSignatureRequest(inner.try_into()?)
+            }
+            proto::signer_message::Payload::BitcoinSignatureResponse(inner) => {
+                Payload::BitcoinSignatureResponse(inner.try_into()?)
             }
         };
         Ok(payload)
@@ -1484,7 +1580,7 @@ impl From<SignerState> for proto::SignerState {
             num_parties: value.num_parties,
             threshold: value.threshold,
             group_key: Some(value.group_key.into()),
-            parties: value.parties.into_iter().map(|v| v.into()).collect(),
+            parties: vec![(value.id, value.party_state).into()],
         }
     }
 }
@@ -1492,6 +1588,18 @@ impl From<SignerState> for proto::SignerState {
 impl TryFrom<proto::SignerState> for SignerState {
     type Error = Error;
     fn try_from(value: proto::SignerState) -> Result<Self, Self::Error> {
+        // In previous versions of WSTS, the SignerState struct had a
+        // `parties` field of type Vec<(u32, PartyState)>. However, the
+        // v2::Party object, always populated the parties field with a
+        // vector of length 1. Since we only use the v2::Party object, this
+        // protobuf should only have a length of 1.
+        let [party_state] = value
+            .parties
+            .try_into()
+            .map_err(|_| Error::InvalidSignerState)?;
+
+        let (_, party_state) = party_state.try_into()?;
+
         Ok(SignerState {
             id: value.id,
             key_ids: value.key_ids,
@@ -1499,11 +1607,7 @@ impl TryFrom<proto::SignerState> for SignerState {
             num_parties: value.num_parties,
             threshold: value.threshold,
             group_key: value.group_key.required()?.try_into()?,
-            parties: value
-                .parties
-                .into_iter()
-                .map(|v| v.try_into())
-                .collect::<Result<Vec<_>, Error>>()?,
+            party_state,
         })
     }
 }
@@ -1531,9 +1635,10 @@ impl TryFrom<proto::ProofIdentifier> for wsts::schnorr::ID {
 
 impl From<PolyCommitment> for proto::PolyCommitment {
     fn from(value: PolyCommitment) -> Self {
+        let (id, poly) = value.into_parts();
         proto::PolyCommitment {
-            id: Some(value.id.into()),
-            poly: value.poly.into_iter().map(|v| v.into()).collect(),
+            id: Some(id.into()),
+            poly: poly.into_iter().map(|v| v.into()).collect(),
         }
     }
 }
@@ -1541,14 +1646,13 @@ impl From<PolyCommitment> for proto::PolyCommitment {
 impl TryFrom<proto::PolyCommitment> for PolyCommitment {
     type Error = Error;
     fn try_from(value: proto::PolyCommitment) -> Result<Self, Self::Error> {
-        Ok(PolyCommitment {
-            id: value.id.required()?.try_into()?,
-            poly: value
-                .poly
-                .into_iter()
-                .map(|v| v.try_into())
-                .collect::<Result<Vec<_>, Error>>()?,
-        })
+        let poly = value
+            .poly
+            .into_iter()
+            .map(|v| v.try_into())
+            .collect::<Result<Vec<_>, Error>>()?;
+        let id = value.id.required()?.try_into()?;
+        Ok(PolyCommitment::new(id, poly)?)
     }
 }
 
@@ -1624,6 +1728,8 @@ impl codec::ProtoSerializable for SignerMessage {
             Payload::WstsMessage(_) => "SBTC_WSTS_MESSAGE",
             Payload::BitcoinPreSignRequest(_) => "SBTC_BITCOIN_PRE_SIGN_REQUEST",
             Payload::BitcoinPreSignAck(_) => "SBTC_BITCOIN_PRE_SIGN_ACK",
+            Payload::BitcoinSignatureRequest(_) => "SBTC_BITCOIN_SIGNATURE_REQUEST",
+            Payload::BitcoinSignatureResponse(_) => "SBTC_BITCOIN_SIGNATURE_RESPONSE",
         }
     }
 }
@@ -1664,8 +1770,21 @@ mod tests {
     use fake::Dummy;
     use fake::Fake as _;
     use fake::Faker;
+    use prost::Message as _;
     use rand::rngs::OsRng;
     use test_case::test_case;
+
+    /// The relevant fields from `StacksTransactionSignRequest` before its
+    /// aggregate key was removed.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct LegacyStacksTransactionSignRequest {
+        /// The aggregate key produced by DKG.
+        #[prost(message, optional, tag = "1")]
+        aggregate_key: Option<proto::PublicKey>,
+        /// The transaction nonce.
+        #[prost(uint64, tag = "2")]
+        nonce: u64,
+    }
 
     #[test]
     fn conversion_between_bytes_and_uint256() {
@@ -1679,6 +1798,22 @@ mod tests {
         let bytes = <[u8; 32]>::from(number);
         let round_trip_number = proto::Uint256::from(bytes);
         assert_eq!(round_trip_number, number);
+    }
+
+    #[test]
+    fn stacks_transaction_sign_request_ignores_legacy_aggregate_key() {
+        let legacy = LegacyStacksTransactionSignRequest {
+            aggregate_key: Some(Faker.fake_with_rng::<PublicKey, _>(&mut OsRng).into()),
+            nonce: 42,
+        };
+
+        let current =
+            proto::StacksTransactionSignRequest::decode(legacy.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(current.nonce, legacy.nonce);
+
+        let legacy =
+            LegacyStacksTransactionSignRequest::decode(current.encode_to_vec().as_slice()).unwrap();
+        std::assert_matches!(legacy.aggregate_key, None);
     }
 
     #[test_case(PhantomData::<([u8; 32], proto::Uint256)>; "Uint256")]
@@ -1706,6 +1841,8 @@ mod tests {
     #[test_case(PhantomData::<(Fees, proto::Fees)>; "Fees")]
     #[test_case(PhantomData::<(BitcoinPreSignRequest, proto::BitcoinPreSignRequest)>; "BitcoinPreSignRequest")]
     #[test_case(PhantomData::<(BitcoinPreSignAck, proto::BitcoinPreSignAck)>; "BitcoinPreSignAck")]
+    #[test_case(PhantomData::<(BitcoinSignatureRequest, proto::BitcoinSignatureRequest)>; "BitcoinSignatureRequest")]
+    #[test_case(PhantomData::<(BitcoinSignatureResponse, proto::BitcoinSignatureResponse)>; "BitcoinSignatureResponse")]
     fn convert_protobuf_type<T, U, E>(_: PhantomData<(T, U)>)
     where
         // `.unwrap()` requires that `E` implement `std::fmt::Debug` and

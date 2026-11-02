@@ -4,12 +4,12 @@ import {
   waitForSetup,
   EPOCH_30_START,
   didCrossPreparePhase,
-  blocksApi,
+  fetchLatestBlock,
+  fetchLatestBlockTransactions,
   parseEnvInt,
-  txApi,
   logger,
 } from './common';
-import { Transaction, ContractCallTransaction } from '@stacks/stacks-blockchain-api-types';
+import { ContractCallTransaction } from '@stacks/stacks-blockchain-api-types';
 
 let lastBurnHeight = 0;
 let lastStxHeight = 0;
@@ -23,13 +23,10 @@ logger.info('Starting monitor script...');
 const EXIT_FROM_MONITOR = process.env.EXIT_FROM_MONITOR === '1';
 const monitorInterval = parseEnvInt('MONITOR_INTERVAL') ?? 2;
 
-logger.debug('Exit from monitor?', EXIT_FROM_MONITOR);
+logger.debug({ exitFromMonitor: EXIT_FROM_MONITOR }, 'Exit from monitor?');
 
 async function getTransactions(): Promise<ContractCallTransaction[]> {
-  let res = await txApi.getTransactionsByBlock({
-    heightOrHash: 'latest',
-  });
-  let txs = res.results as Transaction[];
+  const txs = await fetchLatestBlockTransactions();
   return txs.filter(tx => {
     return tx.tx_type === 'contract_call';
   }) as ContractCallTransaction[];
@@ -39,9 +36,7 @@ async function getInfo() {
   let { client } = accounts[0];
   const [poxInfo, blockInfo, txs] = await Promise.all([
     client.getPoxInfo(),
-    blocksApi.getBlock({
-      heightOrHash: 'latest',
-    }),
+    fetchLatestBlock(),
     getTransactions(),
   ]);
   const { reward_cycle_id } = poxInfo;
@@ -171,9 +166,6 @@ async function loop() {
     }
     if (showStxBlockMsg && info.txs.length > 0) {
       info.txs.forEach(({ contract_call, sender_address, tx_status, ...tx }) => {
-        if (contract_call.contract_id.includes('flood')) {
-          return;
-        }
         loopLog.info(
           {
             sender_address,

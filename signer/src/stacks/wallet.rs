@@ -445,9 +445,11 @@ mod tests {
 
     use crate::context::Context;
     use crate::signature::sign_stacks_tx;
+    use crate::stacks::api::SignerSetInfo;
     use crate::stacks::contracts::AsContractCall;
     use crate::stacks::contracts::ReqContext;
     use crate::storage::model::KeyRotationEvent;
+    use crate::storage::model::RegistryKey;
     use crate::storage::model::StacksPrincipal;
     use crate::testing::context::ConfigureMockedClients as _;
     use crate::testing::context::TestContext;
@@ -712,7 +714,7 @@ mod tests {
             address: StacksPrincipal::from(clarity::vm::types::PrincipalData::from(
                 wallet1.address().clone(),
             )),
-            aggregate_key: *wallet1.stacks_aggregate_key(),
+            aggregate_key: (*wallet1.stacks_aggregate_key()).into(),
             signer_set: signer_keys.clone(),
             signatures_required: wallet1.signatures_required,
         };
@@ -725,8 +727,11 @@ mod tests {
             PublicKey::combine_keys(&config.bootstrap_signing_set).unwrap();
         assert_eq!(wallet0.aggregate_key, bootstrap_aggregate_key);
 
-        ctx.state()
-            .update_registry_signer_set_info(rotate_keys.into());
+        ctx.state().update_registry_signer_set_info(SignerSetInfo {
+            aggregate_key: RegistryKey::try_from(rotate_keys.aggregate_key).unwrap(),
+            signer_set: rotate_keys.signer_set.into_iter().collect(),
+            signatures_required: rotate_keys.signatures_required,
+        });
 
         // Okay, now let's load it up and make sure things match.
         let wallet2 = SignerWallet::load(&ctx).await.unwrap();

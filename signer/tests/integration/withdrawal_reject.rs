@@ -59,10 +59,6 @@ async fn make_withdrawal_reject(
         context_window: 20,
         // The value here doesn't matter.
         origin: fake::Faker.fake_with_rng(&mut OsRng),
-        // When checking whether the transaction is from the signer, we
-        // check that the first "prevout" has a `scriptPubKey` that the
-        // signers control.
-        aggregate_key: data.signers.aggregate_key(),
         // This value affects whether a withdrawal request is considered
         // "rejected". During validation, a signer won't sign a transaction
         // if it is not considered rejected but the collection of signers.
@@ -520,7 +516,7 @@ async fn reject_withdrawal_validation_request_being_fulfilled() {
         prevout_txid: setup.donation.txid.into(),
         prevout_output_index: setup.donation.vout,
         validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-        aggregate_key: setup.signers.aggregate_key().into(),
+        key_set_id: signer::keys::PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
         is_valid_tx: false,
         will_sign: false,
         chain_tip,
@@ -677,7 +673,7 @@ async fn reject_withdrawal_validation_request_still_active() {
     //
     // So we remove the withdrawals from the TestSweepSetup2 object so
     // that they do not get included in the sweep transaction.
-    let withdrawals = setup.withdrawals.drain(..).collect::<Vec<_>>();
+    let withdrawals = std::mem::take(&mut setup.withdrawals);
 
     setup.broadcast_sweep_tx();
     setup.submit_sweep_tx(faucet);

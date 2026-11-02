@@ -1,5 +1,9 @@
 #![doc = include_str!("../README.md")]
 
+use std::num::NonZeroUsize;
+
+use crate::storage::model::BitcoinBlockHeight;
+
 pub mod api;
 pub mod bitcoin;
 pub mod block_observer;
@@ -69,6 +73,29 @@ pub const SIGNER_CHANNEL_CAPACITY: usize = 1024;
 /// for the signers UTXO.
 pub const MAX_REORG_BLOCK_COUNT: u64 = 10;
 
+/// The maximum fee rate, in sats per vbyte, for a bitcoin transaction.
+/// Transactions with a fee rate that exceeds this value will be rejected.
+///
+/// This value is about two times the max fee rate observed on bitcoin
+/// mainnet.
+pub const MAX_BITCOIN_FEE_RATE: f64 = 1000.0;
+
+/// The minimum fee rate, in sats per vbyte, for a bitcoin transaction.
+/// Transactions with a fee rate below this value will be rejected.
+///
+/// This value is below the default of bitcoin core's `minrelaytxfee`
+/// setting, which is 1.0 sats/vB in bitcoin-core v25–v29 and was lowered
+/// to 0.1 sats/vB in v30. We set it low to allow the sBTC signer network
+/// to easily accommodate changes in our bitcoin node's mempool policy
+/// without requiring a change to the signer binary.
+///
+/// <https://bitcoincore.org/en/releases/30.0/>
+pub const MIN_BITCOIN_FEE_RATE: f64 = 0.001;
+
+/// The range of valid fee rates for a bitcoin transaction.
+pub const BITCOIN_FEE_RATE_RANGE: std::ops::RangeInclusive<f64> =
+    MIN_BITCOIN_FEE_RATE..=MAX_BITCOIN_FEE_RATE;
+
 /// The maximum number of sweep transactions that the signers can confirm
 /// per block.
 ///
@@ -80,6 +107,18 @@ pub const MAX_REORG_BLOCK_COUNT: u64 = 10;
 /// <https://bitcoincore.reviews/21800>
 /// <https://github.com/bitcoin/bitcoin/blob/v25.0/src/policy/policy.h#L58-L59>
 pub const MAX_MEMPOOL_PACKAGE_TX_COUNT: u64 = 25;
+
+/// The maximum number of deposit requests that may be included across all
+/// transactions in one Bitcoin pre-sign request.
+pub const MAX_DEPOSITS_PER_BITCOIN_PACKAGE: usize = 50;
+
+/// The maximum number of v1 Bitcoin signing rounds retained in the replay
+/// cache. This holds two full Bitcoin blocks, each containing at most 50
+/// deposit inputs and 25 signer inputs: 2 * (50 + 25) = 150 sighashes.
+pub const BITCOIN_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(
+    2 * (MAX_DEPOSITS_PER_BITCOIN_PACKAGE + MAX_MEMPOOL_PACKAGE_TX_COUNT as usize),
+)
+.expect("the Bitcoin signing request cache size is non-zero");
 
 /// The default maximum number of deposit inputs per bitcoin transaction.
 ///
@@ -128,16 +167,16 @@ pub const WITHDRAWAL_EXPIRY_BUFFER: u64 = 6;
 /// <https://github.com/bitcoin/bitcoin/blob/v25.0/src/policy/policy.h#L60-L61>
 pub const MAX_MEMPOOL_PACKAGE_SIZE: u64 = 101000;
 
-/// This is an upper bound on the number of signer state machines that we
-/// "could" need if we wanted to sign all inputs in parallel and running
-/// DKG.
-///
-/// If the entire transaction package was nothing but donation inputs then
-/// we would need this many state machines to sign the transaction in
-/// parallel. We need to add one for DKG, hence plus 1. We then add a
-/// little buff by going to the next power of 2.
-pub const MAX_SIGNER_STATE_MACHINES: u64 = MAX_MEMPOOL_PACKAGE_SIZE
-    .div_ceil(MIN_BITCOIN_INPUT_VSIZE)
+/// This is the maximum size of a bitcoin block in virtual bytes.
+pub const MAX_BITCOIN_BLOCK_VSIZE: u64 = 1_000_000;
+
+/// This is an upper bound on the number of signer state machines needed to
+/// sign every input authorized by one Bitcoin pre-sign request while also
+/// running DKG. Each transaction has one signer input, so a package can
+/// authorize at most 50 deposit inputs and 25 signer inputs. We add one for
+/// DKG and round up to the next power of two.
+pub const MAX_SIGNER_STATE_MACHINES: u64 = (MAX_DEPOSITS_PER_BITCOIN_PACKAGE as u64)
+    .saturating_add(MAX_MEMPOOL_PACKAGE_TX_COUNT)
     .saturating_add(1)
     .next_power_of_two();
 
@@ -178,6 +217,41 @@ pub const MIN_BITCOIN_INPUT_VSIZE: u64 = 58;
 /// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/protocols/gossipsub/src/protocol.rs#L184-L195>
 /// <https://github.com/libp2p/rust-libp2p/blob/84153a559bdbcb92a48413dd2a31035800cb882d/misc/quick-protobuf-codec/src/lib.rs#L74-L89>
 pub const GOSSIPSUB_MAX_TRANSMIT_SIZE: usize = 65536;
+
+/// The maximum request body size for the event observer endpoint.
+///
+/// Stacks event observer events include the subscribed events and the
+/// transaction results for all transactions confirmed in the block. Stacks
+/// consensus bounds the size of a valid block by the size of the events
+/// and results produced by the confirmed transactions to 50 MiB, and
+/// bounds the size of the confirmed transactions to 2 MiB. Since events,
+/// results, and transactions are serialized in event webhooks as
+/// hex-encoded strings, we need to allow at least 104 MiB of webhook
+/// payload space. To arrive at 256, we pad 104 to 128 and multiply by 2 to
+/// be safe.
+///
+/// In stacks-core, the variable that bounds event and result size is
+/// `MAX_RECEIPT_SIZES`, which is defined in [1] (without comment) and used
+/// in block production and processing in [2-3].
+///
+/// [1]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/stacks/db/blocks.rs#L160>
+/// [2]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/nakamoto/miner.rs#L924>
+/// [3]: <https://github.com/stacks-network/stacks-core/blob/3.4.0.0.3/stackslib/src/chainstate/stacks/db/blocks.rs#L4512>
+pub const NEW_BLOCK_BODY_LIMIT: usize = 256 * 1024 * 1024;
+
+/// The default mainnet activation height for v2 signer UTXOs.
+///
+/// This block height corresponds to around 2026-10-20 15:00 UTC.
+pub const MAINNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(972_295);
+
+/// The default testnet activation height for v2 signer UTXOs.
+pub const TESTNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(245);
+
+/// The default mainnet Bitcoin height at which DKG is disabled.
+pub const MAINNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(u64::MAX);
+
+/// The default testnet Bitcoin height at which DKG is disabled.
+pub const TESTNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(u64::MAX);
 
 // These are all build info variables. Many of them are set in build.rs.
 

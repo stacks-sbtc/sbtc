@@ -1,7 +1,7 @@
 //! This module contains logic specific to the verification of DKG shares.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     time::{Duration, Instant},
 };
 
@@ -277,6 +277,37 @@ impl StateMachine {
     /// Gets the aggregate key that is being verified.
     pub fn aggregate_key(&self) -> XOnlyPublicKey {
         self.aggregate_key
+    }
+
+    /// Return the nonce responses that were received directly from the
+    /// signers selected by a signature-share request.
+    pub fn nonce_responses_for_signature_share_request(
+        &self,
+        request: &wsts::net::SignatureShareRequest,
+    ) -> Vec<wsts::net::NonceResponse> {
+        let signer_ids = request
+            .nonce_responses
+            .iter()
+            .map(|response| response.signer_id)
+            .collect::<BTreeSet<_>>();
+
+        self.wsts_messages
+            .get(&WstsNetMessageType::NonceResponse)
+            .into_iter()
+            .flatten()
+            .filter_map(|queued| match &queued.message {
+                wsts::net::Message::NonceResponse(response)
+                    if signer_ids.contains(&response.signer_id)
+                        && response.dkg_id == request.dkg_id
+                        && response.sign_id == request.sign_id
+                        && response.sign_iter_id == request.sign_iter_id
+                        && response.message == request.message =>
+                {
+                    Some(response.clone())
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// Gets whether or not this [`StateMachine`] has expired.
@@ -568,6 +599,47 @@ mod tests {
             NonceRequest => total: 1, pending: 0;
             NonceResponse => total: 2, pending: 0;
         );
+    }
+
+    #[test]
+    fn nonce_responses_for_signature_share_request_supports_out_of_order_messages() {
+        let mut setup = TestSetup::setup(2);
+        let mut signer1 = setup.next_signer();
+        let mut signer2 = setup.next_signer();
+        let sender1 = signer1.as_public_key();
+        let sender2 = signer2.as_public_key();
+        let mut state_machine = setup.state_machine;
+        let mut rng = get_rng();
+
+        let nonce_request = nonce_request(1, 2, 3);
+        let nonce_response1 = signer1.process(&nonce_request, &mut rng).unwrap().single();
+        let nonce_response2 = signer2.process(&nonce_request, &mut rng).unwrap().single();
+
+        // DKG verification permits responses to arrive before the request.
+        state_machine
+            .process_message(sender1, nonce_response1.clone())
+            .unwrap();
+        state_machine
+            .process_message(sender2, nonce_response2.clone())
+            .unwrap();
+        state_machine
+            .process_message(sender1, nonce_request)
+            .unwrap();
+
+        let Message::NonceResponse(response1) = nonce_response1 else {
+            panic!("expected nonce response")
+        };
+        let Message::NonceResponse(response2) = nonce_response2 else {
+            panic!("expected nonce response")
+        };
+        let share_request =
+            signature_share_request(1, 2, 3, vec![response1.clone(), response2.clone()]);
+        let Message::SignatureShareRequest(share_request) = share_request else {
+            panic!("expected signature share request")
+        };
+
+        let responses = state_machine.nonce_responses_for_signature_share_request(&share_request);
+        assert_eq!(responses, vec![response1, response2]);
     }
 
     #[test]

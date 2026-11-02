@@ -1,6 +1,7 @@
 //! Route configuration for the Blocklist client
 
 use super::handlers;
+use crate::client::sanctions_file::SanctionsState;
 use crate::config::SETTINGS;
 use reqwest::Client;
 use warp::Filter;
@@ -9,11 +10,13 @@ use warp::Filter;
 /// route for the `/screen/{address}` endpoint, which accepts GET requests
 pub fn routes(
     client: Client,
+    sanctions: SanctionsState,
 ) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
     warp::path("screen")
         .and(warp::path::param::<String>())
         .and(warp::get())
         .and(warp::any().map(move || client.clone()))
         .and(warp::any().map(move || SETTINGS.clone()))
+        .and(warp::any().map(move || sanctions.clone()))
         .then(handlers::check_address_handler)
 }

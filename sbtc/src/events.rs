@@ -37,7 +37,7 @@ pub struct StacksTxid(pub [u8; 32]);
 
 impl Display for StacksTxid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.0.to_hex_string(bitcoin::hex::Case::Lower))
+        write!(f, "{}", self.0.to_hex_string(bitcoin::hex::Case::Lower))
     }
 }
 
@@ -277,6 +277,29 @@ pub struct WithdrawalRejectEvent {
     pub signer_bitmap: u128,
 }
 
+/// The opaque 33-byte value in a registry key-rotation event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RegistryKeyBytes([u8; 33]);
+
+impl RegistryKeyBytes {
+    /// Return the raw registry representation.
+    pub fn to_bytes(self) -> [u8; 33] {
+        self.0
+    }
+}
+
+impl From<[u8; 33]> for RegistryKeyBytes {
+    fn from(value: [u8; 33]) -> Self {
+        Self(value)
+    }
+}
+
+impl From<PublicKey> for RegistryKeyBytes {
+    fn from(value: PublicKey) -> Self {
+        Self(value.serialize())
+    }
+}
+
 /// This is the event that is emitted from the `rotate-keys`
 /// public function in the sbtc-registry smart contract.
 #[derive(Debug, Clone)]
@@ -292,8 +315,8 @@ pub struct KeyRotationEvent {
     /// The principal that can make contract calls into the protected
     /// public functions in the sbtc smart contracts.
     pub new_address: PrincipalData,
-    /// The new aggregate key created by combining the above public keys.
-    pub new_aggregate_pubkey: PublicKey,
+    /// The opaque aggregate-key field installed by the rotation.
+    pub new_aggregate_pubkey: RegistryKeyBytes,
     /// The number of signatures required for the multi-sig wallet.
     pub new_signature_threshold: u16,
 }
@@ -558,7 +581,12 @@ impl RawTupleData {
 
         match version.as_slice() {
             // version == 0x00 and (len hashbytes) == 20 => P2PKH
-            [0x00] => {
+            //
+            // We also allow for an empty version slice, since that is
+            // technically allowed by the smart contract. See [1] for more
+            // details.
+            // [1]:  https://github.com/stacks-sbtc/sbtc/issues/2071
+            [0x00] | [] => {
                 let bytes =
                     <[u8; 20]>::try_from(hash_bytes).map_err(EventError::ClaritySliceConversion)?;
                 let pubkey_hash = PubkeyHash::from_byte_array(bytes);
@@ -741,8 +769,9 @@ impl RawTupleData {
             block_id: self.tx_info.block_id,
             new_keys,
             new_address,
-            new_aggregate_pubkey: PublicKey::from_slice(&new_aggregate_pubkey)
-                .map_err(EventError::ClarityPublicKeyConversion)?,
+            new_aggregate_pubkey: <[u8; 33]>::try_from(new_aggregate_pubkey.as_slice())
+                .map(RegistryKeyBytes::from)
+                .map_err(EventError::ClaritySliceConversion)?,
             new_signature_threshold: u16::try_from(new_signature_threshold)
                 .map_err(EventError::ClarityIntConversion)?,
         }))
@@ -982,7 +1011,7 @@ mod tests {
             .collect();
         let new_address =
             PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y").unwrap();
-        let new_aggregate_pubkey = SECP256K1.generate_keypair(&mut OsRng).1;
+        let new_aggregate_pubkey = [0xff; 33];
         let new_signature_threshold = 2;
 
         let event = [
@@ -1003,7 +1032,7 @@ mod tests {
             ),
             (
                 ClarityName::from("new-aggregate-pubkey"),
-                ClarityValue::buff_from(new_aggregate_pubkey.serialize().into()).unwrap(),
+                ClarityValue::buff_from(new_aggregate_pubkey.into()).unwrap(),
             ),
             (
                 ClarityName::from("new-signature-threshold"),
@@ -1021,7 +1050,7 @@ mod tests {
             RegistryEvent::KeyRotation(event) => {
                 assert_eq!(event.new_keys, new_keys);
                 assert_eq!(event.new_address, new_address);
-                assert_eq!(event.new_aggregate_pubkey, new_aggregate_pubkey);
+                assert_eq!(event.new_aggregate_pubkey, new_aggregate_pubkey.into());
                 assert_eq!(event.new_signature_threshold, new_signature_threshold);
             }
             e => panic!("Got the wrong event variant: {e:?}"),
@@ -1050,11 +1079,11 @@ mod tests {
     }
 
     impl RawTupleData {
-        fn new_recipient<const N: usize>(version: u8, hash: [u8; N]) -> Self {
+        fn new_recipient<const N: usize>(version: Vec<u8>, hash: [u8; N]) -> Self {
             let recipient = [
                 (
                     ClarityName::from("version"),
-                    ClarityValue::buff_from_byte(version),
+                    ClarityValue::buff_from(version).unwrap(),
                 ),
                 (
                     ClarityName::from("hashbytes"),
@@ -1069,41 +1098,50 @@ mod tests {
     }
 
     #[test_case(
-        0x00,
+        vec![],
+        PubkeyHash::from(*PUBLIC_KEY).to_byte_array(),
+        ScriptBuf::new_p2pkh(&PUBLIC_KEY.pubkey_hash());
+    "P2PKH-empty-version")]
+    #[test_case(
+        vec![0x00],
         PubkeyHash::from(*PUBLIC_KEY).to_byte_array(),
         ScriptBuf::new_p2pkh(&PUBLIC_KEY.pubkey_hash());
     "P2PKH")]
     #[test_case(
-        0x01,
+        vec![0x01],
         ScriptHash::from(ScriptBuf::new_op_return([1; 5])).to_byte_array(),
         ScriptBuf::new_p2sh(&ScriptBuf::new_op_return([1; 5]).script_hash());
     "P2SH")]
     #[test_case(
-        0x02,
+        vec![0x02],
         new_p2sh_segwit(PUBLIC_KEY.wpubkey_hash()).to_byte_array(),
         ScriptBuf::new_p2sh(&new_p2sh_segwit(PUBLIC_KEY.wpubkey_hash()));
     "P2SH-P2WPKH")]
     #[test_case(
-        0x03,
+        vec![0x03],
         new_p2sh_segwit(ScriptBuf::new_op_return([1; 5]).wscript_hash()).to_byte_array(),
         ScriptBuf::new_p2sh(&new_p2sh_segwit(ScriptBuf::new_op_return([1; 5]).wscript_hash()));
     "P2SH-P2WSH")]
     #[test_case(
-        0x04,
+        vec![0x04],
         PubkeyHash::from(*PUBLIC_KEY).to_byte_array(),
         ScriptBuf::new_p2wpkh(&PUBLIC_KEY.wpubkey_hash());
     "P2WPKH")]
     #[test_case(
-        0x05,
+        vec![0x05],
         ScriptBuf::new_op_return([1; 5]).wscript_hash().to_byte_array(),
         ScriptBuf::new_p2wsh(&ScriptBuf::new_op_return([1; 5]).wscript_hash());
     "P2WSH")]
     #[test_case(
-        0x06,
+        vec![0x06],
         TWEAKED_PUBLIC_KEY.serialize(),
         ScriptBuf::new_p2tr_tweaked(*TWEAKED_PUBLIC_KEY);
     "P2TR")]
-    fn recipient_to_script_pub_key<const N: usize>(version: u8, hash: [u8; N], script: ScriptBuf) {
+    fn recipient_to_script_pub_key<const N: usize>(
+        version: Vec<u8>,
+        hash: [u8; N],
+        script: ScriptBuf,
+    ) {
         // For these tests, we show what is expected for the hashbytes for
         // each of the address types and check that the result of the
         // `RawTupleData::try_into_script_pub_key` function matches what
@@ -1116,14 +1154,16 @@ mod tests {
         assert_eq!(actual_script_pub_key, script);
     }
 
-    #[test_case(0x06, [1; 33]; "hash 33 bytes P2TR")]
-    #[test_case(0x06, [1; 20]; "hash 20 bytes P2TR")]
-    #[test_case(0x07, [1; 20]; "incorrect version 1")]
-    #[test_case(0x07, [1; 32]; "incorrect version 2")]
-    #[test_case(0x05, [1; 20]; "bad p2wsh hash length")]
-    #[test_case(0x00, [1; 32]; "bad p2pkh 1")]
-    #[test_case(0x00, [1; 21]; "bad p2pkh 2")]
-    fn bad_recipient_cases<const N: usize>(version: u8, hash: [u8; N]) {
+    #[test_case(vec![0x06], [1; 33]; "hash 33 bytes P2TR")]
+    #[test_case(vec![0x06], [1; 20]; "hash 20 bytes P2TR")]
+    #[test_case(vec![0x07], [1; 20]; "incorrect version 1")]
+    #[test_case(vec![0x07], [1; 32]; "incorrect version 2")]
+    #[test_case(vec![0x05], [1; 20]; "bad p2wsh hash length")]
+    #[test_case(vec![0x00], [1; 32]; "bad p2pkh 1")]
+    #[test_case(vec![0x00], [1; 21]; "bad p2pkh 2")]
+    #[test_case(vec![], [1; 21]; "bad p2pkh 3")]
+    #[test_case(vec![], [1; 32]; "bad p2pkh 4")]
+    fn bad_recipient_cases<const N: usize>(version: Vec<u8>, hash: [u8; N]) {
         // For these tests, we show what is unexpected lengths in the
         // hashbytes leads to the `RawTupleData::try_into_script_pub_key`
         // returning an error.

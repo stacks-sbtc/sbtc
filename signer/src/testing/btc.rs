@@ -12,6 +12,7 @@ use bitcoin::TxIn;
 use bitcoin::TxOut;
 use bitcoin::Witness;
 use bitcoin::consensus::encode::serialize_hex;
+use clarity::codec::StacksMessageCodec as _;
 
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi as _;
@@ -73,6 +74,8 @@ pub fn build_emily_request(
         deposit_script: info.deposit_script.to_hex_string(),
         reclaim_script: info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(tx),
+        recipient: Some(Some(hex::encode(info.recipient.serialize_to_vec()))),
+        max_fee: Some(Some(info.max_fee)),
     }
 }
 

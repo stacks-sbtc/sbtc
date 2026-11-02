@@ -142,7 +142,10 @@ async fn check_api_response(response: Response) -> Result<Response, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::RiskSeverity::{Low, Severe};
+    use crate::{
+        common::RiskSeverity::{Low, Severe},
+        config::AssessmentMethod,
+    };
     use mockito::{Server, ServerGuard};
 
     const TEST_ADDRESS: &str = "test_address";
@@ -153,6 +156,7 @@ mod tests {
         let config = RiskAnalysisConfig {
             api_url: server.url(),
             api_key: "dummy_api_key".to_string(),
+            assessment_method: AssessmentMethod::Sanctions,
         };
         (client, config)
     }

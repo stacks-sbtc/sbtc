@@ -10,7 +10,9 @@ use std::time::Duration;
 use super::get_rng;
 use crate::bitcoin::MockBitcoinInteract;
 use crate::bitcoin::rpc::BitcoinTxInfo;
+use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::SignerUtxo;
+use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::context::Context;
 use crate::context::RequestDeciderEvent;
 use crate::emily_client::MockEmilyInteract;
@@ -279,18 +281,18 @@ where
             .last()
             .expect("Empty signer set!")
             .signer_public_keys;
+        let bitcoin_signer_set = BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys: signer_public_keys.clone(),
+            signatures_required: context.config().signer.bootstrap_signatures_required,
+        };
 
         // Get the chain tips from storage.
         let (bitcoin_chain_tip, stacks_chain_tip) = storage.get_chain_tips().await;
 
         // Get pending withdrawals from coordinator
         let pending_requests = coordinator
-            .get_pending_requests(
-                &bitcoin_chain_tip,
-                &stacks_chain_tip,
-                &aggregate_key,
-                signer_public_keys,
-            )
+            .get_pending_requests(&bitcoin_chain_tip, &stacks_chain_tip, &bitcoin_signer_set)
             .await
             .expect("Error getting pending requests")
             .expect("Empty pending requests");
@@ -426,7 +428,7 @@ where
                     .expect_get_current_signer_set_info()
                     .returning(move |_| {
                         Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
-                            aggregate_key,
+                            aggregate_key: aggregate_key.into(),
                             ..fake::Faker.fake_with_rng(&mut rng)
                         }))))
                     });
@@ -583,7 +585,7 @@ where
                     .expect_get_current_signer_set_info()
                     .returning(move |_| {
                         Box::pin(std::future::ready(Ok(Some(SignerSetInfo {
-                            aggregate_key,
+                            aggregate_key: aggregate_key.into(),
                             ..fake::Faker.fake_with_rng(&mut rng)
                         }))))
                     });
@@ -803,17 +805,12 @@ where
             is_epoch3: true,
         };
         let (sign_request, multi_tx) = coordinator
-            .construct_withdrawal_accept_stacks_sign_request(
-                withdrawal_req.clone(),
-                &bitcoin_aggregate_key,
-                &WALLET.0,
-            )
+            .construct_withdrawal_accept_stacks_sign_request(withdrawal_req.clone(), &WALLET.0)
             .await
             .expect("Failed to construct withdrawal accept stacks sign request");
 
         let outpoint = withdrawal_req.withdrawal_outpoint();
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
         if let StacksTx::ContractCall(ContractCall::AcceptWithdrawalV1(call)) =
@@ -868,7 +865,6 @@ where
         let mut rng = get_rng();
         let signer_network = SignerNetwork::single(&self.context);
         let private_key = PrivateKey::new(&mut rng);
-        let bitcoin_aggregate_key = PublicKey::from_private_key(&private_key);
 
         // Create test data for the withdrawal request
         let stacks_block: StacksBlock = fake::Faker.fake_with_rng(&mut rng);
@@ -906,16 +902,11 @@ where
         };
 
         let (sign_request, multi_tx) = coordinator
-            .construct_withdrawal_reject_stacks_sign_request(
-                &withdrawal_req,
-                &bitcoin_aggregate_key,
-                &WALLET.0,
-            )
+            .construct_withdrawal_reject_stacks_sign_request(&withdrawal_req, &WALLET.0)
             .await
             .expect("Failed to construct withdrawal reject stacks sign request");
 
         assert_eq!(sign_request.tx_fee, 123000);
-        assert_eq!(sign_request.aggregate_key, Some(bitcoin_aggregate_key));
         assert_eq!(sign_request.txid, multi_tx.tx().txid().into());
         assert_eq!(sign_request.nonce, multi_tx.tx().get_origin_nonce());
 
@@ -1002,7 +993,7 @@ where
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx.compute_txid(), 0),
             amount: 42,
-            public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+            key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
         };
 
         test_data.remove(original_test_data);
@@ -1127,7 +1118,7 @@ where
             let expected = SignerUtxo {
                 outpoint: bitcoin::OutPoint::new(tx.compute_txid(), 0),
                 amount: amt,
-                public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+                key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
             };
             let signer_utxo = storage
                 .get_signer_utxo(&chain_tip.block_hash)
@@ -1251,7 +1242,7 @@ where
         let expected = SignerUtxo {
             outpoint: bitcoin::OutPoint::new(tx_3.compute_txid(), 0),
             amount: 3,
-            public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+            key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
         };
 
         test_data.remove(original_test_data);
@@ -1381,7 +1372,7 @@ where
             SignerUtxo {
                 outpoint: bitcoin::OutPoint::new(tx_a1.compute_txid(), 0),
                 amount: 0xA1,
-                public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+                key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
             }
         );
 
@@ -1396,7 +1387,7 @@ where
             SignerUtxo {
                 outpoint: bitcoin::OutPoint::new(tx_a1.compute_txid(), 0),
                 amount: 0xA1,
-                public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+                key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
             }
         );
 
@@ -1411,7 +1402,7 @@ where
             SignerUtxo {
                 outpoint: bitcoin::OutPoint::new(tx_b1.compute_txid(), 0),
                 amount: 0xB1,
-                public_key: bitcoin::XOnlyPublicKey::from(aggregate_key),
+                key_set: SignerUtxoKeySet::V1(bitcoin::XOnlyPublicKey::from(aggregate_key)),
             }
         );
     }

@@ -4,3 +4,5 @@
 pub mod risk_client;
 /// Client for interacting with the Sanctions API
 pub mod sanctions;
+/// Client for file-based sanctions list
+pub mod sanctions_file;

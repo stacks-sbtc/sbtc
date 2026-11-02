@@ -21,7 +21,7 @@ install-py:
 	uv --directory emily_sidecar venv && uv --directory emily_sidecar pip sync pyproject.toml
 
 install-pnpm:
-	pnpm --recursive install
+	pnpm install --frozen-lockfile
 
 install: install-py install-pnpm
 
@@ -99,8 +99,24 @@ nextest-archive-clean:
 # INTEGRATION TESTS
 # ##############################################################################
 
+INTEGRATION_COMPOSE_FILE ?= docker/docker-compose.test.yml
+BITCOIN_CORE_TEST_WALLET := integration-tests-wallet
+
+# This command tries to ensures the integration-test wallet is loaded
+# before our tests start. The load command handles wallets preserved across
+# container restarts; the create command handles a fresh regtest node.
+initialize-test-wallet:
+	@docker compose --file $(INTEGRATION_COMPOSE_FILE) exec -T bitcoind \
+		bitcoin-cli -rpcwait -rpcwaittimeout=30 -rpcwallet=$(BITCOIN_CORE_TEST_WALLET) getwalletinfo > /dev/null 2>&1 || \
+	docker compose --file $(INTEGRATION_COMPOSE_FILE) exec -T bitcoind \
+		bitcoin-cli -rpcwait -rpcwaittimeout=30 loadwallet $(BITCOIN_CORE_TEST_WALLET) > /dev/null 2>&1 || \
+	docker compose --file $(INTEGRATION_COMPOSE_FILE) exec -T bitcoind \
+		bitcoin-cli -rpcwait -rpcwaittimeout=30 -named createwallet \
+		wallet_name=$(BITCOIN_CORE_TEST_WALLET) disable_private_keys=true load_on_startup=true > /dev/null
+
 integration-env-up: emily-cdk-synth
 	docker compose --file docker/docker-compose.test.yml up -d
+	$(MAKE) initialize-test-wallet
 
 integration-test:
 	cargo $(CARGO_FLAGS) nextest --config-file nextest.toml run --features "testing" $(CARGO_EXCLUDES) --test integration --no-fail-fast
@@ -119,6 +135,7 @@ integration-test-full: integration-env-down integration-env-up integration-test 
 
 integration-env-up-ci: emily-cdk-synth
 	docker compose --file docker/docker-compose.ci.yml up --detach --quiet-pull
+	$(MAKE) initialize-test-wallet INTEGRATION_COMPOSE_FILE=docker/docker-compose.ci.yml
 	DYNAMODB_ENDPOINT=http://localhost:8000 \
 		INPUT_CDK_TEMPLATE=./emily/cdk/cdk.out/EmilyStack.template.json \
 		OUTPUT_CDK_TEMPLATE=./emily/cdk/cdk.out/EmilyStack.devenv.template.json \
@@ -138,7 +155,7 @@ integration-env-down-ci:
 	@echo "killing emily server process..."
 	ps -ef | awk  '/[e]mily-server/{print $$2}' | xargs kill -9
 
-.PHONY: integration-env-up integration-test integration-test-build integration-env-up integration-test-full
+.PHONY: initialize-test-wallet integration-env-up integration-test integration-test-build integration-env-up integration-test-full
 
 # ##############################################################################
 # DEVENV (development testing environment)
@@ -153,6 +170,9 @@ devenv-no-sbtc-down:
 devenv-up:
 	docker compose -f docker/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer up -d
 
+devenv-up-no-dkg:
+	docker compose -f docker/docker-compose.yml -f devenv/deterministic-dkg/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer up -d
+
 devenv-down:
 	docker compose -f docker/docker-compose.yml --profile default --profile bitcoin-mempool --profile observability --profile sbtc-signer down -t 0 -v
 
@@ -165,7 +185,7 @@ devenv-sbtc-down:
 devenv-sbtc-build:
 	docker compose -f docker/docker-compose.yml --profile sbtc-signer --profile bitcoin build
 
-.PHONY: devenv-no-sbtc-up devenv-no-sbtc-down devenv-up devenv-down devenv-sbtc-up devenv-sbtc-down devenv-sbtc-build
+.PHONY: devenv-no-sbtc-up devenv-no-sbtc-down devenv-up devenv-up-no-dkg devenv-down devenv-sbtc-up devenv-sbtc-down devenv-sbtc-build
 
 # ##############################################################################
 # EMILY

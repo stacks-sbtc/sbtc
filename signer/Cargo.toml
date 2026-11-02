@@ -19,7 +19,6 @@ testing = ["dep:fake", "dep:mockall", "sbtc/testing"]
 sbtc = { workspace = true, features = ["webhooks"] }
 
 # External crates
-aquamarine.workspace = true
 axum.workspace = true
 bitcoin.workspace = true
 bitcoinconsensus.workspace = true

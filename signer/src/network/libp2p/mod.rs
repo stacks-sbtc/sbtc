@@ -7,6 +7,7 @@ use libp2p::gossipsub::IdentTopic;
 mod bootstrap;
 mod errors;
 mod event_loop;
+mod gatekeeper;
 mod multiaddr;
 mod network;
 mod swarm;

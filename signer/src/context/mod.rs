@@ -6,6 +6,7 @@ mod signer_state;
 mod termination;
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use tokio::sync::broadcast::error::RecvError;
 use tokio_stream::wrappers::ReceiverStream;
@@ -31,7 +32,7 @@ pub trait Context: Clone + Sync + Send {
     /// Get the current configuration for the signer.
     fn config(&self) -> &Settings;
     /// Get the current state for the signer.
-    fn state(&self) -> &SignerState;
+    fn state(&self) -> &Arc<SignerState>;
     /// Subscribe to the application signalling channel, returning a receiver
     /// which can be used to listen for events.
     fn get_signal_receiver(&self) -> tokio::sync::broadcast::Receiver<SignerSignal>;

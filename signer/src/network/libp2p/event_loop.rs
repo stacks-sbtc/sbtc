@@ -108,6 +108,9 @@ pub async fn run(ctx: &impl Context, swarm: Arc<Mutex<Swarm<SignerBehavior>>>) {
                         peer_id,
                         ..
                     } => {
+                        // TODO: This should be unnecessary since we have
+                        // the gatekeeper behavior, so it should be okay to
+                        // remove.
                         if !ctx.state().current_signer_set().is_allowed_peer(&peer_id) {
                             tracing::warn!(%connection_id, %peer_id, ?endpoint, "connected to peer, however it is not a known signer; disconnecting");
                             let _ = swarm.disconnect_peer_id(peer_id);

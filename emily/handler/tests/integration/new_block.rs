@@ -72,11 +72,13 @@ async fn test_new_blocks_sends_update_deposits_to_emily() {
     let request: CreateDepositRequestBody =
         serde_json::from_str(CREATE_DEPOSIT_VALID).expect("failed to parse request");
     let create_deposity_req = CreateDepositRequestBody {
-        bitcoin_tx_output_index: deposit_completed_event.outpoint.vout as u32,
+        bitcoin_tx_output_index: deposit_completed_event.outpoint.vout,
         bitcoin_txid: bitcoin_txid.clone(),
         deposit_script: request.deposit_script,
         reclaim_script: request.reclaim_script,
         transaction_hex: request.transaction_hex,
+        recipient: None,
+        max_fee: None,
     };
     deposit_api::create_deposit(&configuration, create_deposity_req)
         .await

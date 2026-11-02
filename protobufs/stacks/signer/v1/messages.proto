@@ -30,6 +30,10 @@ message SignerMessage {
     BitcoinPreSignRequest bitcoin_pre_sign_request = 10;
     // Represents an acknowledgment of a BitcoinPreSignRequest
     BitcoinPreSignAck bitcoin_pre_sign_ack = 11;
+    // Request one independent BIP340 signature.
+    BitcoinSignatureRequest bitcoin_signature_request = 12;
+    // A signer's independent BIP340 signature.
+    BitcoinSignatureResponse bitcoin_signature_response = 13;
   }
 }
 
@@ -100,6 +104,28 @@ message BitcoinPreSignRequest {
 
 // Represents an acknowledgment of a BitcoinPreSignRequest.
 message BitcoinPreSignAck {}
+
+// A 64-byte BIP340 signature.
+message SchnorrSignature {
+  // The first 256 bits of the signature.
+  crypto.Uint256 lower_bits = 1;
+  // The last 256 bits of the signature.
+  crypto.Uint256 upper_bits = 2;
+}
+
+// A request for an independent signature over a Bitcoin sighash.
+message BitcoinSignatureRequest {
+  // The message to sign.
+  crypto.Uint256 sighash = 1;
+}
+
+// A signer's response to a BitcoinSignatureRequest.
+message BitcoinSignatureResponse {
+  // The message that was signed.
+  crypto.Uint256 sighash = 1;
+  // The BIP340 signature over the sighash.
+  SchnorrSignature signature = 2;
+}
 
 // This type is a container for all deposits and withdrawals that are part
 // of a transaction package.

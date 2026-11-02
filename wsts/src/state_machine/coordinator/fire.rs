@@ -176,7 +176,7 @@ impl Coordinator {
                         return Ok((None, None));
                     } else if self.state == State::Idle {
                         // We are done with the DKG round! Return the operation result
-                        if let SignatureType::Taproot(_) = signature_type {
+                        if let SignatureType::Taproot = signature_type {
                             if let Some(schnorr_proof) = &self.schnorr_proof {
                                 return Ok((
                                     None,
@@ -474,7 +474,7 @@ impl Coordinator {
                                                     Ok(private_eval) => {
                                                         let poly_eval = match compute::poly(
                                                             &compute::id(*key_id),
-                                                            &poly.poly,
+                                                            poly.poly(),
                                                         ) {
                                                             Ok(p) => p,
                                                             Err(e) => {
@@ -555,7 +555,7 @@ impl Coordinator {
             .dkg_end_messages
             .keys()
             .flat_map(|signer_id| self.dkg_public_shares[signer_id].comms.clone())
-            .fold(Point::default(), |s, (_, comm)| s + comm.poly[0]);
+            .fold(Point::default(), |s, (_, comm)| s + comm.constant_term());
 
         info!("Aggregate public key: {}", key);
         self.aggregate_public_key = Some(key);
@@ -823,8 +823,8 @@ impl Coordinator {
 
             let shares = message_nonce
                 .public_nonces
-                .iter()
-                .flat_map(|(i, _)| self.signature_shares[i].clone())
+                .keys()
+                .flat_map(|i| self.signature_shares[i].clone())
                 .collect::<Vec<SignatureShare>>();
 
             debug!(
@@ -837,13 +837,13 @@ impl Coordinator {
 
             self.aggregator.init(&self.party_polynomials)?;
 
-            if let SignatureType::Taproot(merkle_root) = signature_type {
+            if let SignatureType::Taproot = signature_type {
                 let schnorr_proof = self.aggregator.sign_taproot(
                     &self.message,
                     &nonces,
                     &shares,
                     &key_ids,
-                    merkle_root,
+                    None,
                 )?;
                 debug!("SchnorrProof ({}, {})", schnorr_proof.r, schnorr_proof.s);
                 self.schnorr_proof = Some(schnorr_proof);
@@ -981,7 +981,7 @@ impl CoordinatorTrait for Coordinator {
     ) -> Result<(), Error> {
         let computed_key = party_polynomials
             .iter()
-            .fold(Point::default(), |s, (_, comm)| s + comm.poly[0]);
+            .fold(Point::default(), |s, (_, comm)| s + comm.constant_term());
         if computed_key != aggregate_key {
             return Err(Error::AggregateKeyPolynomialMismatch(
                 computed_key,
@@ -1076,6 +1076,7 @@ impl CoordinatorTrait for Coordinator {
 /// Test module for coordinator functionality
 pub mod test {
     use crate::{
+        common::PolyCommitment,
         curve::{point::Point, scalar::Scalar},
         net::{
             DkgBegin, DkgFailure, DkgPrivateShares, DkgPublicShares, Message, NonceRequest,
@@ -1088,7 +1089,7 @@ pub mod test {
                     bad_signature_share_request, check_signature_shares, coordinator_state_machine,
                     empty_private_shares, empty_public_shares, feedback_messages,
                     feedback_mutated_messages, gen_nonces, invalid_nonce, new_coordinator,
-                    run_dkg_sign, setup, start_dkg_round,
+                    run_dkg_sign, setup, signature_share_uses_configured_key_ids, start_dkg_round,
                 },
                 Config, Coordinator as CoordinatorTrait, State,
             },
@@ -1155,13 +1156,7 @@ pub mod test {
     fn check_signature_shares_v2() {
         check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Frost, vec![0]);
         check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Schnorr, vec![0]);
-        check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Taproot(None), vec![0]);
-        check_signature_shares::<FireCoordinator>(
-            5,
-            2,
-            SignatureType::Taproot(Some([23u8; 32])),
-            vec![0],
-        );
+        check_signature_shares::<FireCoordinator>(5, 2, SignatureType::Taproot, vec![0]);
     }
 
     #[test]
@@ -1416,14 +1411,17 @@ pub mod test {
                                 let comms = shares
                                     .comms
                                     .iter()
-                                    .map(|(id, comm)| {
+                                    .map(|(party_id, comm)| {
                                         let mut c = comm.clone();
+                                        let (id, mut poly) = c.into_parts();
                                         if signer.signer_id == 0 {
-                                            c.poly.push(Point::new());
+                                            poly.push(Point::new());
                                         } else {
-                                            c.poly.pop();
+                                            poly.pop();
                                         }
-                                        (*id, c)
+                                        c = PolyCommitment::new(id, poly)
+                                            .expect("polynomial should still be valid");
+                                        (*party_id, c)
                                     })
                                     .collect();
                                 Message::DkgPublicShares(DkgPublicShares {
@@ -1708,6 +1706,12 @@ pub mod test {
         let num_signers = 12;
         let keys_per_signer = 1;
         let (mut coordinators, mut signers) = all_signers_dkg(num_signers, keys_per_signer);
+        // The signers that answered the first nonce request are not in the
+        // signing set of the second one, and with the cache they would
+        // reject its signature share request instead of ignoring it.
+        for signer in &mut signers {
+            signer.disable_nonce_response_cache();
+        }
 
         // Start a signing round
         let orig_msg = "It was many and many a year ago, in a kingdom by the sea"
@@ -1860,6 +1864,11 @@ pub mod test {
     }
 
     #[test]
+    fn signature_share_uses_configured_key_ids_v2() {
+        signature_share_uses_configured_key_ids::<FireCoordinator>(5, 2);
+    }
+
+    #[test]
     fn invalid_nonce_v2() {
         invalid_nonce::<FireCoordinator>(5, 2);
     }
@@ -1955,7 +1964,7 @@ pub mod test {
             }
             result => panic!(
                 "Expected OperationResult::DkgError(DkgError::DkgEndFailure), got {:?}",
-                &result
+                result
             ),
         }
     }
