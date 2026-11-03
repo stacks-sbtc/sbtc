@@ -430,7 +430,7 @@ pub type DepositTableSecondaryIndex = SecondaryIndex<DepositTableSecondaryIndexI
 impl SecondaryIndexTrait for DepositTableSecondaryIndexInner {
     type PrimaryIndex = DepositTablePrimaryIndex;
     type Entry = DepositInfoEntry;
-    const INDEX_NAME: &'static str = "DepositStatus";
+    const INDEX_NAME: &'static str = "DepositStatusV2";
 }
 
 impl From<DepositInfoEntry> for DepositInfo {
@@ -542,7 +542,7 @@ pub type DepositTableByRecipientSecondaryIndex =
 impl SecondaryIndexTrait for DepositTableByRecipientSecondaryIndexInner {
     type PrimaryIndex = DepositTablePrimaryIndex;
     type Entry = DepositInfoByRecipientEntry;
-    const INDEX_NAME: &'static str = "DepositRecipient";
+    const INDEX_NAME: &'static str = "DepositRecipientV2";
 }
 
 impl From<DepositInfoByRecipientEntry> for DepositInfo {
@@ -654,7 +654,7 @@ pub type DepositTableByReclaimPubkeysSecondaryIndex =
 impl SecondaryIndexTrait for DepositTableByReclaimPubkeysSecondaryIndexInner {
     type PrimaryIndex = DepositTablePrimaryIndex;
     type Entry = DepositInfoByReclaimPubkeysEntry;
-    const INDEX_NAME: &'static str = "DepositReclaimPubkeysHashIndex";
+    const INDEX_NAME: &'static str = "DepositReclaimPubkeysHashIndexV2";
 }
 
 impl From<DepositInfoByReclaimPubkeysEntry> for DepositInfo {
@@ -746,6 +746,22 @@ impl DepositUpdatePackage {
 mod tests {
     use super::*;
     use test_case::test_case;
+
+    #[test]
+    fn deposit_queries_use_replacement_indexes() {
+        assert_eq!(
+            DepositTableSecondaryIndexInner::INDEX_NAME,
+            "DepositStatusV2"
+        );
+        assert_eq!(
+            DepositTableByRecipientSecondaryIndexInner::INDEX_NAME,
+            "DepositRecipientV2"
+        );
+        assert_eq!(
+            DepositTableByReclaimPubkeysSecondaryIndexInner::INDEX_NAME,
+            "DepositReclaimPubkeysHashIndexV2"
+        );
+    }
 
     #[test]
     fn deposit_update_should_be_unnecessary_when_event_is_present() {

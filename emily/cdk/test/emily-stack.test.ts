@@ -36,6 +36,41 @@ describe('EmilyStack Test', () => {
         expect(tableNames).toContain(`ChainstateTable-account-region-${Constants.UNIT_TEST_STAGE_NAME}`);
     });
 
+    it('should keep the original deposit indexes and create replacement indexes', () => {
+        // Arrange
+        const app = new cdk.App();
+        const stack = new EmilyStack(app, 'TestStack', TEST_STACK_PROPS);
+
+        // Act
+        const template = Template.fromStack(stack);
+        const tableResources = template.findResources('AWS::DynamoDB::Table');
+        const depositTable = Object.values(tableResources).find(resource =>
+            resource.Properties.TableName ===
+            `DepositTable-account-region-${Constants.UNIT_TEST_STAGE_NAME}`
+        );
+        const indexes = depositTable?.Properties.GlobalSecondaryIndexes;
+        const indexesByName = Object.fromEntries(
+            indexes.map((index: { IndexName: string }) => [index.IndexName, index])
+        );
+
+        // Assert
+        const replacements = [
+            ['DepositStatus', 'DepositStatusV2'],
+            ['DepositRecipient', 'DepositRecipientV2'],
+            ['DepositReclaimPubkeysHashIndex', 'DepositReclaimPubkeysHashIndexV2'],
+        ];
+        replacements.forEach(([originalName, replacementName]) => {
+            expect(indexesByName[originalName]).toBeDefined();
+            expect(indexesByName[replacementName]).toBeDefined();
+            expect(indexesByName[originalName].Projection.ProjectionType).toBe('INCLUDE');
+            expect(indexesByName[originalName].Projection.NonKeyAttributes).not.toContain('MaxFee');
+            expect(indexesByName[originalName].Projection.NonKeyAttributes).not.toContain('DepositVersion');
+            expect(indexesByName[replacementName].Projection).toEqual({
+                ProjectionType: 'ALL',
+            });
+        });
+    });
+
     it('should create a Lambda function', async () => {
         // Arrange
         const app = new cdk.App();
