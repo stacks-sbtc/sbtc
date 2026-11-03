@@ -731,7 +731,6 @@ async fn get_deposits_for_recipient() {
 }
 
 #[tokio::test]
-#[ignore = "DepositReclaimPubkeysHashIndexV2 is added in a later staged deployment"]
 async fn get_deposits_for_reclaim_pubkeys() {
     let (configuration, tables) = new_test_setup().await;
     // Arrange.
