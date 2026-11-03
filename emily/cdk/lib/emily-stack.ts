@@ -239,22 +239,19 @@ export class EmilyStack extends cdk.Stack {
 
         // Project the full deposit so future response fields do not require another
         // index replacement.
-        //
-        // TODO: CloudFormation can only add one GSI per table update, so this
-        // index is added in a later staged deployment.
-        // const byRecipientV2IndexName: string = "DepositRecipientV2";
-        // table.addGlobalSecondaryIndex({
-        //     indexName: byRecipientV2IndexName,
-        //     partitionKey: {
-        //         name: 'Recipient',
-        //         type: dynamodb.AttributeType.STRING
-        //     },
-        //     sortKey: {
-        //         name: 'LastUpdateHeight',
-        //         type: dynamodb.AttributeType.NUMBER
-        //     },
-        //     projectionType: dynamodb.ProjectionType.ALL,
-        // });
+        const byRecipientV2IndexName: string = "DepositRecipientV2";
+        table.addGlobalSecondaryIndex({
+            indexName: byRecipientV2IndexName,
+            partitionKey: {
+                name: 'Recipient',
+                type: dynamodb.AttributeType.STRING
+            },
+            sortKey: {
+                name: 'LastUpdateHeight',
+                type: dynamodb.AttributeType.NUMBER
+            },
+            projectionType: dynamodb.ProjectionType.ALL,
+        });
 
         // Index to efficiently query deposits that comes from a specific address
         const byReclaimPubkeysHashIndexName: string = "DepositReclaimPubkeysHashIndex";

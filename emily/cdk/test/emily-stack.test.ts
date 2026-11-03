@@ -54,10 +54,9 @@ describe('EmilyStack Test', () => {
         );
 
         // Assert
-        // The recipient replacement is added in a later staged deployment.
         const replacements = [
             ['DepositStatus', 'DepositStatusV2'],
-            // ['DepositRecipient', 'DepositRecipientV2'],
+            ['DepositRecipient', 'DepositRecipientV2'],
             ['DepositReclaimPubkeysHashIndex', 'DepositReclaimPubkeysHashIndexV2'],
         ];
         replacements.forEach(([originalName, replacementName]) => {
