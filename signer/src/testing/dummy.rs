@@ -55,6 +55,7 @@ use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::BitcoinTxVin;
 use crate::bitcoin::rpc::BitcoinTxVinPrevout;
 use crate::bitcoin::rpc::OutputScriptPubKey;
+use crate::bitcoin::utxo::FeeAssessmentMethod;
 use crate::bitcoin::utxo::Fees;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::bitcoin::utxo::SignerUtxo;
@@ -583,6 +584,7 @@ impl fake::Dummy<&[PublicKey]> for SignerBtcState {
         Self {
             fee_rate: Faker.fake_with_rng(rng),
             last_fees: Faker.fake_with_rng(rng),
+            fee_assessment: FeeAssessmentMethod::Proportional,
             magic_bytes: [1, 2],
             output_key_set: SignerUtxoKeySet::V1(aggregate_key_x_only),
             utxo: SignerUtxo {

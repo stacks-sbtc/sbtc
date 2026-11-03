@@ -17,8 +17,10 @@ use sbtc::SignerKeySet;
 
 use crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use crate::MAINNET_DKG_DISABLE_BLOCK_HEIGHT;
+use crate::MAINNET_EVEN_FEES_ACTIVATION_HEIGHT;
 use crate::MAINNET_V2_SIGNING_BLOCK_HEIGHT;
 use crate::TESTNET_DKG_DISABLE_BLOCK_HEIGHT;
+use crate::TESTNET_EVEN_FEES_ACTIVATION_HEIGHT;
 use crate::TESTNET_V2_SIGNING_BLOCK_HEIGHT;
 use crate::config::error::SignerConfigError;
 use crate::config::serialization::duration_milliseconds_deserializer;
@@ -378,6 +380,11 @@ pub struct SignerConfig {
     /// Activation height for v2 signer UTXOs.
     #[serde(default)]
     pub v2_signing_block_height: Option<BitcoinBlockHeight>,
+    /// Bitcoin chain-tip height at which newly proposed sweeps split
+    /// transaction fees evenly across requests. If omitted, the compiled
+    /// default for the configured network is used.
+    #[serde(default)]
+    pub fee_assessment_block_height: Option<BitcoinBlockHeight>,
     /// Bitcoin height at which DKG is disabled and rotate-keys calls
     /// switch to the v2 registry-key encoding. This must be greater than
     /// or equal to the effective v2 signing block height.
@@ -576,6 +583,17 @@ impl SignerConfig {
     /// Return whether newly-created signer outputs should use v2.
     pub fn is_v2_signing_active(&self, block_height: BitcoinBlockHeight) -> bool {
         block_height >= self.v2_signing_block_height()
+    }
+
+    /// Return the pre-sign chain-tip height at which request fees are split
+    /// evenly.
+    pub fn even_fees_activation_height(&self) -> BitcoinBlockHeight {
+        let default = if self.network.is_mainnet() {
+            MAINNET_EVEN_FEES_ACTIVATION_HEIGHT
+        } else {
+            TESTNET_EVEN_FEES_ACTIVATION_HEIGHT
+        };
+        self.fee_assessment_block_height.unwrap_or(default)
     }
 
     /// Return the Bitcoin height at which DKG is disabled.
@@ -824,6 +842,10 @@ mod tests {
         assert_eq!(settings.signer.dkg_verification_window, 10);
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
         assert_eq!(
+            settings.signer.even_fees_activation_height(),
+            TESTNET_EVEN_FEES_ACTIVATION_HEIGHT
+        );
+        assert_eq!(
             settings.signer.dkg_disable_block_height(),
             TESTNET_DKG_DISABLE_BLOCK_HEIGHT
         );
@@ -1010,6 +1032,21 @@ mod tests {
         assert_eq!(
             settings.signer.dkg_min_bitcoin_block_height,
             Some(42u64.into())
+        );
+    }
+
+    /// The fee-assessment activation height can be configured independently
+    /// through the signer environment.
+    #[test]
+    fn default_config_toml_loads_fee_assessment_block_height() {
+        clear_env();
+
+        set_var("SIGNER_SIGNER__FEE_ASSESSMENT_BLOCK_HEIGHT", "42");
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(settings.signer.even_fees_activation_height(), 42_u64.into());
+        assert_ne!(
+            settings.signer.even_fees_activation_height(),
+            settings.signer.v2_signing_block_height()
         );
     }
 
@@ -1453,16 +1490,21 @@ mod tests {
     }
 
     #[test]
-    fn mainnet_uses_configured_v2_and_dkg_disable_heights() {
+    fn mainnet_uses_configured_activation_heights() {
         clear_env();
         let mut settings = Settings::new_from_default_config().unwrap();
         settings.signer.network = NetworkKind::Mainnet;
         settings.signer.v2_signing_block_height = Some(300_u64.into());
+        settings.signer.fee_assessment_block_height = Some(350_u64.into());
         settings.signer.dkg_disable_block_height = Some(400_u64.into());
 
         assert_eq!(
             settings.signer.v2_signing_block_height(),
             BitcoinBlockHeight::from(300_u64)
+        );
+        assert_eq!(
+            settings.signer.even_fees_activation_height(),
+            BitcoinBlockHeight::from(350_u64)
         );
         assert_eq!(
             settings.signer.dkg_disable_block_height(),
@@ -1479,6 +1521,10 @@ mod tests {
         assert_eq!(
             settings.signer.v2_signing_block_height(),
             MAINNET_V2_SIGNING_BLOCK_HEIGHT
+        );
+        assert_eq!(
+            settings.signer.even_fees_activation_height(),
+            MAINNET_EVEN_FEES_ACTIVATION_HEIGHT
         );
         assert_eq!(
             settings.signer.dkg_disable_block_height(),

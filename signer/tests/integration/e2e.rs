@@ -615,7 +615,7 @@ async fn deposit_and_withdrawal() {
     wait_for_stx_balance(&stacks_client, &recipient_principal, |ustx| ustx > 0).await;
 
     let withdrawal_recipient = Recipient::new(AddressType::P2tr);
-    let withdrawal_max_fee = 2_000;
+    let withdrawal_max_fee = 10_000;
     let withdrawal_amount = sbtc_balance.to_sat() - withdrawal_max_fee;
 
     assert_eq!(withdrawal_recipient.get_balance(rpc), Amount::ZERO);
