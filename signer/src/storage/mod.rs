@@ -14,6 +14,7 @@ pub mod sqlx;
 pub mod util;
 
 use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::future::Future;
 
 use libp2p::Multiaddr;
@@ -120,6 +121,14 @@ pub trait DbRead {
         txid: &model::BitcoinTxId,
         output_index: u32,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
+
+    /// Outpoints of stored deposit requests confirmed within
+    /// `context_window` blocks of `chain_tip`.
+    fn get_confirmed_deposit_outpoints(
+        &self,
+        chain_tip: &model::BitcoinBlockHash,
+        context_window: u16,
+    ) -> impl Future<Output = Result<HashSet<bitcoin::OutPoint>, Error>> + Send;
 
     /// This function returns a deposit request report that does the
     /// following:

@@ -18,11 +18,15 @@
 //! - Set aggregate key transactions
 
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::time::Duration;
+use std::time::Instant;
 
+use crate::MAX_REORG_BLOCK_COUNT;
 use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
+use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::utxo::TxDeconstructor as _;
 use crate::context::Context;
@@ -52,11 +56,27 @@ use crate::storage::model::TxPrevoutType;
 use crate::util::FutureExt as _;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
+use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
+use bitcoin::Txid;
+use bitcoin::hashes::Hash as _;
+use bitcoin::hashes::HashEngine as _;
+use bitcoin::hashes::sha256;
+use clarity::codec::StacksMessageCodec as _;
 use futures::stream::StreamExt as _;
+use lru::LruCache;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
+
+/// Max requests [`DepositIntake`] tracks, about 120 bytes each, so ~6 MB.
+const DEPOSIT_INTAKE_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(50_000).expect("the deposit intake capacity is non-zero");
+
+/// Intakes to wait before re-validating an unconfirmed, stored, or twice-failed request. Handles missed confirmations and reorgs.
+const DEPOSIT_REPROBE_INTERVAL: u64 = 6;
 
 /// Block observer
 #[derive(Debug)]
@@ -127,9 +147,7 @@ impl DepositRequestValidator for CreateDepositRequest {
 pub trait DepositRequestValidator {
     /// Validate this deposit request from the transaction.
     ///
-    /// This function fetches the transaction using the given client and
-    /// checks that the transaction has been submitted. The transaction
-    /// need not be confirmed.
+    /// Returns `Ok(None)` if the outpoint is not a confirmed unspent output.
     fn validate<C>(
         &self,
         client: &C,
@@ -137,6 +155,264 @@ pub trait DepositRequestValidator {
     ) -> impl Future<Output = Result<Option<Deposit>, Error>>
     where
         C: BitcoinInteract;
+}
+
+/// The result of validating one deposit request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ValidationOutcome {
+    /// Validated and stored.
+    Valid,
+    /// Not a confirmed unspent output.
+    Unconfirmed,
+    /// Fails for these exact request contents.
+    Invalid,
+    /// Failed transiently.
+    Errored,
+}
+
+impl ValidationOutcome {
+    fn new(result: &Result<Option<Deposit>, Error>) -> Self {
+        match result {
+            Ok(Some(_)) => Self::Valid,
+            Ok(None) => Self::Unconfirmed,
+            // Deterministic for a given transaction and request.
+            Err(Error::SbtcLib(_) | Error::BitcoinTxCoinbase(_)) => Self::Invalid,
+            Err(_) => Self::Errored,
+        }
+    }
+}
+
+/// Result of the last request validation.
+enum IntakeEntry {
+    /// Newly processed, but deferred by the budget.
+    Due,
+    /// Unconfirmed at `probed_at`.
+    Unconfirmed { probed_at: u64 },
+    /// Stored at `probed_at`; stops re-validation after leaving the context window.
+    Stored { probed_at: u64 },
+    /// Transiently failed at `probed_at`; `repeated` if the previous check also failed.
+    Errored { probed_at: u64, repeated: bool },
+    /// Deterministically invalid for `request_digest`.
+    Invalid { request_digest: [u8; 32] },
+}
+
+/// Selects Emily deposit requests to validate each block within a budget.
+struct DepositIntake {
+    /// Intake counter; block heights may repeat after reorgs.
+    seq: u64,
+    /// Txids of processed blocks and their intake sequence.
+    new_blocks: VecDeque<(u64, Vec<Txid>)>,
+    /// First never-tried request skipped by the last completed intake. Prevents evicted requests from overtaking never-tried ones.
+    fresh_cursor: Option<OutPoint>,
+    /// Last validation result per request.
+    entries: LruCache<OutPoint, IntakeEntry>,
+}
+
+/// Requests selected for an intake, with log counts and the next cursor.
+struct Selection<'a> {
+    /// Requests to validate, in order, within budget.
+    requests: Vec<&'a CreateDepositRequest>,
+    /// Stored and confirmed requests in the context window.
+    known: usize,
+    /// Eligible requests from newly processed blocks.
+    in_new_blocks: usize,
+    /// Eligible requests deferred by the budget.
+    deferred: usize,
+    /// First never-tried request for the next intake.
+    cursor: Option<OutPoint>,
+}
+
+impl DepositIntake {
+    fn new(capacity: NonZeroUsize) -> Self {
+        Self {
+            seq: 0,
+            new_blocks: VecDeque::new(),
+            fresh_cursor: None,
+            entries: LruCache::new(capacity),
+        }
+    }
+
+    /// Keeps only the newest [`MAX_REORG_BLOCK_COUNT`] blocks.
+    fn add_new_blocks<I>(&mut self, blocks: I)
+    where
+        I: IntoIterator<Item = Vec<Txid>>,
+    {
+        let seq = self.seq;
+        self.new_blocks
+            .extend(blocks.into_iter().map(|txids| (seq, txids)));
+        let excess = self
+            .new_blocks
+            .len()
+            .saturating_sub(MAX_REORG_BLOCK_COUNT as usize);
+        self.new_blocks.drain(..excess);
+    }
+
+    /// The intake each recent transaction was last processed in.
+    fn new_txids(&self) -> HashMap<Txid, u64> {
+        let mut txids = HashMap::new();
+        for (seq, block) in &self.new_blocks {
+            for txid in block {
+                txids.insert(*txid, *seq);
+            }
+        }
+        txids
+    }
+
+    /// Selects up to `budget` requests: new/due block requests, first errors and due re-checks (up to `ceil(budget / 4)`); changed contents; never-tried requests from the cursor; remaining re-checks. `requests` must be oldest-first and deduplicated.
+    fn select<'a>(
+        &mut self,
+        requests: &'a [CreateDepositRequest],
+        known: &HashSet<OutPoint>,
+        new_txids: &HashMap<Txid, u64>,
+        budget: usize,
+    ) -> Selection<'a> {
+        let mut known_count = 0;
+        let mut in_new_blocks = Vec::new();
+        let mut rechecks = Vec::new();
+        let mut changed = Vec::new();
+        let mut fresh = Vec::new();
+
+        for (index, request) in requests.iter().enumerate() {
+            if known.contains(&request.outpoint) {
+                known_count += 1;
+                continue;
+            }
+            let entry = self.entries.peek(&request.outpoint);
+            let probed_at = match entry {
+                Some(
+                    IntakeEntry::Unconfirmed { probed_at }
+                    | IntakeEntry::Stored { probed_at }
+                    | IntakeEntry::Errored { probed_at, .. },
+                ) => Some(*probed_at),
+                _ => None,
+            };
+            let in_new_block = new_txids
+                .get(&request.outpoint.txid)
+                .is_some_and(|seen| probed_at.is_none_or(|probed_at| *seen > probed_at));
+
+            match entry {
+                Some(IntakeEntry::Invalid { request_digest })
+                    if *request_digest == deposit_request_digest(request) => {}
+                _ if in_new_block => in_new_blocks.push(request),
+                Some(IntakeEntry::Due) => in_new_blocks.push(request),
+                // Retry first errors next intake, others after the interval.
+                Some(IntakeEntry::Errored { probed_at, repeated: false }) => {
+                    rechecks.push((false, *probed_at, request))
+                }
+                Some(
+                    IntakeEntry::Unconfirmed { probed_at }
+                    | IntakeEntry::Stored { probed_at }
+                    | IntakeEntry::Errored { probed_at, repeated: true },
+                ) => {
+                    if self.seq.saturating_sub(*probed_at) >= DEPOSIT_REPROBE_INTERVAL {
+                        rechecks.push((true, *probed_at, request));
+                    }
+                }
+                Some(IntakeEntry::Invalid { .. }) => changed.push(request),
+                None => fresh.push((index, request)),
+            }
+        }
+
+        let cursor = self.fresh_cursor.and_then(|cursor| {
+            requests
+                .iter()
+                .position(|request| request.outpoint == cursor)
+        });
+        if let Some(position) = cursor {
+            let start = fresh.partition_point(|(index, _)| *index < position);
+            fresh.rotate_left(start);
+        }
+
+        rechecks.sort_by_key(|(is_due, probed_at, _)| (*is_due, *probed_at));
+
+        // Reserved so re-checks keep a share of the budget.
+        let mut reserved = rechecks;
+        let later = reserved.split_off(budget.div_ceil(4).min(reserved.len()));
+
+        for request in in_new_blocks.iter().skip(budget) {
+            self.entries.put(request.outpoint, IntakeEntry::Due);
+        }
+
+        let taken_before_fresh = in_new_blocks.len() + reserved.len() + changed.len();
+        let fresh_taken = budget.saturating_sub(taken_before_fresh).min(fresh.len());
+        let cursor = fresh.get(fresh_taken).map(|(_, request)| request.outpoint);
+
+        let eligible = taken_before_fresh + fresh.len() + later.len();
+        let in_new_blocks_count = in_new_blocks.len();
+        let selected: Vec<_> = in_new_blocks
+            .into_iter()
+            .chain(reserved.into_iter().map(|(_, _, request)| request))
+            .chain(changed)
+            .chain(fresh.into_iter().map(|(_, request)| request))
+            .chain(later.into_iter().map(|(_, _, request)| request))
+            .take(budget)
+            .collect();
+        Selection {
+            deferred: eligible.saturating_sub(selected.len()),
+            requests: selected,
+            known: known_count,
+            in_new_blocks: in_new_blocks_count,
+            cursor,
+        }
+    }
+
+    /// Records outcomes, commits the selection cursor and processed blocks, and ends the intake.
+    fn record<'a, I>(
+        &mut self,
+        outcomes: I,
+        cursor: Option<OutPoint>,
+        written_blocks: Vec<Vec<Txid>>,
+    ) where
+        I: IntoIterator<Item = (&'a CreateDepositRequest, ValidationOutcome)>,
+    {
+        for (request, outcome) in outcomes {
+            let entry = match outcome {
+                ValidationOutcome::Valid => IntakeEntry::Stored { probed_at: self.seq },
+                ValidationOutcome::Unconfirmed => IntakeEntry::Unconfirmed { probed_at: self.seq },
+                ValidationOutcome::Errored => IntakeEntry::Errored {
+                    probed_at: self.seq,
+                    repeated: matches!(
+                        self.entries.peek(&request.outpoint),
+                        Some(IntakeEntry::Errored { .. })
+                    ),
+                },
+                ValidationOutcome::Invalid => IntakeEntry::Invalid {
+                    request_digest: deposit_request_digest(request),
+                },
+            };
+            self.entries.put(request.outpoint, entry);
+        }
+        self.fresh_cursor = cursor;
+        self.seq = self.seq.saturating_add(1);
+        // Written during this intake, so some of its checks predate them.
+        self.add_new_blocks(written_blocks);
+    }
+}
+
+/// Hashes the full request, including Emily's mutable v2 recipient and max fee.
+fn deposit_request_digest(request: &CreateDepositRequest) -> [u8; 32] {
+    let mut engine = sha256::Hash::engine();
+    engine.input(request.outpoint.txid.as_byte_array());
+    engine.input(&request.outpoint.vout.to_be_bytes());
+    for script in [&request.deposit_script, &request.reclaim_script] {
+        engine.input(&script.len().to_be_bytes());
+        engine.input(script.as_bytes());
+    }
+    match &request.recipient {
+        Some(recipient) => {
+            engine.input(&[1]);
+            engine.input(&recipient.serialize_to_vec());
+        }
+        None => engine.input(&[0]),
+    }
+    match request.max_fee {
+        Some(max_fee) => {
+            engine.input(&[1]);
+            engine.input(&max_fee.to_be_bytes());
+        }
+        None => engine.input(&[0]),
+    }
+    sha256::Hash::from_engine(engine).to_byte_array()
 }
 
 impl<C, BlockSource> BlockObserver<C, BlockSource>
@@ -156,6 +432,7 @@ where
         let span = tracing::Span::current();
         let term = self.context.get_termination_handle();
         let mut bitcoin_blocks = self.bitcoin_block_source.get_block_hash_stream();
+        let mut intake = DepositIntake::new(DEPOSIT_INTAKE_CAPACITY);
 
         loop {
             if term.shutdown_signalled() {
@@ -180,8 +457,9 @@ where
                     )
                     .increment(1);
 
-                    if let Err(error) = self.process_bitcoin_chain_tip(block_hash).await {
-                        tracing::error!(%error, "could not process bitcoin blocks");
+                    match self.process_bitcoin_chain_tip(block_hash).await {
+                        Ok(new_blocks) => intake.add_new_blocks(new_blocks),
+                        Err(error) => tracing::error!(%error, "could not process bitcoin blocks"),
                     }
 
                     let Ok(chain_tip) = self.resolve_block_ref(block_hash).await else {
@@ -207,7 +485,9 @@ where
                     }
 
                     tracing::info!("loading latest deposit requests from Emily");
-                    if let Err(error) = self.load_latest_deposit_requests().await {
+                    let deposits =
+                        self.load_latest_deposit_requests(&chain_tip.block_hash, &mut intake);
+                    if let Err(error) = deposits.await {
                         tracing::error!(%error, "could not load latest deposit requests from Emily");
                     }
 
@@ -229,12 +509,69 @@ where
 }
 
 impl<C: Context, B> BlockObserver<C, B> {
-    /// Fetch deposit requests from Emily and store the ones that pass
-    /// validation into the database.
+    /// Fetches Emily deposit requests, validates the selection, and stores valid ones.
     #[tracing::instrument(skip_all)]
-    async fn load_latest_deposit_requests(&self) -> Result<(), Error> {
-        let requests = self.context.get_emily_client().get_deposits().await?;
-        self.load_requests(&requests).await
+    async fn load_latest_deposit_requests(
+        &self,
+        chain_tip: &BitcoinBlockHash,
+        intake: &mut DepositIntake,
+    ) -> Result<(), Error> {
+        let config = &self.context.config().signer;
+        let fetch_start = Instant::now();
+        let fetched = self.context.get_emily_client().get_deposits().await?;
+        let fetch_elapsed = fetch_start.elapsed();
+        let fetched_count = fetched.len();
+
+        // Reversed: accepted before pending, each oldest first.
+        let mut seen = HashSet::new();
+        let requests: Vec<CreateDepositRequest> = fetched
+            .into_iter()
+            .rev()
+            .filter(|request| seen.insert(request.outpoint))
+            .collect();
+
+        let known = self
+            .context
+            .get_storage()
+            .get_confirmed_deposit_outpoints(chain_tip, config.context_window)
+            .await?;
+
+        let budget = usize::from(config.max_deposit_validations_per_block.get());
+        let new_txids = intake.new_txids();
+        let selection = intake.select(&requests, &known, &new_txids, budget);
+        let selected: Vec<CreateDepositRequest> = selection.requests.into_iter().cloned().collect();
+
+        let validate_start = Instant::now();
+        let (outcomes, written_blocks) = self.validate_and_store(&selected).await?;
+        let validate_elapsed = validate_start.elapsed();
+
+        let count = |outcome| outcomes.iter().filter(|item| **item == outcome).count();
+        let valid = count(ValidationOutcome::Valid);
+        let unconfirmed = count(ValidationOutcome::Unconfirmed);
+        let invalid = count(ValidationOutcome::Invalid);
+        let errored = count(ValidationOutcome::Errored);
+        intake.record(
+            selected.iter().zip(outcomes),
+            selection.cursor,
+            written_blocks,
+        );
+
+        tracing::info!(
+            fetched = fetched_count,
+            known = selection.known,
+            in_new_blocks = selection.in_new_blocks,
+            validated = selected.len(),
+            valid,
+            unconfirmed,
+            invalid,
+            errored,
+            deferred = selection.deferred,
+            tracked = intake.entries.len(),
+            fetch_ms = fetch_elapsed.as_millis(),
+            validate_ms = validate_elapsed.as_millis(),
+            "processed deposit requests from emily"
+        );
+        Ok(())
     }
 
     /// Validate the given deposit requests and store the ones that pass
@@ -251,6 +588,16 @@ impl<C: Context, B> BlockObserver<C, B> {
     ///    reaching out to bitcoin-core or our database.
     #[tracing::instrument(skip_all)]
     pub async fn load_requests(&self, requests: &[CreateDepositRequest]) -> Result<(), Error> {
+        self.validate_and_store(requests).await.map(|_| ())
+    }
+
+    /// Like [`Self::load_requests`], also returns outcomes and written block txids.
+    async fn validate_and_store(
+        &self,
+        requests: &[CreateDepositRequest],
+    ) -> Result<(Vec<ValidationOutcome>, Vec<Vec<Txid>>), Error> {
+        let mut outcomes = Vec::with_capacity(requests.len());
+        let mut new_blocks = Vec::new();
         let mut deposit_requests = Vec::new();
         let mut deposit_request_txs = Vec::new();
         let bitcoin_client = self.context.get_bitcoin_client();
@@ -265,10 +612,11 @@ impl<C: Context, B> BlockObserver<C, B> {
             // We log the error above, so we just need to extract the
             // deposit now.
             Metrics::increment_deposit_total(&deposit);
+            outcomes.push(ValidationOutcome::new(&deposit));
             let Ok(Some(deposit)) = deposit else { continue };
 
-            self.process_bitcoin_blocks_until(deposit.block_hash)
-                .await?;
+            let blocks = self.process_bitcoin_blocks_until(deposit.block_hash);
+            new_blocks.extend(blocks.await?);
 
             let tx = model::BitcoinTxRef {
                 txid: deposit.tx_info.compute_txid().into(),
@@ -284,7 +632,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         db.write_deposit_requests(deposit_requests).await?;
 
         tracing::debug!("finished processing deposit requests");
-        Ok(())
+        Ok((outcomes, new_blocks))
     }
 
     /// Set the sbtc start height, if it has not been set already.
@@ -372,9 +720,14 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This function must only be called with the bitcoin chain tip since
     /// it updates all blocks that are reachable from the given block hash
     /// as canonical and may update blocks not reachable as non-canonical.
+    ///
+    /// Returns the txids from [`Self::process_bitcoin_blocks_until`].
     #[tracing::instrument(skip_all)]
-    async fn process_bitcoin_chain_tip(&self, chain_tip: BlockHash) -> Result<(), Error> {
-        self.process_bitcoin_blocks_until(chain_tip).await?;
+    async fn process_bitcoin_chain_tip(
+        &self,
+        chain_tip: BlockHash,
+    ) -> Result<Vec<Vec<Txid>>, Error> {
+        let new_blocks = self.process_bitcoin_blocks_until(chain_tip).await?;
 
         let db = self.context.get_storage_mut();
 
@@ -388,7 +741,8 @@ impl<C: Context, B> BlockObserver<C, B> {
             tracing::error!("chain tip not found in database, not setting is_canonical column");
             return Err(Error::UnknownBitcoinChainTip(chain_tip));
         }
-        db.set_canonical_bitcoin_blockchain(&chain_tip).await
+        db.set_canonical_bitcoin_blockchain(&chain_tip).await?;
+        Ok(new_blocks)
     }
 
     /// Process bitcoin blocks until we get caught up to the given
@@ -407,20 +761,38 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// This means that if we stop processing blocks midway though,
     /// subsequent calls to this function will properly pick up from where
     /// we left off and update the database.
-    async fn process_bitcoin_blocks_until(&self, block_hash: BlockHash) -> Result<(), Error> {
+    ///
+    /// Returns the txids of the newest [`MAX_REORG_BLOCK_COUNT`] processed
+    /// blocks, oldest first.
+    async fn process_bitcoin_blocks_until(
+        &self,
+        block_hash: BlockHash,
+    ) -> Result<Vec<Vec<Txid>>, Error> {
         let block_headers = self.next_headers_to_process(block_hash).await?;
+        // Older blocks are a backfill, don't hash them.
+        let skip = block_headers
+            .len()
+            .saturating_sub(MAX_REORG_BLOCK_COUNT as usize);
+        let mut new_blocks = Vec::new();
 
-        for block_header in block_headers {
-            self.process_bitcoin_block(block_header).await?;
+        for (index, block_header) in block_headers.into_iter().enumerate() {
+            let block = self.process_bitcoin_block(block_header).await?;
+            if index >= skip {
+                let txids = block.transactions.iter().map(BitcoinTxInfo::compute_txid);
+                new_blocks.push(txids.collect());
+            }
         }
 
-        Ok(())
+        Ok(new_blocks)
     }
 
     /// Write the bitcoin block and any transactions that spend to any of
-    /// the signers `scriptPubKey`s to the database.
+    /// the signers `scriptPubKey`s to the database, and return the block.
     #[tracing::instrument(skip_all, fields(block_hash = %block_header.hash))]
-    async fn process_bitcoin_block(&self, block_header: BitcoinBlockHeader) -> Result<(), Error> {
+    async fn process_bitcoin_block(
+        &self,
+        block_header: BitcoinBlockHeader,
+    ) -> Result<BitcoinBlockInfo, Error> {
         let block = self
             .context
             .get_bitcoin_client()
@@ -457,7 +829,7 @@ impl<C: Context, B> BlockObserver<C, B> {
         storage_tx.commit().await?;
 
         tracing::debug!("finished processing bitcoin block");
-        Ok(())
+        Ok(block)
     }
 
     /// Get a bitcoin block ref from a block hash.
@@ -834,6 +1206,9 @@ where
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::num::NonZeroU16;
+    use std::sync::Arc;
+    use std::sync::Mutex;
 
     use bitcoin::Amount;
     use bitcoin::BlockHash;
@@ -844,23 +1219,27 @@ mod tests {
     use bitcoin::TxOut;
     use bitcoin::Witness;
     use bitcoin::absolute;
-    use bitcoin::hashes::Hash as _;
     use bitcoin::taproot::LeafVersion;
     use bitcoin::transaction;
     use fake::Dummy as _;
     use fake::Fake as _;
+    use fake::Faker;
     use model::BitcoinTxId;
     use model::ScriptPubKey;
 
     use crate::bitcoin::rpc::GetTxResponse;
+    use crate::bitcoin::rpc::OutPointSummary;
     use crate::context::SignerSignal;
     use crate::keys::PublicKey;
     use crate::storage;
+    use crate::storage::memory::SharedStore;
     use crate::storage::model::BitcoinBlockHash;
     use crate::storage::model::DkgSharesStatus;
     use crate::testing::block_observer::TestHarness;
     use crate::testing::context::*;
     use crate::testing::get_rng;
+    use clarity::vm::types::PrincipalData;
+    use stacks_common::types::chainstate::StacksAddress;
 
     use super::*;
 
@@ -1143,7 +1522,12 @@ mod tests {
             assert_eq!(db.deposit_requests.len(), 0);
         }
 
-        block_observer.load_latest_deposit_requests().await.unwrap();
+        let chain_tip = BitcoinBlockHash::from(block_hash.unwrap());
+        let mut intake = DepositIntake::new(DEPOSIT_INTAKE_CAPACITY);
+        block_observer
+            .load_latest_deposit_requests(&chain_tip, &mut intake)
+            .await
+            .unwrap();
         // Only the transactions from tx_setup0 and tx_setup3 were valid.
         // Note that, since we are not using a real block hash stored in
         // the database. Our DbRead function won't actually find it. And in
@@ -1231,7 +1615,12 @@ mod tests {
             bitcoin_block_source: (),
         };
 
-        block_observer.load_latest_deposit_requests().await.unwrap();
+        let chain_tip = BitcoinBlockHash::from(block_hash.unwrap());
+        let mut intake = DepositIntake::new(DEPOSIT_INTAKE_CAPACITY);
+        block_observer
+            .load_latest_deposit_requests(&chain_tip, &mut intake)
+            .await
+            .unwrap();
 
         let storage = storage.lock().await;
         assert_eq!(storage.deposit_requests.len(), 1);
@@ -1354,5 +1743,745 @@ mod tests {
         let expected_tx_id = tx_setup0.tx.compute_txid().into();
         assert_eq!(tx_ids.len(), 1);
         assert!(tx_ids.contains(&expected_tx_id));
+    }
+
+    /// Fake bitcoin-core for intake tests.
+    #[derive(Default)]
+    struct FakeBitcoinCore {
+        /// Unspent deposit transactions and the blocks confirming them.
+        confirmed: HashMap<Txid, (BitcoinTxInfo, BlockHash)>,
+        /// Outpoints whose lookup fails.
+        failing: HashSet<OutPoint>,
+        /// Outpoints that are coinbase outputs.
+        coinbase: HashSet<OutPoint>,
+        /// Every outpoint looked up, in order.
+        probes: Vec<OutPoint>,
+        /// Blocks that are not in the database yet.
+        blocks: HashMap<BlockHash, BitcoinBlockInfo>,
+    }
+
+    type MockedContext = TestContext<
+        SharedStore,
+        WrappedMockBitcoinInteract,
+        WrappedMockStacksInteract,
+        WrappedMockEmilyInteract,
+    >;
+
+    /// Runs intakes against mocked Emily and bitcoin-core on a stored chain.
+    struct IntakeHarness {
+        observer: BlockObserver<MockedContext, ()>,
+        bitcoin: Arc<Mutex<FakeBitcoinCore>>,
+        /// What Emily returns, newest first.
+        emily: Arc<Mutex<Vec<CreateDepositRequest>>>,
+        /// Whether Emily fails to return deposits.
+        emily_fails: Arc<Mutex<bool>>,
+        blocks: Vec<model::BitcoinBlock>,
+        chain_tip: BitcoinBlockHash,
+        intake: DepositIntake,
+    }
+
+    impl IntakeHarness {
+        async fn new(budget: u16, capacity: usize) -> Self {
+            Self::with_context_window(budget, capacity, 1000).await
+        }
+
+        async fn with_context_window(budget: u16, capacity: usize, context_window: u16) -> Self {
+            let mut rng = get_rng();
+            let ctx = TestContext::builder()
+                .with_in_memory_storage()
+                .with_mocked_clients()
+                .modify_settings(|settings| {
+                    settings.signer.sbtc_bitcoin_start_height = Some(0u64.into());
+                    settings.signer.context_window = context_window;
+                    settings.signer.max_deposit_validations_per_block =
+                        NonZeroU16::new(budget).unwrap();
+                })
+                .build();
+
+            let mut blocks: Vec<model::BitcoinBlock> = Vec::new();
+            for height in 0..5u64 {
+                let mut block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+                block.block_height = height.into();
+                if let Some(parent) = blocks.last() {
+                    block.parent_hash = parent.block_hash;
+                }
+                ctx.get_storage_mut()
+                    .write_bitcoin_block(&block)
+                    .await
+                    .unwrap();
+                blocks.push(block);
+            }
+
+            let bitcoin = Arc::new(Mutex::new(FakeBitcoinCore::default()));
+            let emily = Arc::new(Mutex::new(Vec::new()));
+
+            let fake = bitcoin.clone();
+            ctx.with_bitcoin_client(|client| {
+                let fake_utxo = fake.clone();
+                client.expect_get_utxo_info().returning(move |outpoint| {
+                    let mut fake = fake_utxo.lock().unwrap();
+                    fake.probes.push(*outpoint);
+                    let response = if fake.failing.contains(outpoint) {
+                        Err(Error::BitcoinTxMissingData(outpoint.txid))
+                    } else {
+                        let confirmed = fake.confirmed.get(&outpoint.txid);
+                        Ok(confirmed.map(|(_, block_hash)| OutPointSummary {
+                            block_hash: *block_hash,
+                            is_coinbase: fake.coinbase.contains(outpoint),
+                        }))
+                    };
+                    Box::pin(std::future::ready(response))
+                });
+                let fake_headers = fake.clone();
+                client
+                    .expect_get_block_header()
+                    .returning(move |block_hash| {
+                        let fake = fake_headers.lock().unwrap();
+                        let header = fake.blocks.get(block_hash).map(|block| BitcoinBlockHeader {
+                            hash: block.block_hash,
+                            height: block.height,
+                            time: block.time,
+                            previous_block_hash: block.previous_block_hash,
+                        });
+                        Box::pin(std::future::ready(Ok(header)))
+                    });
+                let fake_blocks = fake.clone();
+                client.expect_get_block().returning(move |block_hash| {
+                    let block = fake_blocks.lock().unwrap().blocks.get(block_hash).cloned();
+                    Box::pin(std::future::ready(Ok(block)))
+                });
+                client.expect_get_tx_info().returning(move |txid, _| {
+                    let tx_info = fake.lock().unwrap().confirmed.get(txid).cloned();
+                    Box::pin(std::future::ready(Ok(tx_info.map(|(tx_info, _)| tx_info))))
+                });
+            })
+            .await;
+
+            let emily_fails = Arc::new(Mutex::new(false));
+            let listed = emily.clone();
+            let fails = emily_fails.clone();
+            ctx.with_emily_client(|client| {
+                client.expect_get_deposits().returning(move || {
+                    let response = if *fails.lock().unwrap() {
+                        Err(Error::InvalidSignerState)
+                    } else {
+                        Ok(listed.lock().unwrap().clone())
+                    };
+                    Box::pin(std::future::ready(response))
+                });
+            })
+            .await;
+
+            let chain_tip = blocks.last().unwrap().block_hash;
+            Self {
+                observer: BlockObserver {
+                    context: ctx,
+                    bitcoin_block_source: (),
+                },
+                bitcoin,
+                emily,
+                emily_fails,
+                blocks,
+                chain_tip,
+                intake: DepositIntake::new(NonZeroUsize::new(capacity).unwrap()),
+            }
+        }
+
+        /// Have Emily list this request as the newest one.
+        fn list(&self, request: &CreateDepositRequest) {
+            self.emily.lock().unwrap().insert(0, request.clone());
+        }
+
+        /// Confirm the deposit transaction in the chain tip block.
+        fn confirm(&self, deposit: &(CreateDepositRequest, BitcoinTxInfo)) {
+            self.confirm_in(deposit, self.chain_tip);
+        }
+
+        fn confirm_in(
+            &self,
+            (request, tx_info): &(CreateDepositRequest, BitcoinTxInfo),
+            block_hash: BitcoinBlockHash,
+        ) {
+            let mut fake = self.bitcoin.lock().unwrap();
+            fake.confirmed
+                .insert(request.outpoint.txid, (tx_info.clone(), block_hash.into()));
+        }
+
+        /// A block after the tip that bitcoin-core knows but isn't stored.
+        fn add_next_block(&self, transactions: &[&BitcoinTxInfo]) -> BitcoinBlockHash {
+            let tip = self.blocks.last().unwrap();
+            let mut rng = get_rng();
+            let mut block = BitcoinBlockInfo::random_with_height(tip.block_height + 1, &mut rng);
+            block.previous_block_hash = tip.block_hash.into();
+            block
+                .transactions
+                .extend(transactions.iter().map(|&tx_info| tx_info.clone()));
+            let block_hash = block.block_hash;
+            let mut fake = self.bitcoin.lock().unwrap();
+            fake.blocks.insert(block_hash, block);
+            block_hash.into()
+        }
+
+        /// Runs an intake, after a block with `new_txids` unless it's empty;
+        /// returns the probes.
+        async fn intake(&mut self, new_txids: &[Txid]) -> Vec<OutPoint> {
+            self.try_intake(new_txids).await.unwrap()
+        }
+
+        async fn try_intake(&mut self, new_txids: &[Txid]) -> Result<Vec<OutPoint>, Error> {
+            if !new_txids.is_empty() {
+                self.intake.add_new_blocks([new_txids.to_vec()]);
+            }
+            let result = self
+                .observer
+                .load_latest_deposit_requests(&self.chain_tip, &mut self.intake)
+                .await;
+            let probes = std::mem::take(&mut self.bitcoin.lock().unwrap().probes);
+            result.map(|()| probes)
+        }
+
+        async fn is_stored(&self, request: &CreateDepositRequest) -> bool {
+            let txid = request.outpoint.txid.into();
+            let storage = self.observer.context.get_storage();
+            storage
+                .deposit_request_exists(&txid, request.outpoint.vout)
+                .await
+                .unwrap()
+        }
+    }
+
+    fn tx_info(tx: Transaction) -> BitcoinTxInfo {
+        BitcoinTxInfo {
+            fee: Some(Amount::from_sat(1_000)),
+            tx,
+            vin: Vec::new(),
+        }
+    }
+
+    /// A v1 deposit request and the transaction it points to.
+    fn v1_deposit() -> (CreateDepositRequest, BitcoinTxInfo) {
+        let setup = sbtc::testing::deposits::tx_setup(150, 10_000, &[500_000]);
+        let request = CreateDepositRequest {
+            outpoint: OutPoint::new(setup.tx.compute_txid(), 0),
+            deposit_script: setup.deposits[0].deposit_script(),
+            reclaim_script: setup.reclaims[0].reclaim_script(),
+            recipient: None,
+            max_fee: None,
+        };
+        (request, tx_info(setup.tx))
+    }
+
+    /// A v2 deposit request and the transaction it points to.
+    fn v2_deposit(max_fee: u64) -> (CreateDepositRequest, BitcoinTxInfo) {
+        let mut rng = get_rng();
+        let recipient = PrincipalData::from(StacksAddress::burn_address(false));
+        let public_keys = (0..3)
+            .map(|_| {
+                let (_, public_key) = secp256k1::SECP256K1.generate_keypair(&mut rng);
+                public_key.x_only_public_key().0
+            })
+            .collect::<BTreeSet<_>>();
+        let deposit =
+            sbtc::deposits::DepositScriptInputsV2::new(public_keys, 2, recipient.clone(), max_fee)
+                .unwrap();
+        let reclaim = sbtc::deposits::ReclaimScriptInputs::try_new(150, ScriptBuf::new()).unwrap();
+        let tx = Transaction {
+            version: transaction::Version::TWO,
+            lock_time: absolute::LockTime::ZERO,
+            input: Vec::new(),
+            output: vec![TxOut {
+                value: Amount::from_sat(500_000),
+                script_pubkey: sbtc::deposits::to_v2_script_pubkey(
+                    deposit.deposit_script(),
+                    reclaim.reclaim_script(),
+                ),
+            }],
+        };
+        let request = CreateDepositRequest {
+            outpoint: OutPoint::new(tx.compute_txid(), 0),
+            deposit_script: deposit.deposit_script(),
+            reclaim_script: reclaim.reclaim_script(),
+            recipient: Some(recipient),
+            max_fee: Some(max_fee),
+        };
+        (request, tx_info(tx))
+    }
+
+    /// At most `budget` validations per intake; stored deposits aren't redone.
+    #[tokio::test]
+    async fn deposit_intake_validates_at_most_the_budget_per_block() {
+        let mut harness = IntakeHarness::new(3, 100).await;
+        let deposits: Vec<_> = (0..10).map(|_| v1_deposit()).collect();
+        for deposit in &deposits {
+            harness.confirm(deposit);
+            harness.list(&deposit.0);
+        }
+
+        // Past the re-probe interval, so only the known filter skips them.
+        let mut probes = Vec::new();
+        for _ in 0..DEPOSIT_REPROBE_INTERVAL + 4 {
+            probes.push(harness.intake(&[]).await.len());
+        }
+
+        assert_eq!(probes, [3, 3, 3, 1, 0, 0, 0, 0, 0, 0]);
+        for (request, _) in &deposits {
+            assert!(harness.is_stored(request).await);
+        }
+    }
+
+    /// Oldest first, each once before any twice; unconfirmed ones wait.
+    #[tokio::test]
+    async fn deposit_intake_tries_every_request_before_retrying_any() {
+        let mut harness = IntakeHarness::new(2, 100).await;
+        let unconfirmed: Vec<_> = (0..5).map(|_| v1_deposit().0).collect();
+        for request in &unconfirmed {
+            harness.list(request);
+        }
+        let deposit = v1_deposit();
+        harness.confirm(&deposit);
+        harness.list(&deposit.0);
+
+        let outpoints = |requests: &[&CreateDepositRequest]| -> Vec<OutPoint> {
+            requests.iter().map(|request| request.outpoint).collect()
+        };
+        let [u0, u1, u2, u3, u4] = [0, 1, 2, 3, 4].map(|index| &unconfirmed[index]);
+
+        assert_eq!(harness.intake(&[]).await, outpoints(&[u0, u1]));
+        assert_eq!(harness.intake(&[]).await, outpoints(&[u2, u3]));
+        assert_eq!(harness.intake(&[]).await, outpoints(&[u4, &deposit.0]));
+        assert!(harness.is_stored(&deposit.0).await);
+
+        // u0 and u1 come due in intake `DEPOSIT_REPROBE_INTERVAL`.
+        for _ in 3..DEPOSIT_REPROBE_INTERVAL {
+            assert!(harness.intake(&[]).await.is_empty());
+        }
+        assert_eq!(harness.intake(&[]).await, outpoints(&[u0, u1]));
+        assert_eq!(harness.intake(&[]).await, outpoints(&[u2, u3]));
+    }
+
+    /// A reorged-out deposit is validated again and linked to its new block.
+    #[tokio::test]
+    async fn deposit_intake_relinks_deposits_after_a_reorg() {
+        let mut harness = IntakeHarness::new(10, 100).await;
+        let deposit = v1_deposit();
+        harness.confirm(&deposit);
+        harness.list(&deposit.0);
+
+        assert_eq!(harness.intake(&[]).await.len(), 1);
+        assert!(harness.intake(&[]).await.is_empty());
+
+        // A sibling tip that also confirms the deposit.
+        let mut rng = get_rng();
+        let parent = &harness.blocks[3];
+        let mut fork: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+        fork.block_height = parent.block_height + 1;
+        fork.parent_hash = parent.block_hash;
+        let storage = harness.observer.context.get_storage_mut();
+        storage.write_bitcoin_block(&fork).await.unwrap();
+        harness.chain_tip = fork.block_hash;
+        harness.confirm(&deposit);
+
+        let new_txids = [deposit.0.outpoint.txid];
+        assert_eq!(harness.intake(&new_txids).await, [deposit.0.outpoint]);
+
+        let signer_public_key: PublicKey = Faker.fake_with_rng(&mut rng);
+        let pending = storage
+            .get_pending_deposit_requests(&fork.block_hash, 100, &signer_public_key)
+            .await
+            .unwrap();
+        let outpoints: Vec<_> = pending
+            .iter()
+            .map(model::DepositRequest::outpoint)
+            .collect();
+        assert_eq!(outpoints, [deposit.0.outpoint]);
+    }
+
+    /// A failed request is skipped until Emily returns different contents.
+    #[tokio::test]
+    async fn deposit_intake_skips_failed_requests_until_their_contents_change() {
+        let mut harness = IntakeHarness::new(1, 100).await;
+        let deposit = v2_deposit(25_000);
+        harness.confirm(&deposit);
+        // An Emily without v2 fields doesn't return the max fee.
+        let mut without_max_fee = deposit.0.clone();
+        without_max_fee.max_fee = None;
+        harness.list(&without_max_fee);
+        for _ in 0..3 {
+            harness.list(&v1_deposit().0);
+        }
+
+        assert_eq!(harness.intake(&[]).await, [deposit.0.outpoint]);
+        let probes = harness.intake(&[]).await;
+        assert!(!probes.contains(&deposit.0.outpoint));
+        assert!(!harness.is_stored(&deposit.0).await);
+
+        // With the max fee it goes ahead of the newer requests.
+        *harness.emily.lock().unwrap().last_mut().unwrap() = deposit.0.clone();
+
+        assert_eq!(harness.intake(&[]).await, [deposit.0.outpoint]);
+        assert!(harness.is_stored(&deposit.0).await);
+    }
+
+    /// A transient error is retried on the next block, ahead of due
+    /// re-checks, even if an earlier check found the request unconfirmed.
+    #[tokio::test]
+    async fn deposit_intake_retries_requests_after_transient_errors() {
+        let mut harness = IntakeHarness::new(1, 100).await;
+        // Enough that the oldest are due for a re-check by the retry.
+        let older: Vec<_> = (0..DEPOSIT_REPROBE_INTERVAL - 1)
+            .map(|_| v1_deposit().0)
+            .collect();
+        for request in &older {
+            harness.list(request);
+        }
+        let deposit = v1_deposit();
+        harness.list(&deposit.0);
+        let outpoint = deposit.0.outpoint;
+
+        // One per block; the deposit isn't confirmed yet.
+        for request in older.iter().chain([&deposit.0]) {
+            assert_eq!(harness.intake(&[]).await, [request.outpoint]);
+        }
+
+        // Its block arrives while bitcoin-core fails to look it up.
+        harness.confirm(&deposit);
+        harness.bitcoin.lock().unwrap().failing.insert(outpoint);
+        assert_eq!(harness.intake(&[outpoint.txid]).await, [outpoint]);
+        harness.bitcoin.lock().unwrap().failing.clear();
+
+        assert_eq!(harness.intake(&[]).await, [outpoint]);
+        assert!(harness.is_stored(&deposit.0).await);
+        assert_eq!(harness.intake(&[]).await, [older[0].outpoint]);
+    }
+
+    /// A request that fails again waits the re-check interval, so it can't
+    /// keep due re-checks out of the reserved share.
+    #[tokio::test]
+    async fn deposit_intake_backs_off_requests_that_keep_failing() {
+        let budget = 4;
+        let mut harness = IntakeHarness::new(budget, 100).await;
+        let failing = v1_deposit();
+        harness.confirm(&failing);
+        harness.list(&failing.0);
+        let failing = failing.0.outpoint;
+        harness.bitcoin.lock().unwrap().failing.insert(failing);
+        let deposit = v1_deposit();
+        harness.list(&deposit.0);
+
+        // Its block is new, so the backoff must also hold against the trigger.
+        let probes = harness.intake(&[failing.txid]).await;
+        assert_eq!(probes, [failing, deposit.0.outpoint]);
+        // The deposit confirms in a block the intake doesn't hear about.
+        harness.confirm(&deposit);
+
+        // New requests keep the never-tried class full. They are valid, so
+        // once stored they don't compete as re-checks.
+        let mut failing_checks = Vec::new();
+        for intake in 1..=DEPOSIT_REPROBE_INTERVAL + 2 {
+            for _ in 0..budget {
+                let new = v1_deposit();
+                harness.confirm(&new);
+                harness.list(&new.0);
+            }
+            let probes = harness.intake(&[]).await;
+            assert_eq!(probes.len(), usize::from(budget));
+            if probes.contains(&failing) {
+                failing_checks.push(intake);
+            }
+        }
+
+        // Retried on the next block, then once per interval.
+        assert_eq!(failing_checks, [1, 1 + DEPOSIT_REPROBE_INTERVAL]);
+        assert!(harness.is_stored(&deposit.0).await);
+    }
+
+    /// A spent output in a new block is checked once, not every block.
+    #[tokio::test]
+    async fn deposit_intake_checks_a_spent_output_in_a_new_block_once() {
+        let mut harness = IntakeHarness::new(10, 100).await;
+        let request = v1_deposit().0;
+        harness.list(&request);
+
+        // In the block, but bitcoin-core reports it spent.
+        let new_txids = [request.outpoint.txid];
+        assert_eq!(harness.intake(&new_txids).await, [request.outpoint]);
+        assert!(harness.intake(&[]).await.is_empty());
+    }
+
+    /// A coinbase output is validated once, not retried.
+    #[tokio::test]
+    async fn deposit_intake_checks_coinbase_outputs_once() {
+        let mut harness = IntakeHarness::new(10, 100).await;
+        let deposit = v1_deposit();
+        harness.confirm(&deposit);
+        harness.list(&deposit.0);
+        let outpoint = deposit.0.outpoint;
+        harness.bitcoin.lock().unwrap().coinbase.insert(outpoint);
+
+        assert_eq!(harness.intake(&[]).await, [outpoint]);
+        for _ in 0..DEPOSIT_REPROBE_INTERVAL {
+            assert!(harness.intake(&[]).await.is_empty());
+        }
+    }
+
+    /// A deposit listed after its block was processed still goes first, as
+    /// long as the block is among the newest processed.
+    #[tokio::test]
+    async fn deposit_intake_matches_deposits_listed_after_their_block() {
+        let mut harness = IntakeHarness::new(1, 100).await;
+        let unconfirmed: Vec<_> = (0..3).map(|_| v1_deposit().0).collect();
+        for request in &unconfirmed {
+            harness.list(request);
+        }
+        let deposit = v1_deposit();
+        harness.confirm(&deposit);
+
+        assert_eq!(harness.intake(&[]).await, [unconfirmed[0].outpoint]);
+        // The block confirming the deposit is processed before Emily lists it.
+        let new_txids = [deposit.0.outpoint.txid];
+        assert_eq!(harness.intake(&new_txids).await, [unconfirmed[1].outpoint]);
+        harness.list(&deposit.0);
+        // More blocks are processed before the intake that sees the listing;
+        // its block is still among the newest.
+        let newer_blocks = (1..MAX_REORG_BLOCK_COUNT).map(|_| Vec::new());
+        harness.intake.add_new_blocks(newer_blocks);
+
+        assert_eq!(harness.intake(&[]).await, [deposit.0.outpoint]);
+        assert!(harness.is_stored(&deposit.0).await);
+    }
+
+    /// A failed intake doesn't move the never-tried cursor, so the same
+    /// batch is retried.
+    #[tokio::test]
+    async fn deposit_intake_retries_the_same_batch_after_a_failed_intake() {
+        let mut harness = IntakeHarness::new(2, 100).await;
+        let deposit = v1_deposit();
+        let block_hash = harness.add_next_block(&[&deposit.1]);
+        harness.confirm_in(&deposit, block_hash);
+        let unconfirmed: Vec<_> = (0..3).map(|_| v1_deposit().0).collect();
+        harness.list(&unconfirmed[0]);
+        harness.list(&deposit.0);
+        harness.list(&unconfirmed[1]);
+        harness.list(&unconfirmed[2]);
+
+        // Storing the deposit fails because its block can't be fetched.
+        let hash = BlockHash::from(block_hash);
+        let block = harness.bitcoin.lock().unwrap().blocks.remove(&hash);
+        assert!(harness.try_intake(&[]).await.is_err());
+        harness
+            .bitcoin
+            .lock()
+            .unwrap()
+            .blocks
+            .insert(hash, block.unwrap());
+
+        let batch = [unconfirmed[0].outpoint, deposit.0.outpoint];
+        assert_eq!(harness.intake(&[]).await, batch);
+        assert!(harness.is_stored(&deposit.0).await);
+    }
+
+    /// A request checked before its block was written in the same intake
+    /// is checked again in the next one.
+    #[tokio::test]
+    async fn deposit_intake_rechecks_requests_checked_before_their_block_was_written() {
+        let mut harness = IntakeHarness::new(2, 100).await;
+        let late = v1_deposit();
+        let deposit = v1_deposit();
+        let block_hash = harness.add_next_block(&[&late.1, &deposit.1]);
+        harness.confirm_in(&deposit, block_hash);
+        harness.list(&late.0);
+        harness.list(&deposit.0);
+
+        // The block is mined after `late` is checked and before `deposit`.
+        let both = [late.0.outpoint, deposit.0.outpoint];
+        assert_eq!(harness.intake(&[]).await, both);
+        harness.confirm_in(&late, block_hash);
+        harness.chain_tip = block_hash;
+
+        assert_eq!(harness.intake(&[]).await, [late.0.outpoint]);
+        assert!(harness.is_stored(&late.0).await);
+    }
+
+    /// New-block deposits go first; those over budget go first next time,
+    /// even once their block is no longer among the newest processed.
+    #[tokio::test]
+    async fn deposit_intake_validates_deposits_in_new_blocks_first() {
+        let mut harness = IntakeHarness::new(1, 100).await;
+        let unconfirmed: Vec<_> = (0..3).map(|_| v1_deposit().0).collect();
+        for request in &unconfirmed {
+            harness.list(request);
+        }
+        let deposits = [v1_deposit(), v1_deposit()];
+        for (request, _) in &deposits {
+            harness.list(request);
+        }
+
+        assert_eq!(harness.intake(&[]).await, [unconfirmed[0].outpoint]);
+
+        for deposit in &deposits {
+            harness.confirm(deposit);
+        }
+        let new_txids = deposits
+            .each_ref()
+            .map(|(request, _)| request.outpoint.txid);
+
+        assert_eq!(harness.intake(&new_txids).await, [deposits[0].0.outpoint]);
+        let newer_blocks = (0..MAX_REORG_BLOCK_COUNT).map(|_| Vec::new());
+        harness.intake.add_new_blocks(newer_blocks);
+        assert_eq!(harness.intake(&[]).await, [deposits[1].0.outpoint]);
+        assert_eq!(harness.intake(&[]).await, [unconfirmed[1].outpoint]);
+        for (request, _) in &deposits {
+            assert!(harness.is_stored(request).await);
+        }
+    }
+
+    /// Unconfirmed requests are re-checked after the interval despite a full
+    /// budget.
+    #[tokio::test]
+    async fn deposit_intake_retries_unconfirmed_requests_after_an_interval() {
+        let budget = 4;
+        let mut harness = IntakeHarness::new(budget, 100).await;
+        let deposit = v1_deposit();
+        harness.list(&deposit.0);
+
+        assert_eq!(harness.intake(&[]).await, [deposit.0.outpoint]);
+        // The deposit confirms in a block the intake doesn't hear about.
+        harness.confirm(&deposit);
+
+        for intake in 1..=DEPOSIT_REPROBE_INTERVAL {
+            for _ in 0..budget {
+                harness.list(&v1_deposit().0);
+            }
+            let probes = harness.intake(&[]).await;
+            assert_eq!(probes.len(), usize::from(budget));
+            let is_due = intake == DEPOSIT_REPROBE_INTERVAL;
+            assert_eq!(probes.contains(&deposit.0.outpoint), is_due);
+        }
+        assert!(harness.is_stored(&deposit.0).await);
+    }
+
+    /// A stored deposit outside the window is re-validated once per interval.
+    #[tokio::test]
+    async fn deposit_intake_rechecks_old_stored_deposits_slowly() {
+        let mut harness = IntakeHarness::with_context_window(10, 100, 2).await;
+        let deposit = v1_deposit();
+        harness.confirm_in(&deposit, harness.blocks[0].block_hash);
+        harness.list(&deposit.0);
+
+        assert_eq!(harness.intake(&[]).await, [deposit.0.outpoint]);
+        assert!(harness.is_stored(&deposit.0).await);
+
+        for _ in 1..DEPOSIT_REPROBE_INTERVAL {
+            assert!(harness.intake(&[]).await.is_empty());
+        }
+        assert_eq!(harness.intake(&[]).await, [deposit.0.outpoint]);
+    }
+
+    /// New-block priority survives a failed intake.
+    #[tokio::test]
+    async fn deposit_intake_keeps_new_block_priority_after_a_failed_intake() {
+        let mut harness = IntakeHarness::new(1, 100).await;
+        for _ in 0..3 {
+            harness.list(&v1_deposit().0);
+        }
+        let deposit = v1_deposit();
+        harness.confirm(&deposit);
+        harness.list(&deposit.0);
+
+        *harness.emily_fails.lock().unwrap() = true;
+        let new_txids = [deposit.0.outpoint.txid];
+        assert!(harness.try_intake(&new_txids).await.is_err());
+        *harness.emily_fails.lock().unwrap() = false;
+
+        assert_eq!(harness.intake(&[]).await, [deposit.0.outpoint]);
+        assert!(harness.is_stored(&deposit.0).await);
+    }
+
+    /// Past cache capacity every request is still tried in turn, even when
+    /// the request decider stores the cursor's request.
+    #[tokio::test]
+    async fn deposit_intake_reaches_every_request_beyond_its_capacity() {
+        let mut harness = IntakeHarness::new(2, 3).await;
+        let deposits: Vec<_> = (0..9).map(|_| v1_deposit()).collect();
+        harness.confirm(&deposits[6]);
+        let requests: Vec<_> = deposits.into_iter().map(|(request, _)| request).collect();
+        for request in &requests {
+            harness.list(request);
+        }
+
+        // Nine requests and two validations per block take five blocks.
+        let mut probed = HashSet::new();
+        for intake in 0..5 {
+            probed.extend(harness.intake(&[]).await);
+            if intake == 2 {
+                let stored = [requests[6].clone()];
+                harness.observer.load_requests(&stored).await.unwrap();
+            }
+        }
+
+        let all: HashSet<_> = requests.iter().map(|request| request.outpoint).collect();
+        assert_eq!(probed, all);
+    }
+
+    /// The budget doesn't apply to the request decider's `load_requests`.
+    #[tokio::test]
+    async fn load_requests_validates_every_request_given() {
+        let harness = IntakeHarness::new(1, 100).await;
+        let deposits: Vec<_> = (0..3).map(|_| v1_deposit()).collect();
+        for deposit in &deposits {
+            harness.confirm(deposit);
+        }
+        let requests: Vec<_> = deposits
+            .iter()
+            .map(|(request, _)| request.clone())
+            .collect();
+
+        harness.observer.load_requests(&requests).await.unwrap();
+
+        for request in &requests {
+            assert!(harness.is_stored(request).await);
+        }
+    }
+
+    /// Only the newest processed blocks' txids are returned.
+    #[tokio::test]
+    async fn processing_a_chain_tip_returns_txids_in_the_newest_blocks() {
+        let mut rng = get_rng();
+        let test_harness = TestHarness::generate(&mut rng, 20, 0..1);
+        let min_height = test_harness.min_block_height();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_stacks_client(test_harness.clone())
+            .with_emily_client(test_harness.clone())
+            .with_bitcoin_client(test_harness.clone())
+            .modify_settings(|settings| settings.signer.sbtc_bitcoin_start_height = min_height)
+            .build();
+        let block_observer = BlockObserver {
+            context: ctx,
+            bitcoin_block_source: (),
+        };
+
+        let blocks = test_harness.bitcoin_blocks();
+        let chain_tip = blocks.last().unwrap().block_hash;
+        let new_blocks = block_observer
+            .process_bitcoin_chain_tip(chain_tip)
+            .await
+            .unwrap();
+
+        let newest = blocks.len() - MAX_REORG_BLOCK_COUNT as usize;
+        let expected: Vec<Vec<Txid>> = blocks[newest..]
+            .iter()
+            .map(|block| {
+                let txids = block.transactions.iter().map(BitcoinTxInfo::compute_txid);
+                txids.collect()
+            })
+            .collect();
+        assert_eq!(new_blocks, expected);
+
+        let new_blocks = block_observer
+            .process_bitcoin_chain_tip(chain_tip)
+            .await
+            .unwrap();
+        assert!(new_blocks.is_empty());
     }
 }
