@@ -614,7 +614,7 @@ async fn process_complete_deposit() {
 }
 
 /// Mock the stacks client to return dummy data for the given context.
-async fn mock_stacks_core<D, B, E>(
+pub async fn mock_stacks_core<D, B, E>(
     ctx: &mut TestContext<D, B, WrappedMock<MockStacksInteract>, E>,
     chain_tip_info: GetChainTipsResultTip,
     db: PgStore,
