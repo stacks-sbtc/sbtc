@@ -264,8 +264,10 @@ services:
       dockerfile: docker/sbtc/Dockerfile
       target: blocklist-client
     environment:
-      BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL: ${BLOCKLIST_CLIENT_RISK_ANALYSIS__API_URL:-https://public.chainalysis.com}
-      BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY: ${BLOCKLIST_CLIENT_RISK_ANALYSIS__API_KEY:-}
+      # Emily dev server doesn't expose the sanctions endpoint, so this URL will always err
+      BLOCKLIST_CLIENT_SANCTIONS__URL: "http://emily-server:3031/sanctions"
+      # But with a local (empty) file the blocklist client is able to handle requests
+      BLOCKLIST_CLIENT_SANCTIONS__LOCAL_PATH: "/dev/null"
       BLOCKLIST_CLIENT_SERVER__HOST: "0.0.0.0"
     ports:
       - "127.0.0.1:3030:3030"
