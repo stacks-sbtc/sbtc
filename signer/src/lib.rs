@@ -154,6 +154,20 @@ pub const WITHDRAWAL_DUST_LIMIT: u64 = 546;
 /// <https://github.com/stacks-network/stacks-core/blob/5595f08a244362cefc316f95b398510a2b8cb791/stacks-signer/src/chainstate/mod.rs#L192-L211>
 pub const WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS: i64 = 3;
 
+/// The mainnet Bitcoin height at which signers begin using tenure-based
+/// withdrawal finality.
+///
+/// This remains disabled until a deployment height is selected.
+pub const MAINNET_WITHDRAWAL_FINALITY_BLOCK_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(u64::MAX);
+
+/// The testnet Bitcoin height at which signers begin using tenure-based
+/// withdrawal finality.
+///
+/// This remains disabled until a deployment height is selected.
+pub const TESTNET_WITHDRAWAL_FINALITY_BLOCK_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(100);
+
 /// This is the number of bitcoin blocks that a withdrawal request will
 /// remain live before it expires and is considered rejected.
 ///

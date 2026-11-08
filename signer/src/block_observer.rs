@@ -20,11 +20,14 @@
 use std::future::Future;
 use std::time::Duration;
 
+use crate::MAINNET_WITHDRAWAL_FINALITY_BLOCK_HEIGHT;
+use crate::TESTNET_WITHDRAWAL_FINALITY_BLOCK_HEIGHT;
 use crate::bitcoin::BitcoinBlockHashStreamProvider;
 use crate::bitcoin::BitcoinInteract;
 use crate::bitcoin::rpc::BitcoinBlockHeader;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::utxo::TxDeconstructor as _;
+use crate::config::NetworkKind;
 use crate::context::Context;
 use crate::context::SbtcLimits;
 use crate::context::SignerEvent;
@@ -43,6 +46,7 @@ use crate::storage::Transactable as _;
 use crate::storage::TransactionHandle as _;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
 use crate::storage::model::SignerKeySet;
@@ -54,6 +58,7 @@ use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
 use futures::stream::StreamExt as _;
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
 use std::collections::HashSet;
@@ -79,6 +84,32 @@ pub struct Deposit {
     pub info: DepositInfo,
     /// The block hash of the Bitcoin block that includes this transaction.
     pub block_hash: BlockHash,
+}
+
+/// Return the Bitcoin height at which tenure-based withdrawal finality is
+/// activated for the given network.
+fn withdrawal_finality_activation_height(network: NetworkKind) -> BitcoinBlockHeight {
+    match network {
+        NetworkKind::Mainnet => MAINNET_WITHDRAWAL_FINALITY_BLOCK_HEIGHT,
+        _ => TESTNET_WITHDRAWAL_FINALITY_BLOCK_HEIGHT,
+    }
+}
+
+/// Return the exclusive withdrawal-finality bound used before tenure-based
+/// finality is activated.
+fn legacy_withdrawal_finality_height(
+    bitcoin_chain_tip_height: BitcoinBlockHeight,
+) -> Option<BitcoinBlockHeight> {
+    let min_confirmations = BitcoinBlockHeight::from(WITHDRAWAL_MIN_CONFIRMATIONS);
+    if bitcoin_chain_tip_height < min_confirmations {
+        return None;
+    }
+
+    Some(
+        bitcoin_chain_tip_height
+            .saturating_sub(WITHDRAWAL_MIN_CONFIRMATIONS)
+            .saturating_add(1u64),
+    )
 }
 
 impl DepositRequestValidator for CreateDepositRequest {
@@ -572,6 +603,67 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
+    /// Update the cached exclusive upper bound for final withdrawal-request
+    /// burn-view heights for the given Bitcoin chain tip.
+    ///
+    /// Before the network-specific activation height, this preserves the
+    /// legacy Bitcoin-confirmation rule. At and after activation, it uses
+    /// the tenure-aware database query. If the query fails, this logs the
+    /// error and retains the previous height so that the remaining signer
+    /// state can still be updated.
+    async fn set_withdrawal_finality_height(&self, bitcoin_chain_tip: &BitcoinBlockRef) {
+        let state = self.context.state();
+        let previous_withdrawal_finality_height = state.withdrawal_finality_height();
+        let network = self.context.config().signer.network;
+        let activation_height = withdrawal_finality_activation_height(network);
+
+        if bitcoin_chain_tip.block_height < activation_height {
+            let withdrawal_finality_height =
+                legacy_withdrawal_finality_height(bitcoin_chain_tip.block_height);
+            tracing::info!(
+                ?withdrawal_finality_height,
+                "using this withdrawal finality height"
+            );
+            state.set_withdrawal_finality_height(withdrawal_finality_height);
+            return;
+        }
+
+        let Some(stacks_chain_tip) = state.stacks_chain_tip() else {
+            tracing::error!(
+                error = %Error::NoStacksChainTip,
+                ?previous_withdrawal_finality_height,
+                "could not update the withdrawal finality height; using the previous value"
+            );
+            return;
+        };
+        let result = self
+            .context
+            .get_storage()
+            .get_withdrawal_finality_height(
+                &stacks_chain_tip.block_hash,
+                WITHDRAWAL_MIN_CONFIRMATIONS,
+            )
+            .await;
+
+        let withdrawal_finality_height = match result {
+            Ok(height) => height,
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    ?previous_withdrawal_finality_height,
+                    "could not update the withdrawal finality height; using the previous value"
+                );
+                return;
+            }
+        };
+
+        tracing::info!(
+            ?withdrawal_finality_height,
+            "using this withdrawal finality height"
+        );
+        state.set_withdrawal_finality_height(withdrawal_finality_height);
+    }
+
     /// Update the `SignerState` object with data that is unlikely to
     /// change until the arrival of the next bitcoin block.
     ///
@@ -581,6 +673,7 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// * sBTC limits from Emily.
     /// * The current signer set.
     /// * The current aggregate key.
+    /// * The withdrawal finality height, if its query succeeds.
     /// * The current bitcoin chain tip.
     async fn update_signer_state(&self, chain_tip: BitcoinBlockRef) -> Result<(), Error> {
         tracing::info!("loading sbtc limits from Emily");
@@ -588,6 +681,9 @@ impl<C: Context, B> BlockObserver<C, B> {
 
         tracing::info!("updating the signer state with the current signer set");
         self.set_signer_set_info().await?;
+
+        tracing::info!("updating the signer state with the withdrawal finality height");
+        self.set_withdrawal_finality_height(&chain_tip).await;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
         self.context.state().set_bitcoin_chain_tip(chain_tip);
@@ -863,6 +959,80 @@ mod tests {
     use crate::testing::get_rng;
 
     use super::*;
+
+    /// Check that the legacy finality height preserves the old inclusive
+    /// six-confirmation rule while exposing an exclusive upper bound.
+    #[test]
+    fn legacy_finality_height_preserves_confirmation_boundary() {
+        let height_before_finality = BitcoinBlockHeight::from(WITHDRAWAL_MIN_CONFIRMATIONS - 1);
+        let first_final_height = BitcoinBlockHeight::from(WITHDRAWAL_MIN_CONFIRMATIONS);
+
+        assert_eq!(
+            legacy_withdrawal_finality_height(height_before_finality),
+            None
+        );
+        assert_eq!(
+            legacy_withdrawal_finality_height(first_final_height),
+            Some(1u64.into())
+        );
+    }
+
+    /// Check that the observer uses the legacy finality height immediately
+    /// before mainnet activation without requiring a Stacks chain tip.
+    #[tokio::test]
+    async fn finality_update_uses_legacy_height_before_activation() {
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| settings.signer.network = NetworkKind::Mainnet)
+            .build();
+        let bitcoin_chain_tip = BitcoinBlockRef {
+            block_hash: fake::Faker.fake(),
+            block_height: MAINNET_WITHDRAWAL_FINALITY_BLOCK_HEIGHT.saturating_sub(1u64),
+        };
+        let expected = legacy_withdrawal_finality_height(bitcoin_chain_tip.block_height);
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_block_source: (),
+        };
+
+        block_observer
+            .set_withdrawal_finality_height(&bitcoin_chain_tip)
+            .await;
+
+        assert_eq!(ctx.state().withdrawal_finality_height(), expected);
+    }
+
+    /// Check that mainnet activation uses the tenure-aware query and that a
+    /// failure retains the previous cached value.
+    #[tokio::test]
+    async fn finality_update_failure_retains_previous_height() {
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| settings.signer.network = NetworkKind::Mainnet)
+            .build();
+        let previous_height = BitcoinBlockHeight::from(42u64);
+        ctx.state()
+            .set_withdrawal_finality_height(Some(previous_height));
+        let bitcoin_chain_tip = BitcoinBlockRef {
+            block_hash: fake::Faker.fake(),
+            block_height: MAINNET_WITHDRAWAL_FINALITY_BLOCK_HEIGHT,
+        };
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_block_source: (),
+        };
+
+        block_observer
+            .set_withdrawal_finality_height(&bitcoin_chain_tip)
+            .await;
+
+        assert_eq!(
+            ctx.state().withdrawal_finality_height(),
+            Some(previous_height)
+        );
+    }
 
     #[test]
     fn recovers_v2_key_set_only_from_a_known_signer_input() {
