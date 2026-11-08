@@ -91,9 +91,9 @@ pub const V2_NUMS_X_COORDINATE: [u8; 32] = [
 pub static V2_UNSPENDABLE_TAPROOT_KEY: LazyLock<XOnlyPublicKey> =
     LazyLock::new(|| XOnlyPublicKey::from_slice(&V2_NUMS_X_COORDINATE).unwrap());
 
-/// This is the number of bitcoin blocks that the signers will wait before
-/// acting on a withdrawal request. We do this to ensure that the
-/// withdrawal request is deemed final on the Stacks blockchain.
+/// This is the number of Bitcoin blocks that the signers require on top
+/// of the block-commit checkpointing a withdrawal request's Stacks
+/// ancestry before acting on the request.
 ///
 /// The value here was taken from the last paragraph of the opening comment
 /// of https://github.com/stacks-network/sbtc/discussions/12 and in the
