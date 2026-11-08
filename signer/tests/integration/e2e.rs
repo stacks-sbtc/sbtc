@@ -698,11 +698,34 @@ async fn deposit_and_withdrawal() {
     }
     assert_ne!(withdrawal_id, 0);
 
-    // Generate enough blocks to make the withdrawal valid; the minus one is
-    // because we already generated one block above to check for signers votes
-    for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS - 1 {
+    // The block above elected the first successor tenure. Elect the remaining
+    // successor tenure so that its block-commit checkpoints the withdrawal's
+    // Stacks ancestry.
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
+    // Now build the required number of Bitcoin blocks on top of the
+    // checkpoint.
+    for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS {
         let chain_tip = faucet.generate_block().into();
         wait_for_tenure_completed(&signers, chain_tip).await;
+    }
+
+    // Keep generating blocks until the sweep shows up in the mempool. The
+    // extra allowance is for the asynchronous coordinator loop, not finality.
+    let is_withdrawal_in_mempool = || {
+        rpc.get_raw_mempool().unwrap().iter().any(|txid| {
+            let tx = rpc.get_raw_transaction(txid, None).unwrap();
+            tx.output
+                .iter()
+                .any(|tx_out| tx_out.script_pubkey == withdrawal_recipient.script_pubkey)
+        })
+    };
+    let mut num_extra_blocks = 0;
+    while !is_withdrawal_in_mempool() {
+        assert_le!(num_extra_blocks, 2, "the withdrawal was never swept");
+        let chain_tip = faucet.generate_block().into();
+        wait_for_tenure_completed(&signers, chain_tip).await;
+        num_extra_blocks += 1;
     }
     // Now the withdrawal should be swept (in mempool)
 
