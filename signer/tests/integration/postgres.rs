@@ -5044,6 +5044,18 @@ async fn withdrawal_report_with_withdrawal_request_confirmed() {
     testing::storage::drop_db(db).await;
 }
 
+/// Check that the finality query returns the parent tenure's Bitcoin anchor
+/// height as an exclusive upper bound. A checkpoint tenure needs at least
+/// three blocks and enough Bitcoin confirmations. Incomplete ancestry and a
+/// noncanonical Bitcoin anchor cause the query to fail closed.
+#[tokio::test]
+async fn withdrawal_finality_height_is_an_exclusive_canonical_bound() {
+    let db = testing::storage::new_test_database().await;
+    testing::storage::assert_withdrawal_finality_height_is_an_exclusive_canonical_bound(&db).await;
+
+    testing::storage::drop_db(db).await;
+}
+
 #[tokio::test]
 async fn can_write_and_get_multiple_bitcoin_txs_sighashes() {
     let db = testing::storage::new_test_database().await;

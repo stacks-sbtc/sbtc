@@ -3,6 +3,8 @@
 use std::future::Future;
 use std::time::Duration;
 
+use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
+
 use crate::keys::PublicKey;
 use crate::storage::model::{
     BitcoinBlock, BitcoinBlockHash, BitcoinBlockRef, DkgSharesStatus, EncryptedDkgShares,
@@ -115,6 +117,189 @@ pub async fn drop_db(store: PgStore) {
             .execute(&pool)
             .await
             .expect("failed to drop test database");
+    }
+}
+
+/// Check that withdrawal-finality height storage implementations return
+/// the same exclusive canonical bound.
+pub async fn assert_withdrawal_finality_height_is_an_exclusive_canonical_bound<F>(db: &F)
+where
+    F: DbRead + DbWrite,
+{
+    let bitcoin_0 = BitcoinBlock::new_genesis();
+    let bitcoin_1 = bitcoin_0.new_child();
+    let bitcoin_2 = bitcoin_1.new_child();
+    let bitcoin_3 = bitcoin_2.new_child();
+    let bitcoin_4 = bitcoin_3.new_child();
+    let bitcoin_5 = bitcoin_4.new_child();
+    let bitcoin_6 = bitcoin_5.new_child();
+    let bitcoin_7 = bitcoin_6.new_child();
+    let bitcoin_8 = bitcoin_7.new_child();
+    let bitcoin_9 = bitcoin_8.new_child();
+    let bitcoin_10 = bitcoin_9.new_child();
+
+    let bitcoin_4_fork = bitcoin_3.new_child();
+    let bitcoin_5_fork = bitcoin_4_fork.new_child();
+    let bitcoin_6_fork = bitcoin_5_fork.new_child();
+    let bitcoin_7_fork = bitcoin_6_fork.new_child();
+    let bitcoin_8_fork = bitcoin_7_fork.new_child();
+    let bitcoin_9_fork = bitcoin_8_fork.new_child();
+    let bitcoin_10_fork = bitcoin_9_fork.new_child();
+
+    let stacks_0 = StacksBlock::new_genesis().anchored_to(&bitcoin_0);
+    let stacks_0_extended = stacks_0.new_child();
+    let stacks_2 = stacks_0_extended.new_child().anchored_to(&bitcoin_2);
+    let stacks_2_extended = stacks_2.new_child();
+    let stacks_2_third = stacks_2_extended.new_child();
+    let stacks_2_fourth = stacks_2_third.new_child();
+    let stacks_3 = stacks_2_third.new_child().anchored_to(&bitcoin_3);
+    let stacks_4_after_stacks_3 = stacks_3.new_child().anchored_to(&bitcoin_4);
+    let stacks_4 = stacks_2_third.new_child().anchored_to(&bitcoin_4);
+    let stacks_4_extended = stacks_4.new_child();
+    let stacks_4_third = stacks_4_extended.new_child();
+    let stacks_missing_parent = StacksBlock::new_genesis().anchored_to(&bitcoin_4);
+    let stacks_4_fork = stacks_0_extended.new_child().anchored_to(&bitcoin_4_fork);
+    let stacks_4_after_fork = stacks_4_fork.new_child().anchored_to(&bitcoin_4);
+    let stacks_4_after_fork_extended = stacks_4_after_fork.new_child();
+
+    let bitcoin_blocks = [
+        &bitcoin_0,
+        &bitcoin_1,
+        &bitcoin_2,
+        &bitcoin_3,
+        &bitcoin_4,
+        &bitcoin_5,
+        &bitcoin_6,
+        &bitcoin_7,
+        &bitcoin_8,
+        &bitcoin_9,
+        &bitcoin_10,
+        &bitcoin_4_fork,
+        &bitcoin_5_fork,
+        &bitcoin_6_fork,
+        &bitcoin_7_fork,
+        &bitcoin_8_fork,
+        &bitcoin_9_fork,
+        &bitcoin_10_fork,
+    ];
+    for block in bitcoin_blocks {
+        db.write_bitcoin_block(block).await.unwrap();
+    }
+
+    let stacks_blocks = [
+        &stacks_0,
+        &stacks_0_extended,
+        &stacks_2,
+        &stacks_2_extended,
+        &stacks_2_third,
+        &stacks_2_fourth,
+        &stacks_3,
+        &stacks_4_after_stacks_3,
+        &stacks_4,
+        &stacks_4_extended,
+        &stacks_4_third,
+        &stacks_missing_parent,
+        &stacks_4_fork,
+        &stacks_4_after_fork,
+        &stacks_4_after_fork_extended,
+    ];
+    for block in stacks_blocks {
+        db.write_stacks_block(block).await.unwrap();
+    }
+
+    let expectations = [
+        (
+            "not enough canonical bitcoin blocks",
+            &bitcoin_5,
+            &stacks_2_extended,
+            None,
+        ),
+        (
+            "one-block confirmed tenure is not a checkpoint",
+            &bitcoin_10,
+            &stacks_2,
+            None,
+        ),
+        (
+            "two-block confirmed tenure is not a checkpoint",
+            &bitcoin_10,
+            &stacks_2_extended,
+            None,
+        ),
+        (
+            "three-block confirmed checkpoint tenure",
+            &bitcoin_10,
+            &stacks_2_third,
+            Some(bitcoin_0.block_height),
+        ),
+        (
+            "extending checkpoint tenure does not advance bound",
+            &bitcoin_10,
+            &stacks_2_fourth,
+            Some(bitcoin_0.block_height),
+        ),
+        (
+            "newest tenure lacks confirmations",
+            &bitcoin_9,
+            &stacks_4_third,
+            Some(bitcoin_0.block_height),
+        ),
+        (
+            "one-block newest tenure is not a checkpoint",
+            &bitcoin_10,
+            &stacks_4,
+            Some(bitcoin_0.block_height),
+        ),
+        (
+            "consecutive one-block tenures are skipped",
+            &bitcoin_10,
+            &stacks_4_after_stacks_3,
+            Some(bitcoin_0.block_height),
+        ),
+        (
+            "two-block newest tenure is not a checkpoint",
+            &bitcoin_10,
+            &stacks_4_extended,
+            Some(bitcoin_0.block_height),
+        ),
+        (
+            "three-block newest tenure is a checkpoint",
+            &bitcoin_10,
+            &stacks_4_third,
+            Some(bitcoin_2.block_height),
+        ),
+        (
+            "incomplete stacks ancestry fails closed",
+            &bitcoin_10,
+            &stacks_missing_parent,
+            None,
+        ),
+        (
+            "noncanonical ancestor anchor fails closed",
+            &bitcoin_10,
+            &stacks_4_after_fork_extended,
+            None,
+        ),
+        (
+            "noncanonical tenure anchor fails closed",
+            &bitcoin_10_fork,
+            &stacks_4_extended,
+            None,
+        ),
+    ];
+    for (name, bitcoin_chain_tip, stacks_chain_tip, expected_height) in expectations {
+        db.set_canonical_bitcoin_blockchain(&bitcoin_chain_tip.block_hash)
+            .await
+            .unwrap();
+        let height = db
+            .get_withdrawal_finality_height(
+                &stacks_chain_tip.block_hash,
+                WITHDRAWAL_MIN_CONFIRMATIONS,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(height, expected_height, "case: {name}");
     }
 }
 
