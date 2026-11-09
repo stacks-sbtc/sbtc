@@ -101,8 +101,8 @@ use testing_emily_client::apis::withdrawal_api;
 use testing_emily_client::models::Chainstate;
 use testing_emily_client::models::WithdrawalStatus as TestingEmilyWithdrawalStatus;
 
-use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
+use signer::WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS;
 use signer::context::SbtcLimits;
 use signer::context::TxCoordinatorEvent;
 use signer::keys::PrivateKey;
@@ -5136,7 +5136,7 @@ async fn sign_bitcoin_transaction_withdrawals() {
     //   and submit the votes to each other.
     // - The coordinator should submit a sweep transaction with an output
     //   fulfilling the withdrawal request once there are
-    //   WITHDRAWAL_MIN_CONFIRMATIONS Bitcoin blocks on top of the
+    //   WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS Bitcoin blocks on top of the
     //   checkpoint.
     // =========================================================================
     let (ctx, _, _, _) = signers.first().unwrap();
@@ -5164,11 +5164,11 @@ async fn sign_bitcoin_transaction_withdrawals() {
         }
     }
 
-    for confirmation in 1..=WITHDRAWAL_MIN_CONFIRMATIONS {
+    for confirmation in 1..=WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
         let chain_tip = faucet.generate_block().into();
         wait_for_tenure_completed(&signers, chain_tip).await;
 
-        if confirmation < WITHDRAWAL_MIN_CONFIRMATIONS {
+        if confirmation < WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
             let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
             assert!(txids.is_empty());
         }
@@ -6976,7 +6976,7 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
         };
         storage.write_stacks_block(&stacks_chain_tip).await.unwrap();
     }
-    for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS {
+    for _ in 0..WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
         bitcoin_chain_tip = model::BitcoinBlock {
             block_height: bitcoin_chain_tip.block_height + 1,
             parent_hash: bitcoin_chain_tip.block_hash,
@@ -6995,7 +6995,10 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
         .await
         .unwrap();
     let withdrawal_finality_height = storage
-        .get_withdrawal_finality_height(&stacks_chain_tip.block_hash, WITHDRAWAL_MIN_CONFIRMATIONS)
+        .get_withdrawal_finality_height(
+            &stacks_chain_tip.block_hash,
+            WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
+        )
         .await
         .unwrap();
     state.set_withdrawal_finality_height(withdrawal_finality_height);

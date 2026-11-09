@@ -54,10 +54,11 @@ use bitcoin::Amount;
 use bitcoin::BlockHash;
 use bitcoin::ScriptBuf;
 use futures::stream::StreamExt as _;
-use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
 use std::collections::HashSet;
+
+use crate::WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS;
 
 /// Block observer
 #[derive(Debug)]
@@ -594,7 +595,7 @@ impl<C: Context, B> BlockObserver<C, B> {
             .get_storage()
             .get_withdrawal_finality_height(
                 &stacks_chain_tip.block_hash,
-                WITHDRAWAL_MIN_CONFIRMATIONS,
+                WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
             )
             .await;
 

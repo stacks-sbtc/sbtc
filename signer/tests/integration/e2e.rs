@@ -25,7 +25,6 @@ use lru::LruCache;
 use more_asserts::{assert_ge, assert_le};
 use rand::rngs::OsRng;
 use sbtc::{
-    WITHDRAWAL_MIN_CONFIRMATIONS,
     events::RegistryEvent,
     testing::{
         containers::TestContainersBuilder,
@@ -34,6 +33,7 @@ use sbtc::{
 };
 use secp256k1::Keypair;
 use signer::{
+    WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
     api::new_block,
     bitcoin::{
         BitcoinBlockHashStreamProvider as _, poller::BitcoinChainTipPoller, rpc::BitcoinCoreClient,
@@ -705,7 +705,7 @@ async fn deposit_and_withdrawal() {
     wait_for_tenure_completed(&signers, chain_tip).await;
     // Now build the required number of Bitcoin blocks on top of the
     // checkpoint.
-    for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS {
+    for _ in 0..WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
         let chain_tip = faucet.generate_block().into();
         wait_for_tenure_completed(&signers, chain_tip).await;
     }

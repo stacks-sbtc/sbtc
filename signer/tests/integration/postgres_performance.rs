@@ -1,6 +1,6 @@
 //! Postgres query-plan measurements.
 
-use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
+use signer::WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS;
 use signer::WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS;
 use signer::storage::DbRead as _;
 use signer::storage::model::BitcoinBlockHeight;
@@ -105,7 +105,7 @@ async fn withdrawal_finality_query_plan() {
 
     let stacks_chain_tip = stacks_block_hash(STACKS_CHAIN_TIP_HEIGHT);
     let finality_height = db
-        .get_withdrawal_finality_height(&stacks_chain_tip, WITHDRAWAL_MIN_CONFIRMATIONS)
+        .get_withdrawal_finality_height(&stacks_chain_tip, WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS)
         .await
         .unwrap();
 
@@ -115,7 +115,7 @@ async fn withdrawal_finality_query_plan() {
         format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)\n{GET_WITHDRAWAL_FINALITY_HEIGHT_QUERY}");
     let query_plan = sqlx::query_scalar::<_, String>(&explain_query)
         .bind(stacks_chain_tip)
-        .bind(i64::try_from(WITHDRAWAL_MIN_CONFIRMATIONS).unwrap())
+        .bind(i64::try_from(WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS).unwrap())
         .bind(WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS)
         .fetch_all(db.pool())
         .await

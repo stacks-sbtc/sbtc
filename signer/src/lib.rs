@@ -154,6 +154,14 @@ pub const WITHDRAWAL_DUST_LIMIT: u64 = 546;
 /// <https://github.com/stacks-network/stacks-core/blob/5595f08a244362cefc316f95b398510a2b8cb791/stacks-signer/src/chainstate/mod.rs#L192-L211>
 pub const WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS: i64 = 3;
 
+/// The minimum number of canonical Bitcoin blocks required on top of a
+/// withdrawal checkpoint tenure's anchor.
+///
+/// This is distinct from [`sbtc::WITHDRAWAL_MIN_CONFIRMATIONS`], which is
+/// also used to determine when an old withdrawal sweep can no longer be
+/// revived by a Bitcoin reorganization.
+pub const WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS: u64 = 4;
+
 /// This is the number of bitcoin blocks that a withdrawal request will
 /// remain live before it expires and is considered rejected.
 ///

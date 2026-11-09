@@ -3,8 +3,7 @@
 use std::future::Future;
 use std::time::Duration;
 
-use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
-
+use crate::WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS;
 use crate::keys::PublicKey;
 use crate::storage::model::{
     BitcoinBlock, BitcoinBlockHash, BitcoinBlockRef, DkgSharesStatus, EncryptedDkgShares,
@@ -211,7 +210,7 @@ where
         (
             "not enough canonical bitcoin blocks",
             &bitcoin_5,
-            &stacks_2_extended,
+            &stacks_2_third,
             None,
         ),
         (
@@ -228,7 +227,7 @@ where
         ),
         (
             "three-block confirmed checkpoint tenure",
-            &bitcoin_10,
+            &bitcoin_6,
             &stacks_2_third,
             Some(bitcoin_0.block_height),
         ),
@@ -240,7 +239,7 @@ where
         ),
         (
             "newest tenure lacks confirmations",
-            &bitcoin_9,
+            &bitcoin_7,
             &stacks_4_third,
             Some(bitcoin_0.block_height),
         ),
@@ -264,7 +263,7 @@ where
         ),
         (
             "three-block newest tenure is a checkpoint",
-            &bitcoin_10,
+            &bitcoin_8,
             &stacks_4_third,
             Some(bitcoin_2.block_height),
         ),
@@ -294,7 +293,7 @@ where
         let height = db
             .get_withdrawal_finality_height(
                 &stacks_chain_tip.block_hash,
-                WITHDRAWAL_MIN_CONFIRMATIONS,
+                WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
             )
             .await
             .unwrap();
