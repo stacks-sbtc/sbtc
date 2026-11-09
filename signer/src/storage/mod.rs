@@ -252,15 +252,19 @@ pub trait DbRead {
     /// heights below the returned height are in an earlier tenure and are
     /// part of the committed Stacks ancestry.
     ///
-    /// This returns `None` when there are fewer than two canonical Stacks
-    /// tenures, no child tenure has enough Stacks blocks and Bitcoin
-    /// confirmations, the supplied Stacks chain has incomplete ancestry,
-    /// or one of the required tenure anchors is not on the canonical
-    /// Bitcoin chain.
+    /// This returns `None` when there are fewer than `min_confirmations + 1`
+    /// canonical Bitcoin blocks, fewer than two canonical Stacks tenures,
+    /// no child tenure has enough Stacks blocks and Bitcoin confirmations,
+    /// the supplied Stacks chain has incomplete ancestry, or one of the
+    /// required tenure anchors is not on the canonical Bitcoin chain. The
+    /// ancestry walk also stops before an anchor below
+    /// `minimum_withdrawal_height`, since such a checkpoint cannot finalize
+    /// a withdrawal request that the caller still considers live.
     fn get_withdrawal_finality_height(
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
     ) -> impl Future<Output = Result<Option<BitcoinBlockHeight>, Error>> + Send;
 
     /// Get pending rejected withdrawal requests that have failed but are not

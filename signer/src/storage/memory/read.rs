@@ -283,6 +283,7 @@ impl DbRead for SharedStore {
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
     ) -> Result<Option<BitcoinBlockHeight>, Error> {
         let store = self.lock().await;
         let mut canonical_bitcoin_heights = store
@@ -313,6 +314,9 @@ impl DbRead for SharedStore {
             else {
                 return Ok(None);
             };
+            if bitcoin_anchor.block_height < minimum_withdrawal_height {
+                return Ok(None);
+            }
 
             let has_enough_stacks_blocks =
                 tenure_block_count >= WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS;
@@ -1022,9 +1026,14 @@ impl DbRead for InMemoryTransaction {
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
     ) -> Result<Option<BitcoinBlockHeight>, Error> {
         self.store
-            .get_withdrawal_finality_height(stacks_chain_tip, min_confirmations)
+            .get_withdrawal_finality_height(
+                stacks_chain_tip,
+                min_confirmations,
+                minimum_withdrawal_height,
+            )
             .await
     }
 

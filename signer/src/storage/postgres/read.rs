@@ -749,6 +749,7 @@ impl PgRead {
              AND bitcoin_anchor.is_canonical
             CROSS JOIN confirmed_bitcoin_block
             WHERE sb.block_hash = $1
+              AND bitcoin_anchor.block_height >= $4
 
             UNION ALL
 
@@ -784,8 +785,11 @@ impl PgRead {
             -- Stop as soon as the exclusive bound has been found. In the normal
             -- case this only visits the checkpoint tenure and its parent, rather
             -- than the entire Stacks chain.
-            WHERE child.checkpoint_tenure_height IS NULL
-               OR child.canonical_tenure_height >= child.checkpoint_tenure_height
+            WHERE (
+                    child.checkpoint_tenure_height IS NULL
+                 OR child.canonical_tenure_height >= child.checkpoint_tenure_height
+            )
+              AND bitcoin_anchor.block_height >= $4
         )
         SELECT canonical_tenure_height AS withdrawal_finality_height
         FROM stacks_blockchain
@@ -800,6 +804,7 @@ impl PgRead {
         executor: &'e mut E,
         stacks_chain_tip: &model::StacksBlockHash,
         min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
     ) -> Result<Option<BitcoinBlockHeight>, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -808,6 +813,7 @@ impl PgRead {
             .bind(stacks_chain_tip)
             .bind(i64::try_from(min_confirmations).map_err(Error::ConversionDatabaseInt)?)
             .bind(WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS)
+            .bind(minimum_withdrawal_height)
             .fetch_optional(executor)
             .await
             .map_err(Error::SqlxQuery)
@@ -2904,11 +2910,13 @@ impl DbRead for PgStore {
         &self,
         stacks_chain_tip: &StacksBlockHash,
         min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
     ) -> Result<Option<BitcoinBlockHeight>, Error> {
         PgRead::get_withdrawal_finality_height(
             self.get_connection().await?.as_mut(),
             stacks_chain_tip,
             min_confirmations,
+            minimum_withdrawal_height,
         )
         .await
     }
@@ -3362,11 +3370,13 @@ impl DbRead for PgTransaction<'_> {
         &self,
         stacks_chain_tip: &StacksBlockHash,
         min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
     ) -> Result<Option<BitcoinBlockHeight>, Error> {
         PgRead::get_withdrawal_finality_height(
             self.tx.lock().await.as_mut(),
             stacks_chain_tip,
             min_confirmations,
+            minimum_withdrawal_height,
         )
         .await
     }
