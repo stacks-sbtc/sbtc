@@ -33,7 +33,7 @@ use sbtc::{
 };
 use secp256k1::Keypair;
 use signer::{
-    WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
+    WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS, WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS,
     api::new_block,
     bitcoin::{
         BitcoinBlockHashStreamProvider as _, poller::BitcoinChainTipPoller, rpc::BitcoinCoreClient,
@@ -73,6 +73,36 @@ use crate::{
 };
 
 const SIMULATED_EVENT_OBSERVER_POLLING: Duration = Duration::from_millis(200);
+
+/// Produce enough linked blocks in the current Stacks tenure for it to be
+/// eligible as a withdrawal checkpoint.
+async fn extend_current_tenure_for_withdrawal_finality(
+    stacks_client: &StacksClient,
+    recipient: &PrincipalData,
+) {
+    let recipient_address = principal_to_address(recipient);
+
+    // The tenure-start block counts as the first block. Waiting for each
+    // transfer to change the balance ensures that the transactions are
+    // confirmed in separate descendant blocks.
+    for _ in 1..WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS {
+        let previous_balance = stacks_client
+            .get_account(&recipient_address)
+            .await
+            .unwrap()
+            .balance;
+        let tx = fund_stx(stacks_client, recipient, 1).await;
+        let response = stacks_client
+            .submit_tx(&tx)
+            .await
+            .expect("failed to extend the checkpoint tenure");
+        assert_matches!(response, SubmitTxResponse::Acceptance(_));
+        wait_for_stx_balance(stacks_client, &recipient_address, |balance| {
+            balance > previous_balance
+        })
+        .await;
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn start_signers(
@@ -703,6 +733,8 @@ async fn deposit_and_withdrawal() {
     // Stacks ancestry.
     let chain_tip = faucet.generate_block().into();
     wait_for_tenure_completed(&signers, chain_tip).await;
+    extend_current_tenure_for_withdrawal_finality(&stacks_client, &recipient).await;
+
     // Now build the required number of Bitcoin blocks on top of the
     // checkpoint.
     for _ in 0..WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {

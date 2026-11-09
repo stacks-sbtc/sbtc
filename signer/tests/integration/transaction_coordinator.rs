@@ -103,6 +103,7 @@ use testing_emily_client::models::WithdrawalStatus as TestingEmilyWithdrawalStat
 
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS;
+use signer::WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS;
 use signer::context::SbtcLimits;
 use signer::context::TxCoordinatorEvent;
 use signer::keys::PrivateKey;
@@ -5164,6 +5165,20 @@ async fn sign_bitcoin_transaction_withdrawals() {
         }
     }
 
+    // The second successor tenure is the checkpoint tenure. Extend it so
+    // that it cannot be skipped under the Stacks signer reorg rules.
+    for _ in 1..WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS {
+        stacks_block = model::StacksBlock {
+            block_hash: Faker.fake_with_rng(&mut OsRng),
+            block_height: stacks_block.block_height + 1,
+            parent_hash: stacks_block.block_hash,
+            bitcoin_anchor: stacks_block.bitcoin_anchor,
+        };
+        for (_, db, _, _) in signers.iter() {
+            db.write_stacks_block(&stacks_block).await.unwrap();
+        }
+    }
+
     for confirmation in 1..=WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
         let chain_tip = faucet.generate_block().into();
         wait_for_tenure_completed(&signers, chain_tip).await;
@@ -6976,6 +6991,19 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
         };
         storage.write_stacks_block(&stacks_chain_tip).await.unwrap();
     }
+
+    // The second successor tenure is the checkpoint tenure. Extend it so
+    // that the withdrawal finality query can use it as a checkpoint.
+    for _ in 1..WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS {
+        stacks_chain_tip = model::StacksBlock {
+            block_hash: Faker.fake_with_rng(&mut rng),
+            block_height: stacks_chain_tip.block_height + 1,
+            parent_hash: stacks_chain_tip.block_hash,
+            bitcoin_anchor: stacks_chain_tip.bitcoin_anchor,
+        };
+        storage.write_stacks_block(&stacks_chain_tip).await.unwrap();
+    }
+
     for _ in 0..WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
         bitcoin_chain_tip = model::BitcoinBlock {
             block_height: bitcoin_chain_tip.block_height + 1,
@@ -6998,6 +7026,9 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
         .get_withdrawal_finality_height(
             &stacks_chain_tip.block_hash,
             WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
+            bitcoin_chain_tip
+                .block_height
+                .saturating_sub(WITHDRAWAL_BLOCKS_EXPIRY),
         )
         .await
         .unwrap();

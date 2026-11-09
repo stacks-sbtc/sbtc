@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::time::Duration;
 
+use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS;
 use crate::keys::PublicKey;
 use crate::storage::model::{
@@ -136,6 +137,16 @@ where
     let bitcoin_8 = bitcoin_7.new_child();
     let bitcoin_9 = bitcoin_8.new_child();
     let bitcoin_10 = bitcoin_9.new_child();
+    let mut later_bitcoin_blocks = Vec::new();
+    let mut later_bitcoin_parent = bitcoin_10.clone();
+    for _ in 11..=24 {
+        let block = later_bitcoin_parent.new_child();
+        later_bitcoin_parent = block.clone();
+        later_bitcoin_blocks.push(block);
+    }
+    let bitcoin_24 = later_bitcoin_parent;
+    let bitcoin_25 = bitcoin_24.new_child();
+    later_bitcoin_blocks.push(bitcoin_25.clone());
 
     let bitcoin_4_fork = bitcoin_3.new_child();
     let bitcoin_5_fork = bitcoin_4_fork.new_child();
@@ -160,6 +171,7 @@ where
     let stacks_4_fork = stacks_0_extended.new_child().anchored_to(&bitcoin_4_fork);
     let stacks_4_after_fork = stacks_4_fork.new_child().anchored_to(&bitcoin_4);
     let stacks_4_after_fork_extended = stacks_4_after_fork.new_child();
+    let stacks_4_after_fork_third = stacks_4_after_fork_extended.new_child();
 
     let bitcoin_blocks = [
         &bitcoin_0,
@@ -184,6 +196,9 @@ where
     for block in bitcoin_blocks {
         db.write_bitcoin_block(block).await.unwrap();
     }
+    for block in &later_bitcoin_blocks {
+        db.write_bitcoin_block(block).await.unwrap();
+    }
 
     let stacks_blocks = [
         &stacks_0,
@@ -201,6 +216,7 @@ where
         &stacks_4_fork,
         &stacks_4_after_fork,
         &stacks_4_after_fork_extended,
+        &stacks_4_after_fork_third,
     ];
     for block in stacks_blocks {
         db.write_stacks_block(block).await.unwrap();
@@ -208,8 +224,14 @@ where
 
     let expectations = [
         (
-            "not enough canonical bitcoin blocks",
+            "checkpoint anchor is not deep enough",
             &bitcoin_5,
+            &stacks_2_third,
+            None,
+        ),
+        (
+            "fewer than five canonical bitcoin blocks",
+            &bitcoin_3,
             &stacks_2_third,
             None,
         ),
@@ -220,7 +242,7 @@ where
             None,
         ),
         (
-            "two-block confirmed tenure is not a checkpoint",
+            "third table block is not on the walked chain",
             &bitcoin_10,
             &stacks_2_extended,
             None,
@@ -276,7 +298,7 @@ where
         (
             "noncanonical ancestor anchor fails closed",
             &bitcoin_10,
-            &stacks_4_after_fork_extended,
+            &stacks_4_after_fork_third,
             None,
         ),
         (
@@ -285,15 +307,31 @@ where
             &stacks_4_extended,
             None,
         ),
+        (
+            "walk includes an anchor at the withdrawal expiry horizon",
+            &bitcoin_24,
+            &stacks_2_third,
+            Some(bitcoin_0.block_height),
+        ),
+        (
+            "walk stops below the withdrawal expiry horizon",
+            &bitcoin_25,
+            &stacks_2_third,
+            None,
+        ),
     ];
     for (name, bitcoin_chain_tip, stacks_chain_tip, expected_height) in expectations {
         db.set_canonical_bitcoin_blockchain(&bitcoin_chain_tip.block_hash)
             .await
             .unwrap();
+        let minimum_withdrawal_height = bitcoin_chain_tip
+            .block_height
+            .saturating_sub(WITHDRAWAL_BLOCKS_EXPIRY);
         let height = db
             .get_withdrawal_finality_height(
                 &stacks_chain_tip.block_hash,
                 WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
+                minimum_withdrawal_height,
             )
             .await
             .unwrap();
