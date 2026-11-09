@@ -58,6 +58,7 @@ use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
 use std::collections::HashSet;
 
+use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS;
 
 /// Block observer
@@ -577,25 +578,31 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// Update the cached exclusive upper bound for final withdrawal-request
     /// burn-view heights.
     ///
-    /// If the query fails, this logs the error and retains the previous
-    /// height so that the remaining signer state can still be updated.
-    async fn set_withdrawal_finality_height(&self) {
+    /// If there is no Stacks chain tip or the query fails, this logs the
+    /// error and clears the height. This makes withdrawals ineligible while
+    /// allowing the remaining signer state to be updated. The minimum
+    /// withdrawal height is derived from the Bitcoin tip that the current
+    /// signer state update is processing.
+    async fn set_withdrawal_finality_height(&self, chain_tip: &BitcoinBlockRef) {
         let state = self.context.state();
-        let previous_withdrawal_finality_height = state.withdrawal_finality_height();
         let Some(stacks_chain_tip) = state.stacks_chain_tip() else {
             tracing::error!(
                 error = %Error::NoStacksChainTip,
-                ?previous_withdrawal_finality_height,
-                "could not update the withdrawal finality height; using the previous value"
+                "could not update the withdrawal finality height; disabling withdrawals"
             );
+            state.set_withdrawal_finality_height(None);
             return;
         };
+        let minimum_withdrawal_height = chain_tip
+            .block_height
+            .saturating_sub(WITHDRAWAL_BLOCKS_EXPIRY);
         let result = self
             .context
             .get_storage()
             .get_withdrawal_finality_height(
                 &stacks_chain_tip.block_hash,
                 WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
+                minimum_withdrawal_height,
             )
             .await;
 
@@ -604,9 +611,9 @@ impl<C: Context, B> BlockObserver<C, B> {
             Err(error) => {
                 tracing::error!(
                     %error,
-                    ?previous_withdrawal_finality_height,
-                    "could not update the withdrawal finality height; using the previous value"
+                    "could not update the withdrawal finality height; disabling withdrawals"
                 );
+                state.set_withdrawal_finality_height(None);
                 return;
             }
         };
@@ -624,20 +631,20 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// # Notes
     ///
     /// The function updates the following:
+    /// * The withdrawal finality height, clearing it if the query fails.
     /// * sBTC limits from Emily.
     /// * The current signer set.
     /// * The current aggregate key.
-    /// * The withdrawal finality height, if its query succeeds.
     /// * The current bitcoin chain tip.
     async fn update_signer_state(&self, chain_tip: BitcoinBlockRef) -> Result<(), Error> {
+        tracing::info!("updating the signer state with the withdrawal finality height");
+        self.set_withdrawal_finality_height(&chain_tip).await;
+
         tracing::info!("loading sbtc limits from Emily");
         self.update_sbtc_limits(chain_tip.block_hash).await?;
 
         tracing::info!("updating the signer state with the current signer set");
         self.set_signer_set_info().await?;
-
-        tracing::info!("updating the signer state with the withdrawal finality height");
-        self.set_withdrawal_finality_height().await;
 
         tracing::info!("updating the signer state with the current bitcoin chain tip");
         self.context.state().set_bitcoin_chain_tip(chain_tip);
@@ -915,25 +922,122 @@ mod tests {
 
     use super::*;
 
-    /// Check that failing to query the withdrawal finality height retains
-    /// the previous cached value.
+    /// Check that a missing Stacks chain tip clears the previous withdrawal
+    /// finality height.
     #[tokio::test]
-    async fn finality_update_failure_retains_previous_height() {
+    async fn finality_update_without_stacks_tip_clears_previous_height() {
         let ctx = TestContext::default_mocked();
         let previous_height = BitcoinBlockHeight::from(42u64);
         ctx.state()
             .set_withdrawal_finality_height(Some(previous_height));
+        assert_eq!(
+            ctx.state().withdrawal_finality_height(),
+            Some(previous_height)
+        );
+
         let block_observer = BlockObserver {
             context: ctx.clone(),
             bitcoin_block_source: (),
         };
 
-        block_observer.set_withdrawal_finality_height().await;
+        let bitcoin_chain_tip: BitcoinBlockRef = model::BitcoinBlock::new_genesis().into();
+        block_observer
+            .set_withdrawal_finality_height(&bitcoin_chain_tip)
+            .await;
+
+        assert!(ctx.state().withdrawal_finality_height().is_none());
+    }
+
+    /// Check that a successful finality query replaces the cached height.
+    #[tokio::test]
+    async fn finality_update_stores_query_result() {
+        let storage = storage::memory::Store::new_shared();
+        let bitcoin_0 = model::BitcoinBlock::new_genesis();
+        storage.write_bitcoin_block(&bitcoin_0).await.unwrap();
+
+        let mut bitcoin_parent = bitcoin_0;
+        for _ in 1..=25 {
+            let block = bitcoin_parent.new_child();
+            storage.write_bitcoin_block(&block).await.unwrap();
+            bitcoin_parent = block;
+        }
+        let bitcoin_25 = bitcoin_parent;
+        let bitcoin_26 = bitcoin_25.new_child();
+        storage.write_bitcoin_block(&bitcoin_26).await.unwrap();
+
+        bitcoin_parent = bitcoin_26.clone();
+        for _ in 27..=30 {
+            let block = bitcoin_parent.new_child();
+            storage.write_bitcoin_block(&block).await.unwrap();
+            bitcoin_parent = block;
+        }
+        storage
+            .set_canonical_bitcoin_blockchain(&bitcoin_parent.block_hash)
+            .await
+            .unwrap();
+
+        let parent_tenure = model::StacksBlock::new_genesis().anchored_to(&bitcoin_25);
+        let checkpoint_start = parent_tenure.new_child().anchored_to(&bitcoin_26);
+        let checkpoint_second = checkpoint_start.new_child();
+        let checkpoint_third = checkpoint_second.new_child();
+        for block in [
+            &parent_tenure,
+            &checkpoint_start,
+            &checkpoint_second,
+            &checkpoint_third,
+        ] {
+            storage.write_stacks_block(block).await.unwrap();
+        }
+
+        let ctx = TestContext::builder()
+            .with_storage(storage)
+            .with_mocked_clients()
+            .build();
+        ctx.state()
+            .set_stacks_chain_tip(checkpoint_third.clone().into());
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_block_source: (),
+        };
+
+        let bitcoin_chain_tip: BitcoinBlockRef = bitcoin_parent.into();
+        block_observer
+            .set_withdrawal_finality_height(&bitcoin_chain_tip)
+            .await;
 
         assert_eq!(
             ctx.state().withdrawal_finality_height(),
-            Some(previous_height)
+            Some(bitcoin_25.block_height)
         );
+    }
+
+    /// Check that a storage error clears the previous finality height.
+    #[tokio::test]
+    async fn finality_update_storage_error_clears_previous_height() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://postgres:postgres@localhost/postgres")
+            .unwrap();
+        pool.close().await;
+        let storage = storage::postgres::PgStore::from(pool);
+        let ctx = TestContext::builder()
+            .with_storage(storage)
+            .with_mocked_clients()
+            .build();
+        let stacks_chain_tip: StacksBlockRef = fake::Faker.fake();
+        ctx.state().set_stacks_chain_tip(stacks_chain_tip);
+        ctx.state()
+            .set_withdrawal_finality_height(Some(BitcoinBlockHeight::from(42u64)));
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_block_source: (),
+        };
+
+        let bitcoin_chain_tip: BitcoinBlockRef = fake::Faker.fake();
+        block_observer
+            .set_withdrawal_finality_height(&bitcoin_chain_tip)
+            .await;
+
+        assert!(ctx.state().withdrawal_finality_height().is_none());
     }
 
     #[test]
