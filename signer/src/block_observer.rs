@@ -585,14 +585,16 @@ impl<C: Context, B> BlockObserver<C, B> {
     /// signer state update is processing.
     async fn set_withdrawal_finality_height(&self, chain_tip: &BitcoinBlockRef) {
         let state = self.context.state();
+        state.set_withdrawal_finality_height(None);
+
         let Some(stacks_chain_tip) = state.stacks_chain_tip() else {
             tracing::error!(
                 error = %Error::NoStacksChainTip,
                 "could not update the withdrawal finality height; disabling withdrawals"
             );
-            state.set_withdrawal_finality_height(None);
             return;
         };
+
         let minimum_withdrawal_height = chain_tip
             .block_height
             .saturating_sub(WITHDRAWAL_BLOCKS_EXPIRY);
@@ -613,7 +615,6 @@ impl<C: Context, B> BlockObserver<C, B> {
                     %error,
                     "could not update the withdrawal finality height; disabling withdrawals"
                 );
-                state.set_withdrawal_finality_height(None);
                 return;
             }
         };
