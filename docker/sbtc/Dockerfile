@@ -1,5 +1,7 @@
 FROM rust:1.98.1-slim-trixie AS builder
 
+ARG GIT_COMMIT
+
 # Install dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
