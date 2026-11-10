@@ -224,6 +224,9 @@ pub struct GetPendingRequestsParams<'a> {
     pub signer_set: &'a BitcoinSignerSet,
     /// The current sBTC limits.
     pub sbtc_limits: &'a SbtcLimits,
+    /// The exclusive upper bound for final withdrawal burn-view heights.
+    /// `None` makes all pending withdrawals ineligible.
+    pub withdrawal_finality_height: Option<model::BitcoinBlockHeight>,
 }
 
 /// This function defines which messages this event loop is interested
@@ -2007,7 +2010,8 @@ where
     /// 1. [x] The request must not have been swept within the current canonical
     ///    Bitcoin chain.
     /// 2. [x] The request must be confirmed in a canonical Stacks block.
-    /// 3. [x] The request must have reached the required number of Bitcoin
+    /// 3. [x] The Bitcoin block-commit checkpointing the withdrawal's
+    ///    Stacks ancestry must have the required Bitcoin confirmations.
     /// 4. [x] The request must be approved:
     ///     - [x] By the required number of signers (this is implemented as a
     ///       pre-filter in the query, any signer),
@@ -2031,15 +2035,12 @@ where
     /// - `expiry_buffer`: The number of blocks _prior to_ the expiration of a
     ///   withdrawal request that it is considered "soft expired" and will be
     ///   skipped/logged (exclusive).
-    /// - `min_confirmations`: The minimum number of confirmations required for
-    ///   a withdrawal request to be considered valid (inclusive).
     /// - `params`: A reference to a `GetPendingRequestsParams` struct.
     #[tracing::instrument(skip_all)]
     pub async fn get_eligible_pending_withdrawal_requests<DB>(
         storage: &DB,
         expiry_window: u64,
         expiry_buffer: u64,
-        min_confirmations: u64,
         params: &GetPendingRequestsParams<'_>,
     ) -> Result<Vec<utxo::WithdrawalRequest>, Error>
     where
@@ -2048,12 +2049,17 @@ where
         // Constants used for logging (local to this method).
         const REQUEST_SKIPPED_MESSAGE: &str = "skipping withdrawal request";
         const SKIP_REASON_AMOUNT_IS_DUST: &str = "amount_is_dust";
+        const SKIP_REASON_REQUEST_NOT_FINAL: &str = "request_not_final";
         const SKIP_REASON_PER_WITHDRAWAL_CAP_EXCEEDED: &str = "per_withdrawal_cap_exceeded";
-        const SKIP_REASON_INSUFFICIENT_CONFIRMATIONS: &str = "insufficient_confirmations";
         const SKIP_REASON_INSUFFICIENT_VOTES: &str = "insufficient_votes";
         const SKIP_REASON_SOFT_EXPIRY: &str = "soft_expiry";
 
         let mut eligible_withdrawals = Vec::new();
+
+        let Some(withdrawal_finality_height) = params.withdrawal_finality_height else {
+            tracing::debug!("no withdrawal finality height is available");
+            return Ok(eligible_withdrawals);
+        };
 
         // Determine the minimum bitcoin block height we should consider for
         // withdrawals.
@@ -2106,6 +2112,20 @@ where
                 continue;
             }
 
+            // [3] Requests with burn-view heights below this exclusive
+            // boundary are in the ancestry checkpointed by a sufficiently
+            // confirmed Bitcoin block-commit.
+            if req.bitcoin_block_height >= withdrawal_finality_height {
+                tracing::debug!(
+                    request_id = req.request_id,
+                    bitcoin_block_height = %req.bitcoin_block_height,
+                    %withdrawal_finality_height,
+                    reason = SKIP_REASON_REQUEST_NOT_FINAL,
+                    message = REQUEST_SKIPPED_MESSAGE
+                );
+                continue;
+            }
+
             // [8] Ensure that the withdrawal request amount is at or above the
             // dust limit specified in `WITHDRAWAL_DUST_LIMIT`.
             if req.amount < WITHDRAWAL_DUST_LIMIT {
@@ -2127,27 +2147,6 @@ where
                     amount = req.amount,
                     per_withdrawal_cap = per_withdrawal_cap,
                     reason = SKIP_REASON_PER_WITHDRAWAL_CAP_EXCEEDED,
-                    message = REQUEST_SKIPPED_MESSAGE
-                );
-                continue;
-            }
-
-            // Calculate the number of blocks passed (confirmations) since the
-            // bitcoin anchor of the stacks block confirming the withdrawal
-            // request.
-            let num_confirmations: u64 = *params
-                .bitcoin_chain_tip
-                .block_height
-                .saturating_sub(req.bitcoin_block_height);
-
-            // [3] Ensure that we have the required number of confirmations for
-            // the withdrawal request.
-            if num_confirmations < min_confirmations {
-                tracing::debug!(
-                    request_id = req.request_id,
-                    num_confirmations,
-                    required_confirmations = min_confirmations,
-                    reason = SKIP_REASON_INSUFFICIENT_CONFIRMATIONS,
                     message = REQUEST_SKIPPED_MESSAGE
                 );
                 continue;
@@ -2276,12 +2275,14 @@ where
 
         // Get the current sBTC limits (caps).
         let sbtc_limits = self.context.state().get_current_limits();
+        let withdrawal_finality_height = self.context.state().withdrawal_finality_height();
         // Setup the parameters for fetching pending requests.
         let params = GetPendingRequestsParams {
             bitcoin_chain_tip,
             stacks_chain_tip,
             signer_set,
             sbtc_limits: &sbtc_limits,
+            withdrawal_finality_height,
         };
 
         // Fetch eligible deposit requests from storage.
@@ -2294,7 +2295,6 @@ where
             &storage,
             WITHDRAWAL_BLOCKS_EXPIRY,
             WITHDRAWAL_EXPIRY_BUFFER,
-            WITHDRAWAL_MIN_CONFIRMATIONS,
             &params,
         )
         .await?;

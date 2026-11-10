@@ -33,6 +33,9 @@ pub struct SignerState {
     // The current stacks chain tip according to stacks-core. This gets
     // updated in the block observer when it fetches new stacks blocks.
     stacks_chain_tip: RwLock<Option<StacksBlockRef>>,
+    // The exclusive upper bound for final withdrawal-request burn-view
+    // heights. None makes withdrawal requests ineligible for sweeps.
+    withdrawal_finality_height: RwLock<Option<BitcoinBlockHeight>>,
 }
 
 impl SignerState {
@@ -101,6 +104,27 @@ impl SignerState {
             .replace(chain_tip);
     }
 
+    /// Return the exclusive upper bound for final withdrawal-request
+    /// burn-view heights. `None` means withdrawal finality is unavailable.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn withdrawal_finality_height(&self) -> Option<BitcoinBlockHeight> {
+        *self
+            .withdrawal_finality_height
+            .read()
+            .expect("BUG: Failed to acquire read lock of withdrawal finality")
+    }
+
+    /// Cache the exclusive upper bound for final withdrawal-request
+    /// burn-view heights. `None` makes withdrawal requests ineligible for
+    /// sweeps.
+    pub fn set_withdrawal_finality_height(&self, height: Option<BitcoinBlockHeight>) {
+        let mut current_height = self
+            .withdrawal_finality_height
+            .write()
+            .expect("BUG: Failed to acquire write lock of withdrawal finality");
+        *current_height = height;
+    }
+
     /// Get the current sBTC limits.
     pub fn get_current_limits(&self) -> SbtcLimits {
         // We should never fail to acquire a lock from the RwLock so that it panics.
@@ -162,6 +186,7 @@ impl Default for SignerState {
             // of the genesis block on bitcoin.
             bitcoin_chain_tip: RwLock::new(None),
             stacks_chain_tip: RwLock::new(None),
+            withdrawal_finality_height: RwLock::new(None),
         }
     }
 }
@@ -596,5 +621,23 @@ mod tests {
         assert!(signer_set.is_allowed_peer(&public_key.into()));
         signer_set.remove_signer(&public_key);
         assert!(!signer_set.is_allowed_peer(&public_key.into()));
+    }
+
+    #[test]
+    fn withdrawal_finality_height_is_optional() {
+        use super::*;
+
+        let state = SignerState::default();
+        let height = BitcoinBlockHeight::from(42u64);
+
+        assert_eq!(state.withdrawal_finality_height(), None);
+
+        state.set_withdrawal_finality_height(Some(height));
+
+        assert_eq!(state.withdrawal_finality_height(), Some(height));
+
+        state.set_withdrawal_finality_height(None);
+
+        assert_eq!(state.withdrawal_finality_height(), None);
     }
 }
