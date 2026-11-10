@@ -34,7 +34,7 @@ pub struct SignerState {
     // updated in the block observer when it fetches new stacks blocks.
     stacks_chain_tip: RwLock<Option<StacksBlockRef>>,
     // The exclusive upper bound for final withdrawal-request burn-view
-    // heights.
+    // heights. None makes withdrawal requests ineligible for sweeps.
     withdrawal_finality_height: RwLock<Option<BitcoinBlockHeight>>,
 }
 
@@ -105,7 +105,7 @@ impl SignerState {
     }
 
     /// Return the exclusive upper bound for final withdrawal-request
-    /// burn-view heights.
+    /// burn-view heights. `None` means withdrawal finality is unavailable.
     #[allow(clippy::unwrap_in_result)]
     pub fn withdrawal_finality_height(&self) -> Option<BitcoinBlockHeight> {
         *self
@@ -115,7 +115,8 @@ impl SignerState {
     }
 
     /// Cache the exclusive upper bound for final withdrawal-request
-    /// burn-view heights.
+    /// burn-view heights. `None` makes withdrawal requests ineligible for
+    /// sweeps.
     pub fn set_withdrawal_finality_height(&self, height: Option<BitcoinBlockHeight>) {
         let mut current_height = self
             .withdrawal_finality_height

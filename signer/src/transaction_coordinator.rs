@@ -225,6 +225,7 @@ pub struct GetPendingRequestsParams<'a> {
     /// The current sBTC limits.
     pub sbtc_limits: &'a SbtcLimits,
     /// The exclusive upper bound for final withdrawal burn-view heights.
+    /// `None` makes all pending withdrawals ineligible.
     pub withdrawal_finality_height: Option<model::BitcoinBlockHeight>,
 }
 

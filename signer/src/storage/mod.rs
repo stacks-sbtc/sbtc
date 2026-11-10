@@ -244,16 +244,17 @@ pub trait DbRead {
     /// burn-view heights.
     ///
     /// The returned height is the Bitcoin anchor height of the parent of
-    /// the newest canonical Stacks tenure that has
-    /// [`WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS`] consecutive blocks and
-    /// whose own Bitcoin anchor has at least `min_confirmations`
-    /// descendants. The child tenure's winning block-commit commits to the
-    /// first block of its parent tenure, so requests with burn-view
+    /// the newest Stacks tenure on the supplied tip's ancestry with at
+    /// least [`crate::WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS`] consecutive
+    /// blocks. That tenure's Bitcoin anchor must have at least
+    /// `min_confirmations` descendants. Its winning block-commit commits
+    /// to the first block of its parent tenure, so requests with burn-view
     /// heights below the returned height are in an earlier tenure and are
     /// part of the committed Stacks ancestry.
     ///
-    /// This returns `None` when there are fewer than `min_confirmations + 1`
-    /// canonical Bitcoin blocks, fewer than two canonical Stacks tenures,
+    /// The caller must supply the canonical Stacks tip. This returns `None`
+    /// when there are fewer than `min_confirmations + 1` canonical Bitcoin
+    /// blocks, fewer than two Stacks tenures on the supplied ancestry,
     /// no child tenure has enough Stacks blocks and Bitcoin confirmations,
     /// the supplied Stacks chain has incomplete ancestry, or one of the
     /// required tenure anchors is not on the canonical Bitcoin chain. The

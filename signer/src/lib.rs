@@ -148,9 +148,9 @@ pub const WITHDRAWAL_DUST_LIMIT: u64 = 546;
 /// Stacks signers reject an attempt to reorg a tenure that has more than
 /// one globally accepted block. Requiring two blocks makes the checkpoint
 /// independent of the timing exception that applies to one-block tenures.
-/// Requiring a third block makes us sure that 70% of Stacks signers built
-/// on the second block and therefore agree that the tenure contains more
-/// than one accepted block. Withdrawal finality does not advance while
+/// Requiring a third block means that at least 70% of signer weight signed
+/// a block built on the second block and therefore accepted a tenure with
+/// more than one block. Withdrawal finality does not advance while
 /// every new tenure contains fewer than this many blocks.
 ///
 /// <https://github.com/stacks-network/stacks-core/blob/10474cdec9f9c0bdf05841b58cffc89cdad87a9b/stacks-signer/src/chainstate/mod.rs#L222-L235>

@@ -65,6 +65,7 @@ pub struct BitcoinTxContext {
     /// `chain_tip` field.
     pub chain_tip_height: BitcoinBlockHeight,
     /// The exclusive upper bound for final withdrawal burn-view heights.
+    /// `None` means withdrawal finality is unavailable.
     pub withdrawal_finality_height: Option<BitcoinBlockHeight>,
     /// This signer's public key.
     pub signer_public_key: PublicKey,
@@ -446,6 +447,7 @@ pub struct BitcoinTxValidationData {
     /// the chain tip height.
     pub chain_tip_height: BitcoinBlockHeight,
     /// The exclusive upper bound for final withdrawal burn-view heights.
+    /// `None` means withdrawal finality is unavailable.
     pub withdrawal_finality_height: Option<BitcoinBlockHeight>,
     /// The current sBTC limits.
     pub sbtc_limits: SbtcLimits,
@@ -724,10 +726,8 @@ pub enum WithdrawalValidationResult {
     /// transaction that has been confirmed on the canonical bitcoin
     /// blockchain.
     RequestFulfilled,
-    /// The withdrawal request is not deemed final. This means that not
-    /// enough bitcoin blocks or Stacks tenures have been observed since
-    /// observing the Stacks block that confirmed the transaction creating
-    /// the withdrawal request.
+    /// Withdrawal finality is unavailable, or the request's burn-view
+    /// height is at or above the exclusive finality bound.
     RequestNotFinal,
     /// The signer has rejected the withdrawal request.
     RequestRejected,
