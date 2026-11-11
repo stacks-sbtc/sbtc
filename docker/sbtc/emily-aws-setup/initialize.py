@@ -85,8 +85,8 @@ def wait_for_dynamodb(timeout_seconds):
                 botocore.exceptions.ConnectTimeoutError,
                 botocore.exceptions.ReadTimeoutError) as error:
 
-        print(f"Waiting for DynamoDB at {DYNAMODB_ENDPOINT} to accept requests: {error}")
-        time.sleep(1)
+            print(f"Waiting for DynamoDB at {DYNAMODB_ENDPOINT} to accept requests: {error}")
+            time.sleep(1)
 
     print(f"DynamoDB at {DYNAMODB_ENDPOINT} did not accept requests within {timeout_seconds} seconds")
     exit(1)
