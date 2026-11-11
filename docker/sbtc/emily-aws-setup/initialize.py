@@ -1,7 +1,9 @@
 import boto3
+import botocore.exceptions
 import os
 import json
 import copy
+import time
 
 # Extract environment variables.
 INPUT_CDK_TEMPLATE = os.environ["INPUT_CDK_TEMPLATE"]
@@ -9,6 +11,9 @@ OUTPUT_CDK_TEMPLATE = os.environ["OUTPUT_CDK_TEMPLATE"]
 DYNAMODB_ENDPOINT = os.environ["DYNAMODB_ENDPOINT"]
 LOCAL_LAMBDA_PATH = os.environ["LOCAL_LAMBDA_PATH"]
 DEPLOYER_ADDRESS = os.environ["DEPLOYER_ADDRESS"]
+
+# How long to wait for DynamoDB to accept requests, in seconds.
+DYNAMODB_READY_TIMEOUT_SECONDS = 30
 
 def main():
     """
@@ -23,6 +28,7 @@ def main():
         aws_secret_access_key="xxxxxxxx",
     )
     template = read_template(INPUT_CDK_TEMPLATE)
+    wait_for_dynamodb(ddb_client, DYNAMODB_READY_TIMEOUT_SECONDS)
     create_missing_tables(template, ddb_client)
     modified_template = replace_local_lambda_path(template, LOCAL_LAMBDA_PATH)
     write_template(modified_template, OUTPUT_CDK_TEMPLATE)
@@ -44,6 +50,28 @@ def write_template(template, template_path):
     with open(template_path, "w") as fp:
         json.dump(template, fp, indent=1)
     print(f"Successfully wrote template to {template_path}")
+
+def wait_for_dynamodb(ddb_client, timeout_seconds):
+    """
+    Wait until DynamoDB accepts requests, exiting if it doesn't within the
+    timeout.
+
+    The DynamoDB Local container can be running before DynamoDB is
+    listening on its port. Requests sent during that window fail with a
+    connection error, so we retry those until DynamoDB responds.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            ddb_client.list_tables(Limit=1)
+            return
+        except (botocore.exceptions.ConnectionClosedError,
+                botocore.exceptions.EndpointConnectionError) as error:
+            if time.monotonic() >= deadline:
+                print(f"DynamoDB at {DYNAMODB_ENDPOINT} did not accept requests within {timeout_seconds} seconds: {error}")
+                exit(1)
+            print(f"Waiting for DynamoDB at {DYNAMODB_ENDPOINT} to accept requests...")
+            time.sleep(1)
 
 def get_template_resource_ids_for_resources_type(template, resource_type):
     """
