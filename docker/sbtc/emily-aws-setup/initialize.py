@@ -1,7 +1,10 @@
 import boto3
+import botocore.config
+import botocore.exceptions
 import os
 import json
 import copy
+import time
 
 # Extract environment variables.
 INPUT_CDK_TEMPLATE = os.environ["INPUT_CDK_TEMPLATE"]
@@ -10,22 +13,33 @@ DYNAMODB_ENDPOINT = os.environ["DYNAMODB_ENDPOINT"]
 LOCAL_LAMBDA_PATH = os.environ["LOCAL_LAMBDA_PATH"]
 DEPLOYER_ADDRESS = os.environ["DEPLOYER_ADDRESS"]
 
+# How long to wait for DynamoDB to accept requests, in seconds.
+DYNAMODB_READY_TIMEOUT_SECONDS = 30
+
 def main():
     """
     Main function to read a CDK template, create missing DynamoDB tables,
     replace local Lambda paths, and write the modified template.
     """
-    ddb_client = boto3.client(
+    ddb_client = create_ddb_client()
+    template = read_template(INPUT_CDK_TEMPLATE)
+    wait_for_dynamodb(DYNAMODB_READY_TIMEOUT_SECONDS)
+    create_missing_tables(template, ddb_client)
+    modified_template = replace_local_lambda_path(template, LOCAL_LAMBDA_PATH)
+    write_template(modified_template, OUTPUT_CDK_TEMPLATE)
+
+def create_ddb_client(config=None):
+    """
+    Create a DynamoDB client for the configured endpoint.
+    """
+    return boto3.client(
         'dynamodb',
         endpoint_url=DYNAMODB_ENDPOINT,
         region_name="us-west-2",
         aws_access_key_id="xxxxxxxx",
         aws_secret_access_key="xxxxxxxx",
+        config=config,
     )
-    template = read_template(INPUT_CDK_TEMPLATE)
-    create_missing_tables(template, ddb_client)
-    modified_template = replace_local_lambda_path(template, LOCAL_LAMBDA_PATH)
-    write_template(modified_template, OUTPUT_CDK_TEMPLATE)
 
 def read_template(template_path):
     """
@@ -44,6 +58,38 @@ def write_template(template, template_path):
     with open(template_path, "w") as fp:
         json.dump(template, fp, indent=1)
     print(f"Successfully wrote template to {template_path}")
+
+def wait_for_dynamodb(timeout_seconds):
+    """
+    Wait until DynamoDB accepts requests, exiting if it doesn't within
+    the timeout (plus a 5-second buffer).
+
+    The DynamoDB Local container can be running before DynamoDB is
+    listening on its port. Requests sent during that window fail with a
+    connection error, so we retry those until DynamoDB responds.
+    """
+
+    ddb_client = create_ddb_client(botocore.config.Config(
+        connect_timeout=5,
+        read_timeout=5,
+        retries={"total_max_attempts": 1},
+    ))
+    deadline = time.monotonic() + timeout_seconds
+
+    while time.monotonic() < deadline:
+        try:
+            ddb_client.list_tables(Limit=1)
+            return
+        except (botocore.exceptions.ConnectionClosedError,
+                botocore.exceptions.EndpointConnectionError,
+                botocore.exceptions.ConnectTimeoutError,
+                botocore.exceptions.ReadTimeoutError) as error:
+
+            print(f"Waiting for DynamoDB at {DYNAMODB_ENDPOINT} to accept requests: {error}")
+            time.sleep(1)
+
+    print(f"DynamoDB at {DYNAMODB_ENDPOINT} did not accept requests within {timeout_seconds} seconds")
+    exit(1)
 
 def get_template_resource_ids_for_resources_type(template, resource_type):
     """
