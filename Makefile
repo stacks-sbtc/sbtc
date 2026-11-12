@@ -134,7 +134,7 @@ integration-env-build:
 integration-test-full: integration-env-down integration-env-up integration-test integration-env-down
 
 integration-env-up-ci: emily-cdk-synth
-	docker compose --file docker/docker-compose.ci.yml up --detach --quiet-pull
+	docker compose --file docker/docker-compose.ci.yml up --detach --wait --wait-timeout 30 --quiet-pull
 	$(MAKE) initialize-test-wallet INTEGRATION_COMPOSE_FILE=docker/docker-compose.ci.yml
 	DYNAMODB_ENDPOINT=http://localhost:8000 \
 		INPUT_CDK_TEMPLATE=./emily/cdk/cdk.out/EmilyStack.template.json \
