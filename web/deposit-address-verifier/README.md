@@ -1,6 +1,6 @@
 # sBTC address constructor
 
-A static, client-side website for independently computing sBTC deposit addresses. It can read a Stacks recipient and the public key for a P2WPKH Bitcoin address from a wallet through Stacks Connect, or accept all inputs manually.
+A static, client-side website for independently computing sBTC deposit addresses. It can read a Stacks recipient and the public key for a P2WPKH Bitcoin address from a wallet through Stacks Connect, or accept all inputs manually. Users choose a version 1 or version 2 deposit. Version 1 uses the registry's aggregate key, or an aggregate public key the user supplies, in which case the site skips the registry. Version 2 uses the registry's signer set and threshold.
 
 The site does not construct, sign, or broadcast transactions. Users should make deposits through the [official sBTC Bridge](https://sbtc.stacks.co/).
 

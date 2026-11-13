@@ -1,12 +1,17 @@
 import {
   computeDepositAddress,
-  fetchSignersPublicKey,
+  fetchRegistrySignerData,
   findWalletValues,
-  normalizeXOnlyPublicKey,
+  formatAsmLines,
+  requireRegistryField,
   scriptToAsm,
+  type DepositSigningInput,
+  type DepositVersion,
   type NetworkName,
 } from "./deposit";
 import { connectWallet } from "./wallet";
+
+const VERSION_LABELS: Record<DepositVersion, string> = { v1: "Version 1", v2: "Version 2" };
 
 function bindVerifier(): void {
   const form = document.querySelector<HTMLFormElement>("#verifier-form")!;
@@ -18,8 +23,10 @@ function bindVerifier(): void {
   const reclaimKey = document.querySelector<HTMLInputElement>("#reclaim-key")!;
   const lockTime = document.querySelector<HTMLInputElement>("#lock-time")!;
   const maxFee = document.querySelector<HTMLInputElement>("#max-fee")!;
+  const depositVersion = document.querySelector<HTMLSelectElement>("#deposit-version")!;
   const stacksApi = document.querySelector<HTMLInputElement>("#stacks-api")!;
   const signersKey = document.querySelector<HTMLInputElement>("#signers-key")!;
+  const signersKeyField = document.querySelector<HTMLElement>("#signers-key-field")!;
   const reclaimScript = document.querySelector<HTMLTextAreaElement>("#reclaim-script")!;
   const error = document.querySelector<HTMLParagraphElement>("#form-error")!;
   const compute = document.querySelector<HTMLButtonElement>("#compute")!;
@@ -76,11 +83,32 @@ function bindVerifier(): void {
     });
   });
 
+  // The aggregate key field only applies to version 1.
+  const updateVersionFields = (): void => {
+    const isV2 = depositVersion.value === "v2";
+    signersKeyField.hidden = isV2;
+    signersKey.disabled = isV2;
+  };
+  depositVersion.addEventListener("change", updateVersionFields);
+  updateVersionFields();
+
   network.addEventListener("change", () => {
     const isMainnet = network.value === "mainnet";
     stacksApi.value = isMainnet ? "https://api.hiro.so" : "https://api.testnet.hiro.so";
     recipient.placeholder = isMainnet ? "SP… or SM…" : "ST… or SN…";
   });
+
+  // The ASM is shown one clause per line; copy it as standard single-line ASM.
+  document
+    .querySelectorAll<HTMLElement>("#deposit-script-asm, #reclaim-script-asm")
+    .forEach((element) => {
+      element.addEventListener("copy", (event) => {
+        const selected = document.getSelection()?.toString();
+        if (!selected || !event.clipboardData) return;
+        event.clipboardData.setData("text/plain", selected.replace(/\s*\n\s*/g, " "));
+        event.preventDefault();
+      });
+    });
 
   window.addEventListener("pagehide", () => {
     active = false;
@@ -119,10 +147,11 @@ function bindVerifier(): void {
     if (!reportFormValidity()) return;
     const submittedRevision = revision;
     const isCurrent = () => active && revision === submittedRevision;
+    const version = depositVersion.value as DepositVersion;
+    // A supplied v1 aggregate key is used as is, without the registry.
+    const overrideKey = version === "v1" ? signersKey.value.trim() : "";
     compute.disabled = true;
-    compute.firstElementChild!.textContent = signersKey.value.trim()
-      ? "Computing…"
-      : "Fetching signer key…";
+    compute.firstElementChild!.textContent = overrideKey ? "Computing…" : "Fetching signer data…";
 
     try {
       const selectedNetwork = network.value as NetworkName;
@@ -140,25 +169,46 @@ function bindVerifier(): void {
               lockTime: parseInteger(lockTime.value, "Lock time"),
             }),
       };
-      const aggregateKey = signersKey.value.trim()
-        ? signersKey.value
-        : await fetchSignersPublicKey(selectedNetwork, stacksApi.value);
-      if (!isCurrent()) return;
-      const result = computeDepositAddress({ ...inputs, signersPublicKey: aggregateKey });
+      let signingInputs: DepositSigningInput;
+      if (overrideKey) {
+        signingInputs = { version: "v1", signersPublicKey: overrideKey };
+      } else {
+        const signerData = await fetchRegistrySignerData(selectedNetwork, stacksApi.value);
+        if (!isCurrent()) return;
+        signingInputs =
+          version === "v1"
+            ? {
+                version: "v1",
+                signersPublicKey: requireRegistryField(signerData.aggregatePublicKey),
+              }
+            : { version: "v2", ...requireRegistryField(signerData.keySet) };
+      }
+      const result = computeDepositAddress({ ...inputs, ...signingInputs });
 
       document.querySelector<HTMLElement>("#empty-result")!.hidden = true;
       document.querySelector<HTMLElement>("#result")!.hidden = false;
       document.querySelector("#result-network")!.textContent = selectedNetwork;
+      document.querySelector("#result-version")!.textContent = VERSION_LABELS[result.version];
       document.querySelector("#deposit-address")!.textContent = result.address;
-      document.querySelector("#result-signers-key")!.textContent =
-        normalizeXOnlyPublicKey(aggregateKey);
+      document.querySelector("#result-signers-label")!.textContent =
+        result.version === "v1"
+          ? "Signers’ aggregate public key"
+          : `Signers’ derived Bitcoin keys (${result.signaturesRequired} of ${result.signingKeys.length} required)`;
+      document.querySelector("#result-signers-key")!.replaceChildren(
+        ...(result.version === "v1" ? [result.signersPublicKey] : result.signingKeys).map((key) =>
+          Object.assign(document.createElement("span"), {
+            className: "key-line",
+            textContent: key,
+          }),
+        ),
+      );
       document.querySelector("#deposit-script")!.textContent = result.depositScript;
       document.querySelector("#result-reclaim-script")!.textContent = result.reclaimScript;
-      document.querySelector("#deposit-script-asm")!.textContent = scriptToAsm(
-        result.depositScript,
+      document.querySelector("#deposit-script-asm")!.textContent = formatAsmLines(
+        scriptToAsm(result.depositScript),
       );
-      document.querySelector("#reclaim-script-asm")!.textContent = scriptToAsm(
-        result.reclaimScript,
+      document.querySelector("#reclaim-script-asm")!.textContent = formatAsmLines(
+        scriptToAsm(result.reclaimScript),
       );
     } catch (cause) {
       if (isCurrent()) showError(error, cause);

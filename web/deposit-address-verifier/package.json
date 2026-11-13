@@ -13,7 +13,9 @@
   },
   "dependencies": {
     "@scure/btc-signer": "2.0.1",
+    "@scure/bip32": "1.7.0",
     "@stacks/connect": "8.2.4",
+    "@stacks/transactions": "7.4.0",
     "sbtc": "0.3.2"
   },
   "devDependencies": {

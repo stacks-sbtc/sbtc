@@ -134,8 +134,8 @@
                   ><span
                     class="tooltip"
                     tabindex="0"
-                    aria-label="The Stacks API queried for the current signer aggregate public key from the network’s sBTC registry contract."
-                    data-tooltip="The Stacks API queried for the current signer aggregate public key from the network’s sBTC registry contract."
+                    aria-label="The Stacks API queried for the current aggregate key, signer set, and signature threshold from the network’s sBTC registry contract."
+                    data-tooltip="The Stacks API queried for the current aggregate key, signer set, and signature threshold from the network’s sBTC registry contract."
                     >?</span
                   ></span
                 >
@@ -242,12 +242,28 @@
             </label>
             <label class="field">
               <span class="field-label"
-                ><span>Signers’ aggregate public key <small>optional override</small></span
+                ><span>Deposit version</span
                 ><span
                   class="tooltip"
                   tabindex="0"
-                  aria-label="The current x-only aggregate public key controlled by the sBTC signer set. Supplying it skips the Stacks API request."
-                  data-tooltip="The current x-only aggregate public key controlled by the sBTC signer set. Supplying it skips the Stacks API request."
+                  aria-label="Version 1 locks the deposit to the signers’ aggregate key. Version 2 locks it to the signer key set and threshold from the registry."
+                  data-tooltip="Version 1 locks the deposit to the signers’ aggregate key. Version 2 locks it to the signer key set and threshold from the registry."
+                  >?</span
+                ></span
+              >
+              <select id="deposit-version" name="depositVersion">
+                <option value="v1" selected>Version 1</option>
+                <option value="v2">Version 2</option>
+              </select>
+            </label>
+            <label class="field" id="signers-key-field">
+              <span class="field-label"
+                ><span>Version 1 aggregate public key <small>overrides the registry</small></span
+                ><span
+                  class="tooltip"
+                  tabindex="0"
+                  aria-label="The x-only aggregate public key for a version 1 address. Supplying it skips the Stacks API request."
+                  data-tooltip="The x-only aggregate public key for a version 1 address. Supplying it skips the Stacks API request."
                   >?</span
                 ></span
               >
@@ -282,7 +298,10 @@
           <div id="result" hidden>
             <div class="result-heading">
               <h2>The deposit address</h2>
-              <span class="network-chip" id="result-network"></span>
+              <div class="result-chips">
+                <span class="network-chip" id="result-network"></span>
+                <span class="network-chip" id="result-version"></span>
+              </div>
             </div>
             <div class="deposit-warning" role="alert">
               <span class="deposit-warning-icon" aria-hidden="true">!</span>
@@ -307,7 +326,8 @@
                 ><span class="details-indicator" aria-hidden="true"></span>
               </summary>
               <div class="detail-block">
-                <span>Signers’ aggregate public key</span><code id="result-signers-key"></code>
+                <span id="result-signers-label">Signers’ aggregate public key</span
+                ><code id="result-signers-key"></code>
               </div>
               <div class="detail-block">
                 <span>Deposit script ASM</span><code id="deposit-script-asm"></code>

@@ -436,19 +436,32 @@ textarea::placeholder {
 }
 .result-heading {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 20px;
+  gap: 12px 20px;
 }
 .result-heading h2 {
   font-size: 1.25rem;
   letter-spacing: -0.025em;
+}
+.result-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.key-line {
+  display: block;
+}
+.key-line + .key-line {
+  margin-top: 6px;
 }
 .network-chip {
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 999px;
   padding: 6px 10px;
   color: #c7cfe2;
+  white-space: nowrap;
   text-transform: capitalize;
   font-size: 0.72rem;
 }
@@ -545,7 +558,7 @@ details[open] .details-indicator::before {
   gap: 8px;
   margin-bottom: 17px;
 }
-.detail-block span {
+.detail-block > span {
   color: #aeb7cf;
   font-size: 0.73rem;
 }
@@ -553,6 +566,7 @@ details[open] .details-indicator::before {
   max-height: 92px;
   overflow: auto;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
   color: #dce4f9;
   font-size: 0.68rem;
   line-height: 1.5;
