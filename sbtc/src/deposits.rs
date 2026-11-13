@@ -933,6 +933,7 @@ mod tests {
     use bitcoin::bip32::ChildNumber;
     use bitcoin::bip32::Fingerprint;
     use bitcoin::bip32::Xpub;
+    use bitcoin::hex::DisplayHex as _;
     use rand::rngs::OsRng;
     use secp256k1::Parity;
     use secp256k1::PublicKey;
@@ -1105,6 +1106,90 @@ mod tests {
         expected.push(opcodes::OP_EQUALVERIFY.to_u8());
 
         assert_eq!(v2_deposit_prefix(commitment).as_bytes(), expected);
+    }
+
+    /// The inputs and expected outputs of the v2 deposit commitment for one
+    /// recipient and max fee.
+    struct CommitmentTestCase {
+        /// The Stacks principal that receives the deposit, as a string.
+        recipient: &'static str,
+        /// The maximum fee, in sats, that the depositor will pay.
+        max_fee: u64,
+        /// The expected hex encoding of the preimage, which is the SHA-256
+        /// hash of the deposit data.
+        expected_preimage: &'static str,
+        /// The expected hex encoding of the commitment, which is the
+        /// SHA-256 hash of the preimage.
+        expected_commitment: &'static str,
+    }
+
+    /// The signers reveal the preimage when they spend a v2 deposit, and
+    /// Emily and the signers recompute the commitment from the recipient
+    /// and max fee when they parse a deposit script. So the mapping
+    /// between preimage and commitment for deposit data must never change,
+    /// or existing deposits could no longer be parsed or swept.
+    ///
+    /// The expected values match a direct SHA-256 computation over the
+    /// serialized deposit data.
+    #[test_case(CommitmentTestCase {
+        recipient: "SP000000000000000000002Q6VF78",
+        max_fee: 80_000,
+        expected_preimage: "7b7fe3bbc53fcb13556d204e0b69371e3db6e0993ad80e3a08d17a9f0347664a",
+        expected_commitment: "bc94e3d783ea495b3e32378c650a0d3ebcf1db9289b9457d8fdd49e069e35392",
+    } ; "standard principal")]
+    #[test_case(CommitmentTestCase {
+        recipient: "SP000000000000000000002Q6VF78.my-contract",
+        max_fee: 123_456,
+        expected_preimage: "46d23f398c2c553eb97e7c8a3cfdacae20ff64585aaf41348c47b08896997c22",
+        expected_commitment: "605806257b04557450ba77a3c9b09ea07dd3f20dd54f357851e3894fc7a1809f",
+    } ; "contract principal")]
+    fn v2_deposit_commitment_is_stable(case: CommitmentTestCase) {
+        let recipient = PrincipalData::parse(case.recipient).unwrap();
+
+        let preimage = deposit_data_preimage(case.max_fee, &recipient);
+        let commitment = deposit_data_commitment(case.max_fee, &recipient);
+
+        assert_eq!(preimage.to_lower_hex_string(), case.expected_preimage);
+        assert_eq!(commitment.to_lower_hex_string(), case.expected_commitment);
+    }
+
+    /// Deposit UTXOs must stay spendable by the signers, so the
+    /// scriptPubKey of a v2 deposit, with its deposit and reclaim leaves
+    /// under the v2 NUMS internal key, must never change.
+    ///
+    /// The signing keys are fixed x-only keys, so this does not depend on
+    /// signer key derivation, which `key_set_script_pubkey_is_stable` in
+    /// the signer_keys module pins.
+    #[test]
+    fn v2_deposit_script_pubkey_is_stable() {
+        let signing_keys = [
+            "374bfe83198f423d763ddcad92837229b219117750cf8eee106f59f09ebac157",
+            "b08d2faade97ce5b7159fc49ed3a98ebfde9dcfe70ba6aaa614da225f4fcf8a6",
+            "c4a51ca195d4b7fe6307de43a6dc7758eb60475fabe82862bc4299350c09c21c",
+        ]
+        .map(|key| key.parse::<XOnlyPublicKey>().unwrap());
+        let recipient = PrincipalData::parse("SP000000000000000000002Q6VF78.my-contract").unwrap();
+        let deposit =
+            DepositScriptInputsV2::new(BTreeSet::from(signing_keys), 2, recipient, 123_456)
+                .unwrap();
+
+        let reclaim_key: XOnlyPublicKey =
+            "1b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f"
+                .parse()
+                .unwrap();
+        let reclaim_script = ScriptBuf::builder()
+            .push_int(950)
+            .push_opcode(opcodes::OP_CSV)
+            .push_opcode(opcodes::OP_DROP)
+            .push_slice(reclaim_key.serialize())
+            .push_opcode(opcodes::OP_CHECKSIG)
+            .into_script();
+
+        let script_pubkey = to_v2_script_pubkey(deposit.deposit_script(), reclaim_script);
+        assert_eq!(
+            script_pubkey.to_hex_string(),
+            "51201c7da221d03a975094a5b500a0a853d7dbe34dd17a768c34b8130212a9f2f997"
+        );
     }
 
     #[test_case(0..1, vec![opcodes::OP_DROP.to_u8()]; "OP_SIZE")]
