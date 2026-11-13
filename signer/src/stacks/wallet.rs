@@ -788,7 +788,7 @@ mod tests {
         assert_eq!(tx.tx().version, expected_version);
 
         let info = SignerSetInfo {
-            aggregate_key: *wallet.stacks_aggregate_key(),
+            aggregate_key: RegistryKey::V1(*wallet.stacks_aggregate_key()),
             signer_set: wallet.public_keys().clone(),
             signatures_required: wallet.signatures_required(),
         };
