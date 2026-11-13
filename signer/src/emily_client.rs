@@ -80,6 +80,8 @@ pub trait EmilyInteract: Sync + Send {
     ) -> impl std::future::Future<Output = Result<Option<CreateDepositRequest>, Error>> + Send;
 
     /// Get pending and accepted deposits to process from Emily.
+    ///
+    /// Pending then accepted, each newest first, the block observer relies on this order.
     fn get_deposits(
         &self,
     ) -> impl std::future::Future<Output = Result<Vec<CreateDepositRequest>, Error>> + Send;
