@@ -28,6 +28,7 @@ use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
 use signer::bitcoin::utxo;
+use signer::bitcoin::utxo::FeeAssessmentMethod;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
@@ -217,6 +218,7 @@ impl TestSweepSetup {
                 },
                 fee_rate: 10.0,
                 last_fees: None,
+                fee_assessment: FeeAssessmentMethod::Proportional,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,
@@ -940,6 +942,7 @@ impl TestSweepSetup2 {
                 },
                 fee_rate: 10.0,
                 last_fees,
+                fee_assessment: FeeAssessmentMethod::Proportional,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,
