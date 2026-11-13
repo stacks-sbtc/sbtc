@@ -142,6 +142,27 @@ pub const DEPOSIT_DUST_LIMIT: u64 = 546;
 /// https://github.com/bitcoin/bitcoin/blob/c242fa5be358150d83c2446896b6f4c45c6365e9/src/policy/policy.cpp#L26-L41
 pub const WITHDRAWAL_DUST_LIMIT: u64 = 546;
 
+/// The minimum number of consecutive Stacks blocks required in the tenure
+/// that checkpoints a withdrawal request's ancestry.
+///
+/// Stacks signers reject an attempt to reorg a tenure that has more than
+/// one globally accepted block. Requiring two blocks makes the checkpoint
+/// independent of the timing exception that applies to one-block tenures.
+/// Requiring a third block means that at least 70% of signer weight signed
+/// a block built on the second block and therefore accepted a tenure with
+/// more than one block. Withdrawal finality does not advance while
+/// every new tenure contains fewer than this many blocks.
+///
+/// <https://github.com/stacks-network/stacks-core/blob/10474cdec9f9c0bdf05841b58cffc89cdad87a9b/stacks-signer/src/chainstate/mod.rs#L222-L235>
+pub const WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS: i64 = 3;
+
+/// The minimum number of canonical Bitcoin blocks required on top of a
+/// withdrawal checkpoint tenure's anchor.
+///
+/// This is distinct from [`sbtc::WITHDRAWAL_MIN_CONFIRMATIONS`], which
+/// determines when an old withdrawal sweep is no longer considered active.
+pub const WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS: u64 = 4;
+
 /// This is the number of bitcoin blocks that a withdrawal request will
 /// remain live before it expires and is considered rejected.
 ///

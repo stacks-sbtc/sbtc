@@ -101,8 +101,9 @@ use testing_emily_client::apis::withdrawal_api;
 use testing_emily_client::models::Chainstate;
 use testing_emily_client::models::WithdrawalStatus as TestingEmilyWithdrawalStatus;
 
-use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
+use signer::WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS;
+use signer::WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS;
 use signer::context::SbtcLimits;
 use signer::context::TxCoordinatorEvent;
 use signer::keys::PrivateKey;
@@ -621,9 +622,24 @@ pub async fn mock_stacks_core<D, B, E>(
     broadcast_stacks_tx: Sender<StacksTransaction>,
 ) {
     ctx.with_stacks_client(|client| {
-        client
-            .expect_get_tenure_info()
-            .returning(move || Box::pin(std::future::ready(Ok(DUMMY_TENURE_INFO.clone()))));
+        // We report the tallest stacks block on the canonical bitcoin
+        // blockchain as the stacks chain tip, so that tests can grow the
+        // stacks blockchain by writing stacks blocks to the database.
+        let tip_db = db.clone();
+        client.expect_get_tenure_info().returning(move || {
+            let db = tip_db.clone();
+            Box::pin(async move {
+                let mut tenure_info = DUMMY_TENURE_INFO.clone();
+                let Some(bitcoin_chain_tip) = db.get_bitcoin_canonical_chain_tip().await? else {
+                    return Ok(tenure_info);
+                };
+                if let Some(stacks_chain_tip) = db.get_stacks_chain_tip(&bitcoin_chain_tip).await? {
+                    tenure_info.tip_block_id = stacks_chain_tip.block_hash;
+                    tenure_info.tip_height = stacks_chain_tip.block_height;
+                }
+                Ok(tenure_info)
+            })
+        });
 
         client.expect_get_block().returning(|_| {
             let response = Ok(NakamotoBlock {
@@ -5109,29 +5125,69 @@ async fn sign_bitcoin_transaction_withdrawals() {
     }
 
     // =========================================================================
-    // Step 7 - Confirm WITHDRAWAL_MIN_CONFIRMATIONS more blocks so that
-    //          the signers process the withdrawal request.
+    // Step 7 - Checkpoint the withdrawal and confirm the checkpoint so
+    //          that the signers process the withdrawal request.
     // -------------------------------------------------------------------------
-    // - Generate WITHDRAWAL_MIN_CONFIRMATIONS blocks the deposit request.
-    //   This will trigger the block observer to update the database.
+    // - Generate bitcoin blocks on top of the withdrawal request. This
+    //   will trigger the block observer to update the database.
+    // - Start two successor Stacks tenures. The block-commit electing the
+    //   second tenure checkpoints the withdrawal's Stacks ancestry.
+    // - Build the required number of Bitcoin blocks on that checkpoint.
     // - Each RequestDecider process should vote on the withdrawal request
     //   and submit the votes to each other.
     // - The coordinator should submit a sweep transaction with an output
-    //   fulfilling the withdrawal request.
+    //   fulfilling the withdrawal request once there are
+    //   WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS Bitcoin blocks on top of the
+    //   checkpoint.
     // =========================================================================
     let (ctx, _, _, _) = signers.first().unwrap();
-    for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS - 1 {
+    let mut stacks_block = db
+        .get_stacks_block(&stacks_chain_tip)
+        .await
+        .unwrap()
+        .unwrap();
+    for _ in 0..2 {
         let chain_tip = faucet.generate_block().into();
         wait_for_tenure_completed(&signers, chain_tip).await;
         // The mempool should be empty, since the signers do not act on the
-        // withdrawal unless they've observed WITHDRAWAL_MIN_CONFIRMATIONS
-        // from the chain tip of when the withdrawal request was created.
+        // withdrawal before its Bitcoin checkpoint is confirmed.
         let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
         assert!(txids.is_empty());
+
+        stacks_block = model::StacksBlock {
+            block_hash: Faker.fake_with_rng(&mut OsRng),
+            block_height: stacks_block.block_height + 1,
+            parent_hash: stacks_block.block_hash,
+            bitcoin_anchor: chain_tip,
+        };
+        for (_, db, _, _) in signers.iter() {
+            db.write_stacks_block(&stacks_block).await.unwrap();
+        }
     }
 
-    let chain_tip = faucet.generate_block().into();
-    wait_for_tenure_completed(&signers, chain_tip).await;
+    // The second successor tenure is the checkpoint tenure. Extend it so
+    // that it cannot be skipped under the Stacks signer reorg rules.
+    for _ in 1..WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS {
+        stacks_block = model::StacksBlock {
+            block_hash: Faker.fake_with_rng(&mut OsRng),
+            block_height: stacks_block.block_height + 1,
+            parent_hash: stacks_block.block_hash,
+            bitcoin_anchor: stacks_block.bitcoin_anchor,
+        };
+        for (_, db, _, _) in signers.iter() {
+            db.write_stacks_block(&stacks_block).await.unwrap();
+        }
+    }
+
+    for confirmation in 1..=WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
+        let chain_tip = faucet.generate_block().into();
+        wait_for_tenure_completed(&signers, chain_tip).await;
+
+        if confirmation < WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
+            let txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
+            assert!(txids.is_empty());
+        }
+    }
 
     let mut txids = ctx.bitcoin_client.inner_client().get_raw_mempool().unwrap();
     assert_eq!(txids.len(), 1);
@@ -5799,6 +5855,10 @@ mod get_eligible_pending_withdrawal_requests {
         SignerNetworkInstance,
     >;
 
+    fn withdrawal_finality_height(height: u64) -> Option<BitcoinBlockHeight> {
+        Some(height.into())
+    }
+
     /// Creates [`WithdrawalSigner`]s for each vote in the provided slice,
     /// zipped together with the signer keys from the provided
     /// [`TestSignerSet`], and stores them in the database.
@@ -5915,7 +5975,7 @@ mod get_eligible_pending_withdrawal_requests {
         num_expected_results: usize,
         expiry_window: u64,
         expiry_buffer: u64,
-        min_confirmations: u64,
+        withdrawal_finality_height: Option<BitcoinBlockHeight>,
         at_block_height: BitcoinBlockHeight,
     }
 
@@ -5930,7 +5990,7 @@ mod get_eligible_pending_withdrawal_requests {
                 num_expected_results: 1,
                 expiry_window: 24,
                 expiry_buffer: 0,
-                min_confirmations: 0,
+                withdrawal_finality_height: withdrawal_finality_height(u64::MAX),
                 at_block_height: 0u64.into(),
             }
         }
@@ -5957,25 +6017,27 @@ mod get_eligible_pending_withdrawal_requests {
         ..Default::default()
     }; "amount_over_per_withdrawal_limit")]
     #[test_case(TestParams {
-        // This case will calculate the confirmations as:
-        // chain_length (10) - min_confirmations (6) = 4 (maximum block height),
-        // at_block_height (5) > 4 (maximum).
+        // The finality height is an exclusive boundary, so a request at
+        // exactly that height is not final.
         chain_length: 10,
-        at_block_height: 5u64.into(),
-        min_confirmations: 6,
+        at_block_height: 3u64.into(),
+        withdrawal_finality_height: withdrawal_finality_height(3),
         num_expected_results: 0,
         ..Default::default()
-    }; "insufficient_confirmations_one_too_few")]
+    }; "request_at_finality_height_is_not_final")]
     #[test_case(TestParams {
-        // This case will calculate the confirmations as:
-        // chain_length (10) - min_confirmations(6) = 4 (maximum block height),
-        // at_block_height (4) <= 4.
+        // A request immediately below the exclusive boundary is final.
         chain_length: 10,
-        at_block_height: 4u64.into(),
-        min_confirmations: 6,
+        at_block_height: 2u64.into(),
+        withdrawal_finality_height: withdrawal_finality_height(3),
         num_expected_results: 1,
         ..Default::default()
-    }; "exact_number_of_confirmations_allowed")]
+    }; "request_below_finality_height_is_final")]
+    #[test_case(TestParams {
+        withdrawal_finality_height: None,
+        num_expected_results: 0,
+        ..Default::default()
+    }; "missing_finality_height_fails_closed")]
     #[test_case(TestParams {
         signature_threshold: 2,
         num_approves: 1,
@@ -6049,6 +6111,7 @@ mod get_eligible_pending_withdrawal_requests {
             bitcoin_chain_tip: &bitcoin_chain_tip,
             stacks_chain_tip: &stacks_chain_tip,
             sbtc_limits: &params.sbtc_limits,
+            withdrawal_finality_height: params.withdrawal_finality_height,
         };
 
         // Create a request below the dust limit.
@@ -6070,7 +6133,6 @@ mod get_eligible_pending_withdrawal_requests {
             &db,
             params.expiry_window,
             params.expiry_buffer,
-            params.min_confirmations,
             &get_requests_params,
         )
         .await
@@ -6906,9 +6968,43 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
         }
     }
 
-    // Create more bitcoin blocks to ensure the withdrawals are considered valid
+    // Create two successor tenures and then enough Bitcoin blocks to
+    // confirm the checkpoint created by the second successor tenure.
     let mut bitcoin_chain_tip = bitcoin_block;
-    for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS {
+    let mut stacks_chain_tip = stacks_block;
+    for _ in 0..2 {
+        bitcoin_chain_tip = model::BitcoinBlock {
+            block_height: bitcoin_chain_tip.block_height + 1,
+            parent_hash: bitcoin_chain_tip.block_hash,
+            ..Faker.fake_with_rng(&mut rng)
+        };
+        storage
+            .write_bitcoin_block(&bitcoin_chain_tip)
+            .await
+            .unwrap();
+
+        stacks_chain_tip = model::StacksBlock {
+            block_hash: Faker.fake_with_rng(&mut rng),
+            block_height: stacks_chain_tip.block_height + 1,
+            parent_hash: stacks_chain_tip.block_hash,
+            bitcoin_anchor: bitcoin_chain_tip.block_hash,
+        };
+        storage.write_stacks_block(&stacks_chain_tip).await.unwrap();
+    }
+
+    // The second successor tenure is the checkpoint tenure. Extend it so
+    // that the withdrawal finality query can use it as a checkpoint.
+    for _ in 1..WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS {
+        stacks_chain_tip = model::StacksBlock {
+            block_hash: Faker.fake_with_rng(&mut rng),
+            block_height: stacks_chain_tip.block_height + 1,
+            parent_hash: stacks_chain_tip.block_hash,
+            bitcoin_anchor: stacks_chain_tip.bitcoin_anchor,
+        };
+        storage.write_stacks_block(&stacks_chain_tip).await.unwrap();
+    }
+
+    for _ in 0..WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
         bitcoin_chain_tip = model::BitcoinBlock {
             block_height: bitcoin_chain_tip.block_height + 1,
             parent_hash: bitcoin_chain_tip.block_hash,
@@ -6921,6 +7017,22 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
     }
     let bitcoin_chain_tip: model::BitcoinBlockRef = bitcoin_chain_tip.into();
     state.set_bitcoin_chain_tip(bitcoin_chain_tip);
+    state.set_stacks_chain_tip(stacks_chain_tip.clone().into());
+    storage
+        .set_canonical_bitcoin_blockchain(&bitcoin_chain_tip.block_hash)
+        .await
+        .unwrap();
+    let withdrawal_finality_height = storage
+        .get_withdrawal_finality_height(
+            &stacks_chain_tip.block_hash,
+            WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
+            bitcoin_chain_tip
+                .block_height
+                .saturating_sub(WITHDRAWAL_BLOCKS_EXPIRY),
+        )
+        .await
+        .unwrap();
+    state.set_withdrawal_finality_height(withdrawal_finality_height);
 
     // Create our coordinator
     let network = network::in_memory::InMemoryNetwork::new();
@@ -6948,7 +7060,7 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
     let requests = coordinator
         .get_pending_requests(
             &bitcoin_chain_tip,
-            &stacks_block.block_hash,
+            &stacks_chain_tip.block_hash,
             &active_signer_set,
         )
         .await
