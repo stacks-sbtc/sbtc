@@ -30,7 +30,7 @@ use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::Transactable;
 use crate::storage::model::ConsensusHash;
-use crate::storage::model::{BitcoinTxId, StacksBlockHash};
+use crate::storage::model::{BitcoinTxId, RegistryKey, StacksBlockHash};
 use crate::{
     bitcoin::{
         BitcoinInteract, MockBitcoinInteract, rpc::BitcoinCoreClientParams, rpc::GetTxResponse,
@@ -249,7 +249,7 @@ pub fn prevent_dkg_on_changed_signer_set_info<Storage, Bitcoin, Stacks, Emily>(
 {
     let config = context.config();
     let signer_set_info = SignerSetInfo {
-        aggregate_key,
+        aggregate_key: aggregate_key.into(),
         signatures_required: config.signer.bootstrap_signatures_required,
         signer_set: config.signer.bootstrap_signing_set.clone(),
     };
@@ -458,7 +458,7 @@ impl StacksInteract for WrappedMockStacksInteract {
     async fn get_current_signers_aggregate_key(
         &self,
         contract_principal: &StacksAddress,
-    ) -> Result<Option<PublicKey>, Error> {
+    ) -> Result<Option<RegistryKey>, Error> {
         self.inner
             .lock()
             .await
@@ -653,8 +653,15 @@ pub struct ContextConfig<Storage, Bitcoin, Stacks, Emily> {
 
 impl Default for ContextConfig<(), (), (), ()> {
     fn default() -> Self {
+        let mut settings =
+            Settings::new_from_default_config().expect("failed to load default config");
+        // Test chains are often past the default testnet activation height,
+        // either because they use random block heights or because the
+        // regtest chain starts high. Tests use v1 unless they opt into v2
+        // by setting an activation height.
+        settings.signer.v2_signing_block_height = Some(u64::MAX.into());
         Self {
-            settings: Settings::new_from_default_config().expect("failed to load default config"),
+            settings,
             storage: (),
             bitcoin: (),
             stacks: (),

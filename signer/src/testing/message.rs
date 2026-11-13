@@ -85,7 +85,6 @@ impl fake::Dummy<fake::Faker> for message::StacksTransactionSignRequest {
             contract_tx: ContractCall::RejectWithdrawalV1(Box::new(reject_withdrawal_v1)).into(),
             tx_fee: 123,
             nonce: 1,
-            aggregate_key: None,
             txid: config.fake_with_rng::<StacksTxId, _>(rng),
         }
     }

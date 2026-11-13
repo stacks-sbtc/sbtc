@@ -9,9 +9,7 @@ import "stacks/signer/v1/common.proto";
 
 // Represents a request to sign a Stacks transaction.
 message StacksTransactionSignRequest {
-  // This is the bitcoin aggregate key that was output from DKG. It is used
-  // to identify the signing set for the transaction.
-  crypto.PublicKey aggregate_key = 1;
+  reserved 1;
   // The nonce to use for the transaction.
   uint64 nonce = 2;
   // The transaction fee in microSTX.
@@ -128,10 +126,13 @@ message RotateKeys {
   // The new set of public keys for all known signers during this
   // PoX cycle.
   repeated crypto.PublicKey new_keys = 1;
-  // The aggregate key created by combining the above public keys.
+  // The v1 aggregate key created by combining the above public keys.
   crypto.PublicKey aggregate_key = 2;
   // The address that deployed the contract.
   stacks.StacksAddress deployer = 3;
   // The number of signatures required for the multi-sig wallet.
   uint32 signatures_required = 4;
+  // The Bitcoin block hash uniquely identifying a v2 rotation. Exactly one
+  // of this field and aggregate_key is populated.
+  bitcoin.BitcoinBlockHash bitcoin_block_hash = 5;
 }

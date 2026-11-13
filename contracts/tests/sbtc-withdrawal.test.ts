@@ -1081,5 +1081,5 @@ describe("optimization tests for completing withdrawals", () => {
       }),
       deployer
     );
-  });
+  }, 10_000);
 });

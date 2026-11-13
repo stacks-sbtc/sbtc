@@ -1089,7 +1089,7 @@ pub mod test {
                     bad_signature_share_request, check_signature_shares, coordinator_state_machine,
                     empty_private_shares, empty_public_shares, feedback_messages,
                     feedback_mutated_messages, gen_nonces, invalid_nonce, new_coordinator,
-                    run_dkg_sign, setup, start_dkg_round,
+                    run_dkg_sign, setup, signature_share_uses_configured_key_ids, start_dkg_round,
                 },
                 Config, Coordinator as CoordinatorTrait, State,
             },
@@ -1706,6 +1706,12 @@ pub mod test {
         let num_signers = 12;
         let keys_per_signer = 1;
         let (mut coordinators, mut signers) = all_signers_dkg(num_signers, keys_per_signer);
+        // The signers that answered the first nonce request are not in the
+        // signing set of the second one, and with the cache they would
+        // reject its signature share request instead of ignoring it.
+        for signer in &mut signers {
+            signer.disable_nonce_response_cache();
+        }
 
         // Start a signing round
         let orig_msg = "It was many and many a year ago, in a kingdom by the sea"
@@ -1855,6 +1861,11 @@ pub mod test {
     #[test]
     fn bad_signature_share_request_v2() {
         bad_signature_share_request::<FireCoordinator>(5, 2);
+    }
+
+    #[test]
+    fn signature_share_uses_configured_key_ids_v2() {
+        signature_share_uses_configured_key_ids::<FireCoordinator>(5, 2);
     }
 
     #[test]

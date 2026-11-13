@@ -74,6 +74,8 @@ mod serial {
             outpoint: OutPoint::new(setup.tx.compute_txid(), 0),
             reclaim_script: setup.reclaims.first().unwrap().reclaim_script(),
             deposit_script: deposit.deposit_script(),
+            recipient: None,
+            max_fee: None,
         };
 
         regtest::p2tr_sign_transaction(&mut setup.tx, 0, &utxos, &depositor.keypair);
@@ -85,7 +87,12 @@ mod serial {
         assert_eq!(parsed.deposit_script, request.deposit_script);
         assert_eq!(parsed.reclaim_script, request.reclaim_script);
         assert_eq!(parsed.amount, amount_sats);
-        assert_eq!(parsed.signers_public_key, deposit.signers_public_key);
+        assert_eq!(
+            parsed.signing_info,
+            sbtc::deposits::DepositSigningInfo::V1 {
+                public_key: deposit.signers_public_key,
+            }
+        );
         assert_eq!(parsed.recipient, deposit.recipient);
 
         let lock_time_height = bitcoin::relative::LockTime::from_height(lock_time as u16);
@@ -489,6 +496,8 @@ mod serial {
             outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
             reclaim_script: reclaim_script.clone(),
             deposit_script: deposit_script.clone(),
+            recipient: None,
+            max_fee: None,
         };
 
         let _ = request.validate_tx(&deposit_tx, false).unwrap();
@@ -689,6 +698,8 @@ mod serial {
             outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
             reclaim_script: reclaim_script.clone(),
             deposit_script: deposit_script.clone(),
+            recipient: None,
+            max_fee: None,
         };
 
         request.validate_tx(&deposit_tx, false).unwrap_err();

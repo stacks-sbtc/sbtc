@@ -60,7 +60,12 @@ impl TestSetup {
     }
 
     pub fn next_signer(&mut self) -> Signer {
-        self.signers.pop_front().expect("no more signers")
+        let mut signer = self.signers.pop_front().expect("no more signers");
+        // These unit tests exercise the verification coordinator directly,
+        // rather than the transaction-signer path that populates the signer's
+        // nonce-response cache.
+        signer.disable_nonce_response_cache();
+        signer
     }
 }
 

@@ -45,7 +45,10 @@ use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockRef;
 use crate::storage::model::EncryptedDkgShares;
+use crate::storage::model::SignerKeySet;
 use crate::storage::model::StacksBlockRef;
+use crate::storage::model::TxPrevout;
+use crate::storage::model::TxPrevoutType;
 use crate::util::FutureExt as _;
 use bitcoin::Amount;
 use bitcoin::BlockHash;
@@ -54,6 +57,9 @@ use futures::stream::StreamExt as _;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
 use std::collections::HashSet;
+
+use crate::WITHDRAWAL_BLOCKS_EXPIRY;
+use crate::WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS;
 
 /// Block observer
 #[derive(Debug)]
@@ -569,17 +575,72 @@ impl<C: Context, B> BlockObserver<C, B> {
         Ok(())
     }
 
+    /// Update the cached exclusive upper bound for final withdrawal-request
+    /// burn-view heights.
+    ///
+    /// If there is no Stacks chain tip or the query fails, this logs the
+    /// error and clears the height. This makes withdrawals ineligible while
+    /// allowing the remaining signer state to be updated. The minimum
+    /// withdrawal height is derived from the Bitcoin tip that the current
+    /// signer state update is processing.
+    async fn set_withdrawal_finality_height(&self, chain_tip: &BitcoinBlockRef) {
+        let state = self.context.state();
+        state.set_withdrawal_finality_height(None);
+
+        let Some(stacks_chain_tip) = state.stacks_chain_tip() else {
+            tracing::error!(
+                error = %Error::NoStacksChainTip,
+                "could not update the withdrawal finality height; disabling withdrawals"
+            );
+            return;
+        };
+
+        let minimum_withdrawal_height = chain_tip
+            .block_height
+            .saturating_sub(WITHDRAWAL_BLOCKS_EXPIRY);
+        let result = self
+            .context
+            .get_storage()
+            .get_withdrawal_finality_height(
+                &stacks_chain_tip.block_hash,
+                WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS,
+                minimum_withdrawal_height,
+            )
+            .await;
+
+        let withdrawal_finality_height = match result {
+            Ok(height) => height,
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    "could not update the withdrawal finality height; disabling withdrawals"
+                );
+                return;
+            }
+        };
+
+        tracing::info!(
+            ?withdrawal_finality_height,
+            "using this withdrawal finality height"
+        );
+        state.set_withdrawal_finality_height(withdrawal_finality_height);
+    }
+
     /// Update the `SignerState` object with data that is unlikely to
     /// change until the arrival of the next bitcoin block.
     ///
     /// # Notes
     ///
     /// The function updates the following:
+    /// * The withdrawal finality height, clearing it if the query fails.
     /// * sBTC limits from Emily.
     /// * The current signer set.
     /// * The current aggregate key.
     /// * The current bitcoin chain tip.
     async fn update_signer_state(&self, chain_tip: BitcoinBlockRef) -> Result<(), Error> {
+        tracing::info!("updating the signer state with the withdrawal finality height");
+        self.set_withdrawal_finality_height(&chain_tip).await;
+
         tracing::info!("loading sbtc limits from Emily");
         self.update_sbtc_limits(chain_tip.block_hash).await?;
 
@@ -659,7 +720,7 @@ where
     // transactions and write them to the database.
     let extract_fut = || async {
         // We store all the scriptPubKeys associated with the signers'
-        // aggregate public key. Let's get the last years worth of them.
+        // aggregate public key.
         let signer_script_pubkeys: HashSet<ScriptBuf> = db
             .get_signers_script_pubkeys()
             .await?
@@ -714,12 +775,19 @@ where
 
             for prevout in tx_info.to_inputs(&signer_script_pubkeys) {
                 db.write_tx_prevout(&prevout).await?;
-                if prevout.prevout_type == model::TxPrevoutType::Deposit {
-                    metrics::counter!(
-                        Metrics::DepositsSweptTotal,
-                        "blockchain" => BITCOIN_BLOCKCHAIN,
-                    )
-                    .increment(1);
+                match prevout.prevout_type {
+                    TxPrevoutType::Deposit => {
+                        metrics::counter!(
+                            Metrics::DepositsSweptTotal,
+                            "blockchain" => BITCOIN_BLOCKCHAIN,
+                        )
+                        .increment(1);
+                    }
+                    TxPrevoutType::SignersInput => {
+                        if let Some(key_set) = signer_key_set_from_signer_input(tx_info, &prevout) {
+                            db.write_signer_key_set(&key_set).await?;
+                        }
+                    }
                 }
             }
 
@@ -750,14 +818,31 @@ where
     extract_fut().await
 }
 
-/// Return the signing set that can make sBTC related contract calls along
-/// with the current aggregate key to use for locking UTXOs on bitcoin.
+/// Recover a v2 signer key set from a known signer input's witness.
 ///
-/// The aggregate key fetched here is the one confirmed on the canonical
-/// Stacks blockchain as part of a `rotate-keys` contract call. It will be
-/// the public key that is the result of a DKG run. If there are no
-/// rotate-keys transactions on the canonical stacks blockchain, then we
-/// return None.
+/// The signers' input is always the first input in a signer-created sweep.
+/// The reconstructed single-leaf scriptPubKey must match the classified
+/// prevout before the key set is returned.
+fn signer_key_set_from_signer_input(
+    tx_info: &BitcoinTxInfo,
+    prevout: &TxPrevout,
+) -> Option<SignerKeySet> {
+    if prevout.prevout_type != TxPrevoutType::SignersInput {
+        return None;
+    }
+    let script = tx_info.tx.input.first()?.witness.tapscript()?;
+    let key_set = sbtc::SignerKeySet::parse(script).ok()?;
+    let script_pubkey = key_set.script_pubkey();
+    (model::ScriptPubKey::from(script_pubkey) == prevout.script_pubkey).then_some(key_set.into())
+}
+
+/// Return the signing set that can make sBTC-related contract calls along
+/// with the registry's current versioned key field.
+///
+/// Before v2 activation this field is the aggregate public key from DKG. A
+/// v2 rotation stores an opaque Bitcoin block hash instead. If there are no
+/// rotate-keys transactions on the canonical Stacks blockchain, this returns
+/// `None`.
 #[tracing::instrument(skip_all)]
 pub async fn get_signer_set_info<C>(ctx: &C) -> Result<Option<SignerSetInfo>, Error>
 where
@@ -806,10 +891,20 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use bitcoin::Amount;
     use bitcoin::BlockHash;
+    use bitcoin::OutPoint;
+    use bitcoin::Sequence;
+    use bitcoin::Transaction;
+    use bitcoin::TxIn;
     use bitcoin::TxOut;
+    use bitcoin::Witness;
+    use bitcoin::absolute;
     use bitcoin::hashes::Hash as _;
+    use bitcoin::taproot::LeafVersion;
+    use bitcoin::transaction;
     use fake::Dummy as _;
     use fake::Fake as _;
     use model::BitcoinTxId;
@@ -820,12 +915,194 @@ mod tests {
     use crate::keys::PublicKey;
     use crate::storage;
     use crate::storage::model::BitcoinBlockHash;
+    use crate::storage::model::BitcoinBlockHeight;
     use crate::storage::model::DkgSharesStatus;
     use crate::testing::block_observer::TestHarness;
     use crate::testing::context::*;
     use crate::testing::get_rng;
 
     use super::*;
+
+    /// Check that a missing Stacks chain tip clears the previous withdrawal
+    /// finality height.
+    #[tokio::test]
+    async fn finality_update_without_stacks_tip_clears_previous_height() {
+        let ctx = TestContext::default_mocked();
+        let previous_height = BitcoinBlockHeight::from(42u64);
+        ctx.state()
+            .set_withdrawal_finality_height(Some(previous_height));
+        assert_eq!(
+            ctx.state().withdrawal_finality_height(),
+            Some(previous_height)
+        );
+
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_block_source: (),
+        };
+
+        let bitcoin_chain_tip: BitcoinBlockRef = model::BitcoinBlock::new_genesis().into();
+        block_observer
+            .set_withdrawal_finality_height(&bitcoin_chain_tip)
+            .await;
+
+        assert!(ctx.state().withdrawal_finality_height().is_none());
+    }
+
+    /// Check that a successful finality query replaces the cached height.
+    #[tokio::test]
+    async fn finality_update_stores_query_result() {
+        let storage = storage::memory::Store::new_shared();
+        let bitcoin_0 = model::BitcoinBlock::new_genesis();
+        storage.write_bitcoin_block(&bitcoin_0).await.unwrap();
+
+        let mut bitcoin_parent = bitcoin_0;
+        for _ in 1..=25 {
+            let block = bitcoin_parent.new_child();
+            storage.write_bitcoin_block(&block).await.unwrap();
+            bitcoin_parent = block;
+        }
+        let bitcoin_25 = bitcoin_parent;
+        let bitcoin_26 = bitcoin_25.new_child();
+        storage.write_bitcoin_block(&bitcoin_26).await.unwrap();
+
+        bitcoin_parent = bitcoin_26.clone();
+        for _ in 27..=30 {
+            let block = bitcoin_parent.new_child();
+            storage.write_bitcoin_block(&block).await.unwrap();
+            bitcoin_parent = block;
+        }
+        storage
+            .set_canonical_bitcoin_blockchain(&bitcoin_parent.block_hash)
+            .await
+            .unwrap();
+
+        let parent_tenure = model::StacksBlock::new_genesis().anchored_to(&bitcoin_25);
+        let checkpoint_start = parent_tenure.new_child().anchored_to(&bitcoin_26);
+        let checkpoint_second = checkpoint_start.new_child();
+        let checkpoint_third = checkpoint_second.new_child();
+        for block in [
+            &parent_tenure,
+            &checkpoint_start,
+            &checkpoint_second,
+            &checkpoint_third,
+        ] {
+            storage.write_stacks_block(block).await.unwrap();
+        }
+
+        let ctx = TestContext::builder()
+            .with_storage(storage)
+            .with_mocked_clients()
+            .build();
+        ctx.state()
+            .set_stacks_chain_tip(checkpoint_third.clone().into());
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_block_source: (),
+        };
+
+        let bitcoin_chain_tip: BitcoinBlockRef = bitcoin_parent.into();
+        block_observer
+            .set_withdrawal_finality_height(&bitcoin_chain_tip)
+            .await;
+
+        assert_eq!(
+            ctx.state().withdrawal_finality_height(),
+            Some(bitcoin_25.block_height)
+        );
+    }
+
+    /// Check that a storage error clears the previous finality height.
+    #[tokio::test]
+    async fn finality_update_storage_error_clears_previous_height() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://postgres:postgres@localhost/postgres")
+            .unwrap();
+        pool.close().await;
+        let storage = storage::postgres::PgStore::from(pool);
+        let ctx = TestContext::builder()
+            .with_storage(storage)
+            .with_mocked_clients()
+            .build();
+        let stacks_chain_tip: StacksBlockRef = fake::Faker.fake();
+        ctx.state().set_stacks_chain_tip(stacks_chain_tip);
+        ctx.state()
+            .set_withdrawal_finality_height(Some(BitcoinBlockHeight::from(42u64)));
+        let block_observer = BlockObserver {
+            context: ctx.clone(),
+            bitcoin_block_source: (),
+        };
+
+        let bitcoin_chain_tip: BitcoinBlockRef = fake::Faker.fake();
+        block_observer
+            .set_withdrawal_finality_height(&bitcoin_chain_tip)
+            .await;
+
+        assert!(ctx.state().withdrawal_finality_height().is_none());
+    }
+
+    #[test]
+    fn recovers_v2_key_set_only_from_a_known_signer_input() {
+        let mut rng = get_rng();
+        let public_keys = (0..3)
+            .map(|_| {
+                secp256k1::SECP256K1
+                    .generate_keypair(&mut rng)
+                    .1
+                    .x_only_public_key()
+                    .0
+            })
+            .collect::<BTreeSet<_>>();
+        let key_set = sbtc::SignerKeySet::new(public_keys, 2).unwrap();
+        let signing_script = key_set.signing_script();
+        let control_block = key_set
+            .taproot()
+            .control_block(&(signing_script.clone(), LeafVersion::TapScript))
+            .unwrap();
+        let witness = Witness::from_slice(&[signing_script.to_bytes(), control_block.serialize()]);
+        let tx_info = BitcoinTxInfo {
+            fee: None,
+            tx: Transaction {
+                version: transaction::Version::TWO,
+                lock_time: absolute::LockTime::ZERO,
+                input: vec![TxIn {
+                    previous_output: OutPoint::null(),
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence::MAX,
+                    witness,
+                }],
+                output: Vec::new(),
+            },
+            vin: vec![crate::bitcoin::rpc::BitcoinTxVin {
+                txid: Some(bitcoin::Txid::all_zeros()),
+                vout: Some(u32::MAX),
+                prevout: Some(crate::bitcoin::rpc::BitcoinTxVinPrevout {
+                    value: Amount::from_sat(1_000),
+                    script_pubkey: crate::bitcoin::rpc::OutputScriptPubKey {
+                        script: key_set.script_pubkey(),
+                    },
+                }),
+            }],
+        };
+
+        let signer_input = tx_info
+            .to_inputs(&HashSet::from([key_set.script_pubkey()]))
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            signer_key_set_from_signer_input(&tx_info, &signer_input),
+            Some(key_set.into())
+        );
+
+        let mut deposit_input = signer_input.clone();
+        deposit_input.prevout_type = TxPrevoutType::Deposit;
+        assert!(signer_key_set_from_signer_input(&tx_info, &deposit_input).is_none());
+
+        let mut mismatched_input = signer_input;
+        mismatched_input.script_pubkey = ScriptBuf::new().into();
+        assert!(signer_key_set_from_signer_input(&tx_info, &mismatched_input).is_none());
+    }
 
     #[test_log::test(tokio::test)]
     async fn should_be_able_to_extract_bitcoin_blocks_given_a_block_header_stream() {
@@ -924,6 +1201,8 @@ mod tests {
             },
             deposit_script: tx_setup0.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup0.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
         let req0 = deposit_request0.clone();
         // When we validate the deposit request, we fetch the transaction
@@ -945,6 +1224,8 @@ mod tests {
             },
             deposit_script: bitcoin::ScriptBuf::new(),
             reclaim_script: tx_setup1.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
         // The transaction is also in the mempool, even though it is an
         // invalid deposit.
@@ -972,6 +1253,8 @@ mod tests {
             },
             deposit_script: tx_setup2.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup2.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
 
         // This deposit transaction is a fine deposit, it just hasn't been
@@ -992,6 +1275,8 @@ mod tests {
             },
             deposit_script: tx_setup3.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup3.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
         let req3 = deposit_request3.clone();
 
@@ -1087,6 +1372,8 @@ mod tests {
             },
             deposit_script: tx_setup0.deposits.first().unwrap().deposit_script(),
             reclaim_script: tx_setup0.reclaims.first().unwrap().reclaim_script(),
+            recipient: None,
+            max_fee: None,
         };
         // When we validate the deposit request, we fetch the transaction
         // from bitcoin-core's blockchain. The stubs out that
