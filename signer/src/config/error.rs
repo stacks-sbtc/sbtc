@@ -22,6 +22,12 @@ pub enum SignerConfigError {
     #[error("The connected Stacks network must match the network kind of the deployer address")]
     NetworkDeployerMismatch,
 
+    /// A Stacks mainnet node only runs on Bitcoin mainnet, so seeing any
+    /// other Bitcoin network means the signer is connected to the wrong
+    /// Bitcoin node.
+    #[error("The connected Stacks node is on mainnet but the connected Bitcoin node is on {0}")]
+    StacksMainnetRequiresBitcoinMainnet(bitcoin::Network),
+
     /// Invalid P2P URI
     #[error("Invalid P2P URI: Only schemes 'tcp' and 'quic-v1' are supported; got '{0}'")]
     InvalidP2PScheme(String),

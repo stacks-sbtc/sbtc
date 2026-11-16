@@ -45,6 +45,10 @@ use tracing::Span;
 // TODO: make this interval a config parameter.
 const SIGNER_INFO_LOGGER_INTERVAL: Duration = Duration::from_secs(3600);
 
+/// How long to wait before retrying network discovery when a node could
+/// not be reached.
+const NODE_NETWORK_RETRY_DELAY: Duration = Duration::from_secs(20);
+
 /// The window of time in which we consider a peer to be known and valid for
 /// inclusion in bootstrapping.
 const KNOWN_PEER_WINDOW: Duration = Duration::from_secs(60 * 60 * 24 * 30); // 30 days
@@ -136,7 +140,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ApiFallbackClient<StacksClient>,
         ApiFallbackClient<EmilyClient>,
     >::init(settings, db)
-    .await
     .inspect_err(|error| {
         tracing::error!(%error, "failed to initialize the signer context");
     })?;
@@ -165,6 +168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         run_shutdown_signal_watcher(context.clone()),
         // The rest of our services which run concurrently, and must all be
         // running for the signer to be operational.
+        run_checked(run_node_network_check, &context),
         run_checked(run_api, &context),
         run_checked(run_libp2p_swarm, &context),
         run_checked(run_block_observer, &context),
@@ -254,6 +258,41 @@ async fn run_shutdown_signal_watcher(ctx: impl Context) -> Result<(), Error> {
     term.signal_shutdown();
 
     Ok(())
+}
+
+/// Discover and validate the network of the connected nodes.
+///
+/// Discovery also happens on first use, but running it at startup means a
+/// misconfigured signer shuts down promptly. A validation failure, or
+/// connected nodes that disagree with each other, is fatal. Errors
+/// reaching the nodes are retried without limit, since the signer keeps
+/// running through node outages everywhere else too.
+async fn run_node_network_check(ctx: impl Context) -> Result<(), Error> {
+    let mut term = ctx.get_termination_handle();
+    loop {
+        match ctx.node_network().await {
+            Ok(network) => {
+                tracing::info!(?network, "validated the network of the connected nodes");
+                return Ok(());
+            }
+            Err(
+                error @ (Error::SignerConfig(_)
+                | Error::BitcoinNodeNetworkMismatch(_)
+                | Error::StacksNodeChainIdMismatch(_)),
+            ) => return Err(error),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "could not discover the network of the connected nodes; retrying"
+                );
+            }
+        }
+
+        tokio::select! {
+            _ = term.wait_for_shutdown() => return Ok(()),
+            _ = tokio::time::sleep(NODE_NETWORK_RETRY_DELAY) => {}
+        }
+    }
 }
 
 /// Runs the libp2p swarm.

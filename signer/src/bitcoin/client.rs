@@ -19,7 +19,9 @@ use bitcoin::OutPoint;
 use bitcoin::Txid;
 use bitcoincore_rpc_json::GetTxOutResult;
 
-use crate::{error::Error, util::ApiFallbackClient};
+use crate::error::Error;
+use crate::util::ApiFallbackClient;
+use crate::util::single_value;
 
 use super::BitcoinInteract;
 use super::rpc::BitcoinBlockHeader;
@@ -135,6 +137,14 @@ impl BitcoinInteract for ApiFallbackClient<BitcoinCoreClient> {
     ) -> Result<bitcoincore_rpc_json::GetBlockchainInfoResult, Error> {
         self.exec(|client, _| async { client.get_blockchain_info() })
             .await
+    }
+
+    async fn get_network(&self) -> Result<bitcoin::Network, Error> {
+        let networks = self
+            .exec_all(|client| async { client.get_blockchain_info().map(|info| info.chain) })
+            .await?;
+
+        single_value(&networks).ok_or_else(|| Error::BitcoinNodeNetworkMismatch(networks))
     }
 
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {

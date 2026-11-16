@@ -105,11 +105,11 @@ where
             bitcoin_client.clone(),
             stacks_client.clone(),
             emily_client.clone(),
-            Some(NodeNetwork {
-                stacks_chain_id: StacksChainId::TESTNET,
-                bitcoin_network: bitcoin::Network::Regtest,
-            }),
-        );
+        )
+        .with_node_network(Some(NodeNetwork {
+            stacks_chain_id: StacksChainId::TESTNET,
+            bitcoin_network: bitcoin::Network::Regtest,
+        }));
 
         Self {
             inner: context,
@@ -434,6 +434,10 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
         self.inner.lock().await.get_blockchain_info().await
     }
 
+    async fn get_network(&self) -> Result<bitcoin::Network, Error> {
+        self.inner.lock().await.get_network().await
+    }
+
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         self.inner.lock().await.get_network_info().await
     }
@@ -550,6 +554,10 @@ impl StacksInteract for WrappedMockStacksInteract {
 
     async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.inner.lock().await.get_node_info().await
+    }
+
+    async fn get_chain_id(&self) -> Result<StacksChainId, Error> {
+        self.inner.lock().await.get_chain_id().await
     }
 
     async fn get_contract_source(

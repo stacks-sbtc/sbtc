@@ -1,7 +1,5 @@
 FROM rust:1.98.1-slim-trixie AS builder
 
-ARG GIT_COMMIT
-
 # Install dependencies.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
@@ -17,6 +15,7 @@ WORKDIR /code/sbtc
 COPY . /code/sbtc/
 
 ARG GIT_COMMIT
+
 # Build signer and blocklist client.
 # -------------------------------------
 RUN cargo build --locked --bin signer --bin blocklist-client

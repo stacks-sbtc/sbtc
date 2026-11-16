@@ -768,11 +768,11 @@ mod tests {
             base.bitcoin_client,
             base.stacks_client,
             base.emily_client,
-            Some(NodeNetwork {
-                stacks_chain_id: chain_id,
-                bitcoin_network: bitcoin::Network::Regtest,
-            }),
-        );
+        )
+        .with_node_network(Some(NodeNetwork {
+            stacks_chain_id: chain_id,
+            bitcoin_network: bitcoin::Network::Regtest,
+        }));
 
         let wallet = SignerWallet::load(&context).await.unwrap();
         let tx = MultisigTx::new_contract_call(TestContractCall::default(), &wallet, TX_FEE);

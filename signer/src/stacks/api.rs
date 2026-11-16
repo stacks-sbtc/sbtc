@@ -57,6 +57,7 @@ use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
 use crate::util::ApiFallbackClient;
+use crate::util::single_value;
 
 use super::contracts::AsTxPayload;
 use super::contracts::SmartContract;
@@ -299,6 +300,12 @@ pub trait StacksInteract: Send + Sync {
 
     /// Get information about the current node.
     fn get_node_info(&self) -> impl Future<Output = Result<GetNodeInfoResponse, Error>> + Send;
+
+    /// Get the chain ID of the connected Stacks node.
+    ///
+    /// Clients that connect to several nodes return an error if the nodes
+    /// report different chain IDs.
+    fn get_chain_id(&self) -> impl Future<Output = Result<StacksChainId, Error>> + Send;
 
     /// Get the source of a deployed smart contract.
     ///
@@ -582,6 +589,12 @@ impl StacksChainId {
 impl From<StacksChainId> for u32 {
     fn from(chain_id: StacksChainId) -> Self {
         chain_id.as_u32()
+    }
+}
+
+impl std::fmt::Display for StacksChainId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_u32())
     }
 }
 
@@ -1637,6 +1650,10 @@ impl StacksInteract for StacksClient {
         self.get_node_info().await
     }
 
+    async fn get_chain_id(&self) -> Result<StacksChainId, Error> {
+        self.get_node_info().await.map(|info| info.network_id)
+    }
+
     /// Get the source of a deployed smart contract.
     ///
     /// # Notes
@@ -1788,6 +1805,14 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
 
     async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.exec(|client, _| client.get_node_info()).await
+    }
+
+    async fn get_chain_id(&self) -> Result<StacksChainId, Error> {
+        let chain_ids = self
+            .exec_all(|client| async { client.get_node_info().await.map(|info| info.network_id) })
+            .await?;
+
+        single_value(&chain_ids).ok_or_else(|| Error::StacksNodeChainIdMismatch(chain_ids))
     }
 
     async fn get_contract_source(
@@ -2678,6 +2703,56 @@ mod tests {
             serde_json::to_value(info).unwrap()["network_id"],
             serde_json::json!(chain_id.as_u32())
         );
+    }
+
+    /// The fallback client checks every Stacks node, skipping the ones
+    /// that cannot be reached, and errors if the others disagree.
+    #[test_case(StacksChainId::TESTNET, Some(StacksChainId::TESTNET); "nodes agree")]
+    #[test_case(StacksChainId::MAINNET, None; "nodes disagree")]
+    #[tokio::test]
+    async fn fallback_client_chain_id_checks_every_node(
+        last_chain_id: StacksChainId,
+        expected: Option<StacksChainId>,
+    ) {
+        let mut json: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/stacksapi-get-node-info-test-data.json"
+        ))
+        .unwrap();
+
+        let mut servers = Vec::new();
+        let mut mocks = Vec::new();
+        for chain_id in [Some(StacksChainId::TESTNET), None, Some(last_chain_id)] {
+            let mut server = mockito::Server::new_async().await;
+            let mock = match chain_id {
+                Some(chain_id) => {
+                    json["network_id"] = serde_json::json!(chain_id.as_u32());
+                    server
+                        .mock("GET", "/v2/info")
+                        .with_status(200)
+                        .with_header("content-type", "application/json")
+                        .with_body(json.to_string())
+                }
+                None => server.mock("GET", "/v2/info").with_status(500),
+            };
+            mocks.push(mock.expect(1).create_async().await);
+            servers.push(server);
+        }
+
+        let clients = servers
+            .iter()
+            .map(|server| StacksClient::new(url::Url::parse(&server.url()).unwrap()).unwrap())
+            .collect();
+        let client = ApiFallbackClient::new(clients).unwrap();
+
+        let result = client.get_chain_id().await;
+        match expected {
+            Some(chain_id) => assert_eq!(result.unwrap(), chain_id),
+            None => std::assert_matches!(result, Err(Error::StacksNodeChainIdMismatch(_))),
+        }
+
+        for mock in mocks {
+            mock.assert_async().await;
+        }
     }
 
     #[tokio::test]

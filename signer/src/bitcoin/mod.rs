@@ -152,6 +152,9 @@ pub trait BitcoinInteract: Sync + Send {
         &self,
     ) -> impl Future<Output = Result<bitcoincore_rpc_json::GetBlockchainInfoResult, Error>> + Send;
 
+    /// Gets the network of the connected Bitcoin node.
+    fn get_network(&self) -> impl Future<Output = Result<bitcoin::Network, Error>> + Send;
+
     /// Gets information about the network from the Bitcoin node.
     fn get_network_info(
         &self,

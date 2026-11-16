@@ -611,14 +611,22 @@ impl Settings {
     /// Validate settings that depend on the network reported by the nodes.
     /// Called when the node network identity is first discovered.
     pub fn validate_network(&self, network: &NodeNetwork) -> Result<(), ConfigError> {
+        // A test Stacks network on Bitcoin mainnet is allowed for
+        // testing, but Stacks mainnet never runs on another Bitcoin
+        // network.
+        if network.is_stacks_mainnet() && !network.is_bitcoin_mainnet() {
+            let err =
+                SignerConfigError::StacksMainnetRequiresBitcoinMainnet(network.bitcoin_network);
+            return Err(ConfigError::Message(err.to_string()));
+        }
+
         if self.signer.deployer.is_mainnet() != network.is_stacks_mainnet() {
             return Err(ConfigError::Message(
                 SignerConfigError::NetworkDeployerMismatch.to_string(),
             ));
         }
 
-        let is_bitcoin_mainnet = network.bitcoin_network == bitcoin::Network::Bitcoin;
-        if is_bitcoin_mainnet && self.signer.p2p.seeds.is_empty() {
+        if network.is_bitcoin_mainnet() && self.signer.p2p.seeds.is_empty() {
             return Err(ConfigError::Message(
                 SignerConfigError::P2PSeedPeerRequired.to_string(),
             ));
@@ -1701,15 +1709,25 @@ mod tests {
 
     #[test_case::test_case(bitcoin::Network::Bitcoin, false; "mainnet requires seeds")]
     #[test_case::test_case(bitcoin::Network::Testnet, true; "testnet permits no seeds")]
+    #[test_case::test_case(bitcoin::Network::Testnet4, true; "testnet4 permits no seeds")]
     #[test_case::test_case(bitcoin::Network::Signet, true; "signet permits no seeds")]
     #[test_case::test_case(bitcoin::Network::Regtest, true; "regtest permits no seeds")]
     fn discovered_network_seed_requirement(bitcoin_network: bitcoin::Network, valid: bool) {
         clear_env();
+        let is_mainnet = bitcoin_network == bitcoin::Network::Bitcoin;
+        set_var(
+            "SIGNER_SIGNER__DEPLOYER",
+            StacksAddress::burn_address(is_mainnet).to_string(),
+        );
         let settings = Settings::new_from_default_config().unwrap();
         assert!(settings.signer.p2p.seeds.is_empty());
 
         let network = crate::context::NodeNetwork {
-            stacks_chain_id: StacksChainId::TESTNET,
+            stacks_chain_id: if is_mainnet {
+                StacksChainId::MAINNET
+            } else {
+                StacksChainId::TESTNET
+            },
             bitcoin_network,
         };
         let result = settings.validate_network(&network);
@@ -1732,18 +1750,57 @@ mod tests {
         );
         set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
         let settings = Settings::new_from_default_config().unwrap();
-        let network = crate::context::NodeNetwork {
-            stacks_chain_id: if node_mainnet {
-                StacksChainId::MAINNET
-            } else {
-                StacksChainId::TESTNET
-            },
-            bitcoin_network: bitcoin::Network::Regtest,
+        let network = if node_mainnet {
+            crate::context::NodeNetwork {
+                stacks_chain_id: StacksChainId::MAINNET,
+                bitcoin_network: bitcoin::Network::Bitcoin,
+            }
+        } else {
+            crate::context::NodeNetwork {
+                stacks_chain_id: StacksChainId::TESTNET,
+                bitcoin_network: bitcoin::Network::Regtest,
+            }
         };
-        assert_eq!(
-            settings.validate_network(&network).is_ok(),
-            node_mainnet == deployer_mainnet
+
+        let result = settings.validate_network(&network);
+        if node_mainnet == deployer_mainnet {
+            result.expect("the deployer matches the node network");
+        } else {
+            std::assert_matches!(result, Err(ConfigError::Message(message)) if message == SignerConfigError::NetworkDeployerMismatch.to_string());
+        }
+    }
+
+    #[test_case::test_case(StacksChainId::MAINNET, bitcoin::Network::Bitcoin, true; "mainnet on mainnet")]
+    #[test_case::test_case(StacksChainId::TESTNET, bitcoin::Network::Regtest, true; "testnet on regtest")]
+    #[test_case::test_case(StacksChainId::TESTNET, bitcoin::Network::Testnet4, true; "testnet on testnet4")]
+    #[test_case::test_case(StacksChainId::new(0x8000_1234), bitcoin::Network::Regtest, true; "custom chain on regtest")]
+    #[test_case::test_case(StacksChainId::MAINNET, bitcoin::Network::Regtest, false; "mainnet on regtest")]
+    #[test_case::test_case(StacksChainId::MAINNET, bitcoin::Network::Testnet4, false; "mainnet on testnet4")]
+    #[test_case::test_case(StacksChainId::TESTNET, bitcoin::Network::Bitcoin, true; "testnet on mainnet")]
+    fn stacks_mainnet_requires_bitcoin_mainnet(
+        stacks_chain_id: StacksChainId,
+        bitcoin_network: bitcoin::Network,
+        valid: bool,
+    ) {
+        clear_env();
+        set_var(
+            "SIGNER_SIGNER__DEPLOYER",
+            StacksAddress::burn_address(stacks_chain_id.is_mainnet()).to_string(),
         );
+        set_var("SIGNER_SIGNER__P2P__SEEDS", "tcp://localhost:4122");
+        let settings = Settings::new_from_default_config().unwrap();
+        let network = crate::context::NodeNetwork {
+            stacks_chain_id,
+            bitcoin_network,
+        };
+
+        let result = settings.validate_network(&network);
+        if valid {
+            result.expect("the Stacks network may run on this Bitcoin network");
+        } else {
+            let expected = SignerConfigError::StacksMainnetRequiresBitcoinMainnet(bitcoin_network);
+            std::assert_matches!(result, Err(ConfigError::Message(message)) if message == expected.to_string());
+        }
     }
 
     #[test]
