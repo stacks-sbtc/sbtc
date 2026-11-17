@@ -850,11 +850,6 @@ impl TxRequestCounts {
     }
 }
 
-/// The max fee of a request that passes validation, in sats.
-const VALID_MAX_FEE: u64 = 10_000;
-/// The max fee of a request that fails validation, in sats.
-const INVALID_MAX_FEE: u64 = 10;
-
 /// Check that a signer only writes pre-sign rows for the transactions in
 /// the package that come before the first one that fails validation.
 ///
@@ -863,7 +858,8 @@ const INVALID_MAX_FEE: u64 = 10;
 /// when its max fee is less than the fee it is assessed in its
 /// transaction, and a single invalid request makes its transaction
 /// invalid. At the 2 sats per vbyte used here, each request is assessed
-/// well over [`INVALID_MAX_FEE`] and well under [`VALID_MAX_FEE`].
+/// well over 10 sats and well under 10,000 sats, so we use those as the
+/// max fees of invalid and valid requests.
 ///
 /// We check both the sighash rows and the withdrawal output rows. The
 /// withdrawal output rows feed the checks for whether a withdrawal may be
@@ -893,7 +889,13 @@ const INVALID_MAX_FEE: u64 = 10;
 ] ; "last-transaction-invalid-deposit")]
 #[tokio::test]
 async fn presign_rows_only_written_for_valid_transactions(request_counts: Vec<TxRequestCounts>) {
-    // These are the transactions that we expect rows for.
+    /// The max fee of a request that passes validation, in sats.
+    const VALID_MAX_FEE: u64 = 10_000;
+    /// The max fee of a request that fails validation, in sats.
+    const INVALID_MAX_FEE: u64 = 10;
+
+    // The number of transactions at the start of the package that we
+    // expect rows for.
     let expected_valid_txs = request_counts.iter().take_while(|tx| tx.is_valid()).count();
     let db = testing::storage::new_test_database().await;
 
@@ -921,26 +923,30 @@ async fn presign_rows_only_written_for_valid_transactions(request_counts: Vec<Tx
     // The setup keeps deposits in the order that we give them, so we list
     // them in package order, with each transaction's valid deposits before
     // its invalid ones.
-    let deposit_max_fees = request_counts.iter().flat_map(|tx| {
-        let valid = std::iter::repeat_n(VALID_MAX_FEE, tx.valid_deposits);
-        let invalid = std::iter::repeat_n(INVALID_MAX_FEE, tx.invalid_deposits);
-        valid.chain(invalid)
-    });
-    let deposits = deposit_max_fees.map(|max_fee| SweepAmounts {
-        amount: 100_000,
-        max_fee,
-        is_deposit: true,
-    });
-    let withdrawal_max_fees = request_counts.iter().flat_map(|tx| {
-        let valid = std::iter::repeat_n(VALID_MAX_FEE, tx.valid_withdrawals);
-        let invalid = std::iter::repeat_n(INVALID_MAX_FEE, tx.invalid_withdrawals);
-        valid.chain(invalid)
-    });
-    let withdrawals = withdrawal_max_fees.map(|max_fee| SweepAmounts {
-        amount: 30_000,
-        max_fee,
-        is_deposit: false,
-    });
+    let deposits = request_counts
+        .iter()
+        .flat_map(|tx| {
+            let valid = std::iter::repeat_n(VALID_MAX_FEE, tx.valid_deposits);
+            let invalid = std::iter::repeat_n(INVALID_MAX_FEE, tx.invalid_deposits);
+            valid.chain(invalid)
+        })
+        .map(|max_fee| SweepAmounts {
+            amount: 100_000,
+            max_fee,
+            is_deposit: true,
+        });
+    let withdrawals = request_counts
+        .iter()
+        .flat_map(|tx| {
+            let valid = std::iter::repeat_n(VALID_MAX_FEE, tx.valid_withdrawals);
+            let invalid = std::iter::repeat_n(INVALID_MAX_FEE, tx.invalid_withdrawals);
+            valid.chain(invalid)
+        })
+        .map(|max_fee| SweepAmounts {
+            amount: 30_000,
+            max_fee,
+            is_deposit: false,
+        });
     let sweep_amounts: Vec<SweepAmounts> = deposits.chain(withdrawals).collect();
     let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &sweep_amounts);
 
@@ -1138,11 +1144,11 @@ async fn presign_rows_only_written_for_valid_transactions(request_counts: Vec<Tx
         .map(|id| (id.request_id, id.block_hash))
         .collect();
 
-    // Each recorded transaction has one withdrawal output row for each of
-    // its withdrawals, after the signers' output and the OP_RETURN
-    // output, and it belongs to one of the transactions that we recorded
-    // sighashes for. No row exists for the first invalid transaction or
-    // for any transaction after it.
+    // There is one withdrawal output row for each withdrawal in a
+    // recorded transaction. Each row is for an output after the signers'
+    // output and the OP_RETURN output, and for a transaction that we
+    // recorded sighashes for. No row exists for the first invalid
+    // transaction or for any transaction after it.
     assert_eq!(withdrawal_rows.len(), expected_withdrawals.len());
     assert!(withdrawal_rows.iter().all(|row| row.is_valid_tx));
     assert!(withdrawal_rows.iter().all(|row| row.output_index >= 2));
