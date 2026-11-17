@@ -504,7 +504,8 @@ where
     /// based on the current state of its UTXO and fee details obtained
     /// from the coordinator.
     /// It validates the transactions and records its intent to sign them
-    /// in the database.
+    /// in the database. Nothing is recorded for a transaction that fails
+    /// validation, or for any transaction after it in the package.
     #[tracing::instrument(skip_all)]
     pub async fn handle_bitcoin_pre_sign_request(
         &mut self,
@@ -525,10 +526,50 @@ where
             .construct_package_sighashes(&self.context, &btc_ctx)
             .await?;
 
-        let deposits_sighashes: Vec<model::BitcoinTxSigHash> =
-            sighashes.iter().flat_map(|s| s.to_input_rows()).collect();
+        // We only write rows for transactions that we will sign. The rows
+        // tell us which requests a transaction services, and we use them
+        // when deciding whether a withdrawal may be rejected, so a
+        // coordinator should not be able to add rows by proposing invalid
+        // transactions. See https://github.com/stacks-sbtc/sbtc/issues/1427.
+        //
+        // Each transaction in the package spends the signers' UTXO created
+        // by the transaction before it, so a transaction cannot confirm
+        // unless all of the transactions before it do. We stop at the first
+        // invalid transaction.
+        let valid_tx_count = sighashes.iter().take_while(|s| s.is_valid_tx()).count();
+        let (valid_txs, invalid_txs) = sighashes.split_at(valid_tx_count);
 
-        let withdrawals_outputs: Vec<model::BitcoinWithdrawalOutput> = sighashes
+        if let Some(invalid_tx) = invalid_txs.first() {
+            let inputs: Vec<_> = invalid_tx
+                .to_input_rows()
+                .into_iter()
+                .map(|row| {
+                    (
+                        bitcoin::OutPoint::new(row.prevout_txid.into(), row.prevout_output_index),
+                        row.validation_result,
+                    )
+                })
+                .collect();
+            let withdrawals: Vec<_> = invalid_tx
+                .to_withdrawal_rows()
+                .into_iter()
+                .map(|row| (row.request_id, row.validation_result))
+                .collect();
+
+            tracing::warn!(
+                txid = %invalid_tx.tx.compute_txid(),
+                package_size = sighashes.len(),
+                %valid_tx_count,
+                ?inputs,
+                ?withdrawals,
+                "pre-sign transaction failed validation; skipping it and the following transactions"
+            );
+        }
+
+        let deposits_sighashes: Vec<model::BitcoinTxSigHash> =
+            valid_txs.iter().flat_map(|s| s.to_input_rows()).collect();
+
+        let withdrawals_outputs: Vec<model::BitcoinWithdrawalOutput> = valid_txs
             .iter()
             .flat_map(|s| s.to_withdrawal_rows())
             .collect();

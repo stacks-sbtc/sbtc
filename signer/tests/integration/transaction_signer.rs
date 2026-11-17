@@ -1,6 +1,8 @@
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
+use bitcoin::OutPoint;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::RpcApi as _;
 use fake::Fake as _;
@@ -822,6 +824,205 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         .await;
 
     assert!(result.is_ok());
+
+    testing::storage::drop_db(db).await;
+}
+
+/// Check that a signer only writes pre-sign rows for the transactions in
+/// the package that come before the first one that fails validation.
+///
+/// Each case is a package of two transactions that each sweep one
+/// deposit. The deposit amounts are given in package order, and any
+/// deposit above the per-deposit cap makes its transaction invalid. Later
+/// transactions spend the signers' UTXO created by earlier ones, so a
+/// valid transaction after an invalid one must not be recorded either.
+#[test_case([100_000, 120_000], 2 ; "all-transactions-valid")]
+#[test_case([100_000, 200_000], 1 ; "second-transaction-invalid")]
+#[test_case([200_000, 100_000], 0 ; "first-transaction-invalid")]
+#[tokio::test]
+async fn presign_rows_only_written_for_valid_transactions(
+    deposit_amounts: [u64; 2],
+    expected_valid_txs: usize,
+) {
+    let db = testing::storage::new_test_database().await;
+
+    let mut rng = get_rng();
+    let per_deposit_cap = 150_000;
+
+    // The signer reads its public key from the config when validating
+    // pre-sign requests, and the deposit votes are stored under the test
+    // signer set's key, so the two need to match.
+    let signers = TestSignerSet::new(&mut rng);
+    let signer_private_key = signers.private_key();
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+            settings.signer.private_key = signer_private_key;
+        })
+        .build();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    let amounts = deposit_amounts.map(|amount| SweepAmounts {
+        amount,
+        max_fee: 10_000,
+        is_deposit: true,
+    });
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &amounts);
+
+    let block_header = rpc
+        .get_block_header_info(&setup.deposit_block_hash)
+        .unwrap();
+    let chain_tip = BitcoinBlockRef {
+        block_hash: block_header.hash.into(),
+        block_height: block_header.height.into(),
+    };
+
+    let aggregate_key = setup.signers.aggregate_key();
+
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_rotate_keys_event(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+
+    set_verification_status(&db, aggregate_key, DkgSharesStatus::Verified).await;
+
+    let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let signer_set_info = SignerSetInfo::from(shares);
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
+
+    ctx.state().update_registry_signer_set_info(signer_set_info);
+    ctx.state()
+        .update_current_limits(SbtcLimits::new_per_deposit(0, per_deposit_cap));
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
+
+    let network = WanNetwork::default();
+
+    let net = network.connect(&ctx);
+    let mut tx_signer = TxSignerEventLoop {
+        network: net.spawn(),
+        context: ctx.clone(),
+        context_window: 10000,
+        wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+        // We use this private key because it needs to be associated with
+        // one of the public keys that we stored in the DKG shares table.
+        signer_private_key: setup.signers.private_key(),
+        last_presign_block: None,
+        dkg_begin_pause: None,
+        dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
+    };
+
+    // Each transaction in the package sweeps one deposit, in the same
+    // order as the given amounts.
+    let deposit_outpoints: Vec<OutPoint> = deposit_amounts
+        .iter()
+        .map(|amount| {
+            setup
+                .deposits
+                .iter()
+                .find(|(_, request, _)| request.amount == *amount)
+                .map(|(info, _, _)| info.outpoint)
+                .unwrap()
+        })
+        .collect();
+
+    let request_package = deposit_outpoints
+        .iter()
+        .map(|outpoint| TxRequestIds {
+            deposits: vec![*outpoint],
+            withdrawals: vec![],
+        })
+        .collect();
+
+    let presign_request = BitcoinPreSignRequest {
+        request_package,
+        fee_rate: 2.0,
+        last_fees: None,
+    };
+
+    // Nothing has been written yet.
+    let count_sql = "SELECT COUNT(*) FROM sbtc_signer.bitcoin_tx_sighashes";
+    let row_count = sqlx::query_scalar::<_, i64>(count_sql)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(row_count, 0);
+
+    let mut handle = network.connect(&ctx).spawn();
+
+    tx_signer
+        .handle_bitcoin_pre_sign_request(&presign_request, &chain_tip)
+        .await
+        .unwrap();
+
+    // The signer still acknowledges the request, whatever the outcome of
+    // validation.
+    tokio::time::timeout(Duration::from_secs(2), async move {
+        handle.receive().await.unwrap();
+    })
+    .await
+    .unwrap();
+
+    #[derive(sqlx::FromRow, Debug)]
+    struct TxSighashRow {
+        txid: BitcoinTxId,
+        prevout_txid: BitcoinTxId,
+        prevout_output_index: i32,
+        prevout_type: model::TxPrevoutType,
+        is_valid_tx: bool,
+    }
+
+    let rows = sqlx::query_as::<_, TxSighashRow>(
+        r#"
+        SELECT
+            txid
+          , prevout_txid
+          , prevout_output_index
+          , prevout_type
+          , is_valid_tx
+        FROM sbtc_signer.bitcoin_tx_sighashes
+        "#,
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+
+    // Each recorded transaction has one row for the signers' input and
+    // one row for its deposit, and every recorded row is for a
+    // valid transaction.
+    assert_eq!(rows.len(), 2 * expected_valid_txs);
+    assert!(rows.iter().all(|row| row.is_valid_tx));
+
+    let recorded_txids: HashSet<BitcoinTxId> = rows.iter().map(|row| row.txid).collect();
+    assert_eq!(recorded_txids.len(), expected_valid_txs);
+
+    let recorded_deposits: HashSet<OutPoint> = rows
+        .iter()
+        .filter(|row| row.prevout_type == model::TxPrevoutType::Deposit)
+        .map(|row| OutPoint::new(row.prevout_txid.into(), row.prevout_output_index as u32))
+        .collect();
+    let expected_deposits: HashSet<OutPoint> = deposit_outpoints
+        .into_iter()
+        .take(expected_valid_txs)
+        .collect();
+
+    assert_eq!(recorded_deposits, expected_deposits);
 
     testing::storage::drop_db(db).await;
 }
