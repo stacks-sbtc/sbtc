@@ -18,6 +18,8 @@ on:
   pull_request:
     branches:
       - main
+    ## labeled/unlabeled: the environment comes from a label, so a label change must re-evaluate.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   id-token: write
@@ -47,7 +49,8 @@ jobs:
           SHOULD_RUN=true
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${GITHUB_REF_NAME}" != "main" ]; then
+            ## Full ref: a tag named main must not pass.
+            if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
               echo "### The workflow_dispatch can only be run on main branch." >> $GITHUB_STEP_SUMMARY
               exit 1
             fi
@@ -130,6 +133,11 @@ jobs:
       - name: Checkout Repository
         id: checkout_repository
         uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      ## The arm64 image runs target-platform commands at build time (uv sync, apt-get).
+      - name: Setup QEMU
+        id: setup_qemu
+        uses: stacks-sbtc/actions/docker/setup-qemu-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
 
       - name: Setup Buildx
         id: setup_buildx
