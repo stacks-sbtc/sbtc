@@ -53,6 +53,7 @@ use signer::storage::model::BitcoinTxId;
 use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::SigHash;
+use signer::storage::model::StacksBlockHash;
 use signer::storage::model::StacksTxId;
 use signer::testing;
 use signer::testing::context::*;
@@ -828,26 +829,75 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
     testing::storage::drop_db(db).await;
 }
 
+/// The number of valid and invalid requests serviced by one transaction
+/// in a pre-sign package.
+#[derive(Debug, Default)]
+struct TxRequestCounts {
+    /// Deposits with a max fee that covers their assessed fee.
+    valid_deposits: usize,
+    /// Deposits with a max fee below their assessed fee.
+    invalid_deposits: usize,
+    /// Withdrawals with a max fee that covers their assessed fee.
+    valid_withdrawals: usize,
+    /// Withdrawals with a max fee below their assessed fee.
+    invalid_withdrawals: usize,
+}
+
+impl TxRequestCounts {
+    /// Whether every request in the transaction passes validation.
+    fn is_valid(&self) -> bool {
+        self.invalid_deposits == 0 && self.invalid_withdrawals == 0
+    }
+}
+
+/// The max fee of a request that passes validation, in sats.
+const VALID_MAX_FEE: u64 = 10_000;
+/// The max fee of a request that fails validation, in sats.
+const INVALID_MAX_FEE: u64 = 10;
+
 /// Check that a signer only writes pre-sign rows for the transactions in
 /// the package that come before the first one that fails validation.
 ///
-/// Each case is a package of two transactions that each sweep one
-/// deposit. The deposit amounts are given in package order, and any
-/// deposit above the per-deposit cap makes its transaction invalid. Later
-/// transactions spend the signers' UTXO created by earlier ones, so a
-/// valid transaction after an invalid one must not be recorded either.
-#[test_case([100_000, 120_000], 2 ; "all-transactions-valid")]
-#[test_case([100_000, 200_000], 1 ; "second-transaction-invalid")]
-#[test_case([200_000, 100_000], 0 ; "first-transaction-invalid")]
+/// Each case gives the number of valid and invalid deposits and
+/// withdrawals in each transaction of the package. A request is invalid
+/// when its max fee is less than the fee it is assessed in its
+/// transaction, and a single invalid request makes its transaction
+/// invalid. At the 2 sats per vbyte used here, each request is assessed
+/// well over [`INVALID_MAX_FEE`] and well under [`VALID_MAX_FEE`].
+///
+/// We check both the sighash rows and the withdrawal output rows. The
+/// withdrawal output rows feed the checks for whether a withdrawal may be
+/// rejected, so rows for an invalid transaction would let a coordinator
+/// delay or confuse those checks.
+#[test_case(vec![
+    TxRequestCounts { valid_deposits: 2, valid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_withdrawals: 2, ..Default::default() },
+    TxRequestCounts { valid_deposits: 1, ..Default::default() },
+] ; "all-transactions-valid")]
+#[test_case(vec![
+    TxRequestCounts { valid_deposits: 1, invalid_deposits: 1, valid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_deposits: 1, ..Default::default() },
+] ; "first-transaction-invalid-deposit")]
+#[test_case(vec![
+    TxRequestCounts { invalid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_deposits: 1, valid_withdrawals: 1, ..Default::default() },
+] ; "first-transaction-invalid-withdrawal")]
+#[test_case(vec![
+    TxRequestCounts { valid_deposits: 1, valid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_withdrawals: 1, invalid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_deposits: 1, valid_withdrawals: 1, ..Default::default() },
+] ; "middle-transaction-invalid-withdrawal")]
+#[test_case(vec![
+    TxRequestCounts { valid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { invalid_deposits: 1, ..Default::default() },
+] ; "last-transaction-invalid-deposit")]
 #[tokio::test]
-async fn presign_rows_only_written_for_valid_transactions(
-    deposit_amounts: [u64; 2],
-    expected_valid_txs: usize,
-) {
+async fn presign_rows_only_written_for_valid_transactions(request_counts: Vec<TxRequestCounts>) {
+    // These are the transactions that we expect rows for.
+    let expected_valid_txs = request_counts.iter().take_while(|tx| tx.is_valid()).count();
     let db = testing::storage::new_test_database().await;
 
     let mut rng = get_rng();
-    let per_deposit_cap = 150_000;
 
     // The signer reads its public key from the config when validating
     // pre-sign requests, and the deposit votes are stored under the test
@@ -868,12 +918,31 @@ async fn presign_rows_only_written_for_valid_transactions(
     let rpc = bitcoin.rpc();
     let faucet = &bitcoin.get_faucet();
 
-    let amounts = deposit_amounts.map(|amount| SweepAmounts {
-        amount,
-        max_fee: 10_000,
+    // The setup keeps deposits in the order that we give them, so we list
+    // them in package order, with each transaction's valid deposits before
+    // its invalid ones.
+    let deposit_max_fees = request_counts.iter().flat_map(|tx| {
+        let valid = std::iter::repeat_n(VALID_MAX_FEE, tx.valid_deposits);
+        let invalid = std::iter::repeat_n(INVALID_MAX_FEE, tx.invalid_deposits);
+        valid.chain(invalid)
+    });
+    let deposits = deposit_max_fees.map(|max_fee| SweepAmounts {
+        amount: 100_000,
+        max_fee,
         is_deposit: true,
     });
-    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &amounts);
+    let withdrawal_max_fees = request_counts.iter().flat_map(|tx| {
+        let valid = std::iter::repeat_n(VALID_MAX_FEE, tx.valid_withdrawals);
+        let invalid = std::iter::repeat_n(INVALID_MAX_FEE, tx.invalid_withdrawals);
+        valid.chain(invalid)
+    });
+    let withdrawals = withdrawal_max_fees.map(|max_fee| SweepAmounts {
+        amount: 30_000,
+        max_fee,
+        is_deposit: false,
+    });
+    let sweep_amounts: Vec<SweepAmounts> = deposits.chain(withdrawals).collect();
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &sweep_amounts);
 
     let block_header = rpc
         .get_block_header_info(&setup.deposit_block_hash)
@@ -894,6 +963,8 @@ async fn presign_rows_only_written_for_valid_transactions(
     setup.store_deposit_txs(&db).await;
     setup.store_deposit_request(&db).await;
     setup.store_deposit_decisions(&db).await;
+    setup.store_withdrawal_requests(&db).await;
+    setup.store_withdrawal_decisions(&db).await;
 
     set_verification_status(&db, aggregate_key, DkgSharesStatus::Verified).await;
 
@@ -906,9 +977,12 @@ async fn presign_rows_only_written_for_valid_transactions(
         .unwrap();
 
     ctx.state().update_registry_signer_set_info(signer_set_info);
-    ctx.state()
-        .update_current_limits(SbtcLimits::new_per_deposit(0, per_deposit_cap));
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
     ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
+    // The withdrawal requests are confirmed in the chain tip block, so
+    // they are final if the finality height is just above it.
+    ctx.state()
+        .set_withdrawal_finality_height(Some(chain_tip.block_height.saturating_add(1u64)));
 
     let network = WanNetwork::default();
 
@@ -928,27 +1002,35 @@ async fn presign_rows_only_written_for_valid_transactions(
         bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
-    // Each transaction in the package sweeps one deposit, in the same
-    // order as the given amounts.
-    let deposit_outpoints: Vec<OutPoint> = deposit_amounts
+    // Build the package from the requests that the setup created. The
+    // deposits are in package order. The setup sorts withdrawals by
+    // request ID, so we split them by max fee and take them as needed;
+    // withdrawals with the same max fee are interchangeable.
+    let mut deposits = setup.deposits.iter().map(|(info, _, _)| info.outpoint);
+    let (valid_withdrawals, invalid_withdrawals): (Vec<_>, Vec<_>) = setup
+        .withdrawals
         .iter()
-        .map(|amount| {
-            setup
-                .deposits
-                .iter()
-                .find(|(_, request, _)| request.amount == *amount)
-                .map(|(info, _, _)| info.outpoint)
-                .unwrap()
+        .map(|w| &w.request)
+        .partition(|req| req.max_fee == VALID_MAX_FEE);
+    let mut valid_withdrawals = valid_withdrawals.into_iter().map(|req| req.qualified_id());
+    let mut invalid_withdrawals = invalid_withdrawals
+        .into_iter()
+        .map(|req| req.qualified_id());
+
+    let request_package: Vec<TxRequestIds> = request_counts
+        .iter()
+        .map(|tx| {
+            let deposit_count = tx.valid_deposits + tx.invalid_deposits;
+            let valid = valid_withdrawals.by_ref().take(tx.valid_withdrawals);
+            let invalid = invalid_withdrawals.by_ref().take(tx.invalid_withdrawals);
+            TxRequestIds {
+                deposits: deposits.by_ref().take(deposit_count).collect(),
+                withdrawals: valid.chain(invalid).collect(),
+            }
         })
         .collect();
 
-    let request_package = deposit_outpoints
-        .iter()
-        .map(|outpoint| TxRequestIds {
-            deposits: vec![*outpoint],
-            withdrawals: vec![],
-        })
-        .collect();
+    let valid_txs = request_package[..expected_valid_txs].to_vec();
 
     let presign_request = BitcoinPreSignRequest {
         request_package,
@@ -956,13 +1038,14 @@ async fn presign_rows_only_written_for_valid_transactions(
         last_fees: None,
     };
 
-    // Nothing has been written yet.
-    let count_sql = "SELECT COUNT(*) FROM sbtc_signer.bitcoin_tx_sighashes";
-    let row_count = sqlx::query_scalar::<_, i64>(count_sql)
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
-    assert_eq!(row_count, 0);
+    // Start with empty tables, so that every row we find below was
+    // written by the pre-sign request.
+    sqlx::query(
+        "TRUNCATE sbtc_signer.bitcoin_tx_sighashes, sbtc_signer.bitcoin_withdrawals_outputs",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
 
     let mut handle = network.connect(&ctx).spawn();
 
@@ -1003,10 +1086,15 @@ async fn presign_rows_only_written_for_valid_transactions(
     .await
     .unwrap();
 
+    let expected_deposits: HashSet<OutPoint> = valid_txs
+        .iter()
+        .flat_map(|tx| tx.deposits.iter().copied())
+        .collect();
+
     // Each recorded transaction has one row for the signers' input and
-    // one row for its deposit, and every recorded row is for a
+    // one row for each of its deposits, and every recorded row is for a
     // valid transaction.
-    assert_eq!(rows.len(), 2 * expected_valid_txs);
+    assert_eq!(rows.len(), expected_valid_txs + expected_deposits.len());
     assert!(rows.iter().all(|row| row.is_valid_tx));
 
     let recorded_txids: HashSet<BitcoinTxId> = rows.iter().map(|row| row.txid).collect();
@@ -1017,12 +1105,59 @@ async fn presign_rows_only_written_for_valid_transactions(
         .filter(|row| row.prevout_type == model::TxPrevoutType::Deposit)
         .map(|row| OutPoint::new(row.prevout_txid.into(), row.prevout_output_index as u32))
         .collect();
-    let expected_deposits: HashSet<OutPoint> = deposit_outpoints
-        .into_iter()
-        .take(expected_valid_txs)
-        .collect();
 
     assert_eq!(recorded_deposits, expected_deposits);
+
+    #[derive(sqlx::FromRow, Debug)]
+    struct WithdrawalOutputRow {
+        bitcoin_txid: BitcoinTxId,
+        output_index: i32,
+        request_id: i64,
+        stacks_block_hash: StacksBlockHash,
+        is_valid_tx: bool,
+    }
+
+    let withdrawal_rows = sqlx::query_as::<_, WithdrawalOutputRow>(
+        r#"
+        SELECT
+            bitcoin_txid
+          , output_index
+          , request_id
+          , stacks_block_hash
+          , is_valid_tx
+        FROM sbtc_signer.bitcoin_withdrawals_outputs
+        "#,
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+
+    let expected_withdrawals: HashSet<(u64, StacksBlockHash)> = valid_txs
+        .iter()
+        .flat_map(|tx| &tx.withdrawals)
+        .map(|id| (id.request_id, id.block_hash))
+        .collect();
+
+    // Each recorded transaction has one withdrawal output row for each of
+    // its withdrawals, after the signers' output and the OP_RETURN
+    // output, and it belongs to one of the transactions that we recorded
+    // sighashes for. No row exists for the first invalid transaction or
+    // for any transaction after it.
+    assert_eq!(withdrawal_rows.len(), expected_withdrawals.len());
+    assert!(withdrawal_rows.iter().all(|row| row.is_valid_tx));
+    assert!(withdrawal_rows.iter().all(|row| row.output_index >= 2));
+    assert!(
+        withdrawal_rows
+            .iter()
+            .all(|row| recorded_txids.contains(&row.bitcoin_txid))
+    );
+
+    let recorded_withdrawals: HashSet<(u64, StacksBlockHash)> = withdrawal_rows
+        .iter()
+        .map(|row| (row.request_id as u64, row.stacks_block_hash))
+        .collect();
+
+    assert_eq!(recorded_withdrawals, expected_withdrawals);
 
     testing::storage::drop_db(db).await;
 }
