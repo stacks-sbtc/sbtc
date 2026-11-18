@@ -333,14 +333,14 @@ impl BitcoinPreSignRequest {
 
         let output_key_set = btc_ctx.signer_set.output_key_set();
         let activation_height = ctx.config().signer.even_fees_activation_height();
-        let fee_assessment =
+        let fee_assessment_method =
             FeeAssessmentMethod::from_chain_tip_height(btc_ctx.chain_tip_height, activation_height);
         let mut signer_state = SignerBtcState {
             fee_rate: self.fee_rate,
             utxo: signer_utxo,
             output_key_set,
             last_fees,
-            fee_assessment,
+            fee_assessment_method,
             magic_bytes: *b"T3",
         };
         let mut outputs = Vec::new();

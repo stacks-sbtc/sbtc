@@ -51,7 +51,7 @@ where
         .await
         .unwrap()
         .unwrap();
-    let fee_assessment = FeeAssessmentMethod::from_chain_tip_height(
+    let fee_assessment_method = FeeAssessmentMethod::from_chain_tip_height(
         btc_ctx.chain_tip_height,
         ctx.config().signer.even_fees_activation_height(),
     );
@@ -64,7 +64,7 @@ where
             .map(TryInto::try_into)
             .transpose()
             .unwrap(),
-        fee_assessment,
+        fee_assessment_method,
         magic_bytes: *b"T3",
     }
 }

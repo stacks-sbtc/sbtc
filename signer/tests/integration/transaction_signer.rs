@@ -526,7 +526,7 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
             .await
             .unwrap()
             .unwrap(),
-        fee_assessment: FeeAssessmentMethod::Proportional,
+        fee_assessment_method: FeeAssessmentMethod::Proportional,
         fee_rate,
         last_fees: None,
         magic_bytes: *b"T3",

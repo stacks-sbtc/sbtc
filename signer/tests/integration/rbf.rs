@@ -226,7 +226,7 @@ mod serial {
                 },
                 fee_rate: ctx.initial_fee_rate,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 // The value here isn't important, but it matches what happens
                 // in Nakamoto testnet.
                 magic_bytes: *b"T3",

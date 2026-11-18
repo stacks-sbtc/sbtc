@@ -2007,7 +2007,7 @@ where
             .ok_or(Error::MissingSignerUtxo)?;
 
         let activation_height = self.context.config().signer.even_fees_activation_height();
-        let fee_assessment =
+        let fee_assessment_method =
             FeeAssessmentMethod::from_chain_tip_height(chain_tip.block_height, activation_height);
 
         // We still need to send these to the other signers, since they may
@@ -2019,7 +2019,7 @@ where
             utxo,
             output_key_set: output_key_set.clone(),
             last_fees,
-            fee_assessment,
+            fee_assessment_method,
             magic_bytes: *b"T3",
         })
     }

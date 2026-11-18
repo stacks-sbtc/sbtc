@@ -231,7 +231,7 @@ pub struct RequestPreprocessor<'a> {
     /// The largest virtual-size contribution from a candidate request.
     max_request_vsize: u64,
     /// The rule used to apportion transaction fees to requests.
-    fee_assessment: FeeAssessmentMethod,
+    fee_assessment_method: FeeAssessmentMethod,
 }
 
 impl<'a> RequestPreprocessor<'a> {
@@ -247,7 +247,7 @@ impl<'a> RequestPreprocessor<'a> {
             signer_input_vsize: BASE_WITHDRAWAL_TX_VSIZE - BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT,
             max_signer_input_vsize: BASE_WITHDRAWAL_TX_VSIZE - BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT,
             max_request_vsize: 0,
-            fee_assessment: FeeAssessmentMethod::Proportional,
+            fee_assessment_method: FeeAssessmentMethod::Proportional,
         }
     }
 
@@ -259,7 +259,7 @@ impl<'a> RequestPreprocessor<'a> {
     /// request can share a transaction with a larger request and therefore pay
     /// a larger share than its own solo-sweep fee.
     fn solo_tx_vsize(&self, request_vsize: u64) -> f64 {
-        match self.fee_assessment {
+        match self.fee_assessment_method {
             FeeAssessmentMethod::Proportional => {
                 BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + self.signer_input_vsize + request_vsize as f64
             }
@@ -397,7 +397,7 @@ pub struct SignerBtcState {
     pub last_fees: Option<Fees>,
     /// The rule used to apportion transaction fees to requests. This is
     /// selected from the pre-sign chain tip and retained across a package.
-    pub fee_assessment: FeeAssessmentMethod,
+    pub fee_assessment_method: FeeAssessmentMethod,
     /// Two byte prefix for BTC transactions that are related to the Stacks
     /// blockchain.
     pub magic_bytes: [u8; 2],
@@ -450,7 +450,7 @@ impl SbtcRequests {
             signer_input_vsize: signer_input_vsize as f64,
             max_signer_input_vsize: max_signer_input_vsize as f64,
             max_request_vsize: self.max_request_vsize(),
-            fee_assessment: self.signer_state.fee_assessment,
+            fee_assessment_method: self.signer_state.fee_assessment_method,
         };
         let deposits = request_preprocessor
             .filter_deposits(&self.deposits)
@@ -1748,7 +1748,7 @@ impl<'a> UnsignedTransaction<'a> {
         // Create OP_RETURN data
         let mut data = PushBytesBuf::with_capacity(OP_RETURN_MAX_SIZE);
         data.extend_from_slice(&state.magic_bytes)?;
-        data.push(state.fee_assessment.op_return_version())?;
+        data.push(state.fee_assessment_method.op_return_version())?;
 
         // Extract all withdrawal request IDs
         let withdrawal_ids: Vec<u64> = reqs.iter().filter_map(|req| req.withdrawal_id()).collect();
@@ -2859,7 +2859,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 15,
@@ -2897,7 +2897,7 @@ mod tests {
                 },
                 fee_rate: 5.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3016,7 +3016,7 @@ mod tests {
                 },
                 fee_rate,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 15,
@@ -3061,7 +3061,7 @@ mod tests {
             },
             fee_rate,
             last_fees: None,
-            fee_assessment: FeeAssessmentMethod::Even,
+            fee_assessment_method: FeeAssessmentMethod::Even,
             magic_bytes: *b"T3",
         };
         let mut withdrawal = create_withdrawal(100_000, u64::MAX, 0);
@@ -3072,7 +3072,7 @@ mod tests {
             signer_input_vsize: signer_state.utxo.input_vsize() as f64,
             max_signer_input_vsize: signer_state.utxo.input_vsize() as f64,
             max_request_vsize: deposit.vsize().max(withdrawal.vsize()),
-            fee_assessment: FeeAssessmentMethod::Proportional,
+            fee_assessment_method: FeeAssessmentMethod::Proportional,
         };
         withdrawal.max_fee = compute_transaction_fee(
             preprocessor.solo_tx_vsize(withdrawal.vsize()),
@@ -3105,7 +3105,7 @@ mod tests {
         ));
 
         let even_preprocessor = RequestPreprocessor {
-            fee_assessment: FeeAssessmentMethod::Even,
+            fee_assessment_method: FeeAssessmentMethod::Even,
             ..preprocessor
         };
         assert!(
@@ -3184,7 +3184,7 @@ mod tests {
                 fee_rate,
                 output_key_set,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Even,
+                fee_assessment_method: FeeAssessmentMethod::Even,
                 magic_bytes: *b"T3",
             },
             num_signers: 15,
@@ -3448,7 +3448,7 @@ mod tests {
                         fee_rate: f64::from(test_case.fee_rate),
                         output_key_set: output_key_set.clone(),
                         last_fees,
-                        fee_assessment: FeeAssessmentMethod::Even,
+                        fee_assessment_method: FeeAssessmentMethod::Even,
                         magic_bytes: *b"T3",
                     },
                     num_signers: 15,
@@ -3630,7 +3630,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3694,7 +3694,7 @@ mod tests {
             },
             fee_rate: 0.0,
             last_fees: None,
-            fee_assessment: FeeAssessmentMethod::Proportional,
+            fee_assessment_method: FeeAssessmentMethod::Proportional,
             magic_bytes: [0; 2],
         };
 
@@ -3728,7 +3728,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: *b"ST",
             },
             num_signers: 10,
@@ -3843,7 +3843,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3889,7 +3889,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3941,7 +3941,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3990,7 +3990,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Even,
+                fee_assessment_method: FeeAssessmentMethod::Even,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4002,7 +4002,7 @@ mod tests {
         let transactions = requests.construct_transactions().unwrap();
         more_asserts::assert_gt!(transactions.len(), 1);
         assert!(transactions.iter().all(|tx| {
-            tx.signer_utxo.fee_assessment == FeeAssessmentMethod::Even
+            tx.signer_utxo.fee_assessment_method == FeeAssessmentMethod::Even
                 && FeeAssessmentMethod::try_from_tx(&tx.tx) == Ok(FeeAssessmentMethod::Even)
         }));
 
@@ -4055,7 +4055,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4156,7 +4156,7 @@ mod tests {
                 },
                 fee_rate: 25.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4223,7 +4223,7 @@ mod tests {
                 },
                 fee_rate: 25.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4301,7 +4301,7 @@ mod tests {
                 },
                 fee_rate: 25.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4347,7 +4347,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4406,7 +4406,7 @@ mod tests {
                 },
                 fee_rate,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4852,7 +4852,7 @@ mod tests {
             signer_input_vsize: utxo.input_vsize() as f64,
             max_signer_input_vsize: utxo.input_vsize() as f64,
             max_request_vsize: req.vsize(),
-            fee_assessment: FeeAssessmentMethod::Proportional,
+            fee_assessment_method: FeeAssessmentMethod::Proportional,
         };
         let solo_tx_vsize = preprocessor.solo_tx_vsize(req.vsize());
         let amount = DEPOSIT_DUST_LIMIT as i64 + solo_tx_vsize.ceil() as i64 + amount_offset;
@@ -4866,7 +4866,7 @@ mod tests {
                 utxo,
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             num_signers: 11,
@@ -4913,7 +4913,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             accept_threshold: 127,
@@ -4967,7 +4967,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment: FeeAssessmentMethod::Proportional,
+                fee_assessment_method: FeeAssessmentMethod::Proportional,
                 magic_bytes: [0; 2],
             },
             accept_threshold: 10,

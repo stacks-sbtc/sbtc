@@ -584,7 +584,7 @@ impl fake::Dummy<&[PublicKey]> for SignerBtcState {
         Self {
             fee_rate: Faker.fake_with_rng(rng),
             last_fees: Faker.fake_with_rng(rng),
-            fee_assessment: FeeAssessmentMethod::Proportional,
+            fee_assessment_method: FeeAssessmentMethod::Proportional,
             magic_bytes: [1, 2],
             output_key_set: SignerUtxoKeySet::V1(aggregate_key_x_only),
             utxo: SignerUtxo {

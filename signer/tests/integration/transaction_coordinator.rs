@@ -4135,7 +4135,10 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     );
     assert_eq!(btc_state.fee_rate, 1.3);
     assert_eq!(btc_state.last_fees, None);
-    assert_eq!(btc_state.fee_assessment, FeeAssessmentMethod::Proportional);
+    assert_eq!(
+        btc_state.fee_assessment_method,
+        FeeAssessmentMethod::Proportional
+    );
     assert_eq!(btc_state.magic_bytes, [b'T', b'3']);
 
     // Let's grab the state again, this time we expect fees from
@@ -4150,7 +4153,7 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
         .unwrap();
 
     assert_eq!(btc_state.fee_rate, MAX_BITCOIN_FEE_RATE);
-    assert_eq!(btc_state.fee_assessment, FeeAssessmentMethod::Even);
+    assert_eq!(btc_state.fee_assessment_method, FeeAssessmentMethod::Even);
 
     // Let's grab the state one last time, where this time we expect fees
     // from "bitcoin-core" that are too low.
