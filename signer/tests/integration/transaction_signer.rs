@@ -844,8 +844,8 @@ struct TxRequestCounts {
 }
 
 impl TxRequestCounts {
-    /// Whether every request in the transaction passes validation and
-    /// contains at least one valid request.
+    /// Whether the transaction has at least one request and every request
+    /// passes validation.
     fn is_valid(&self) -> bool {
         self.invalid_deposits == 0
             && self.invalid_withdrawals == 0
