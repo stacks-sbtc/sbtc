@@ -35,7 +35,7 @@ env:
 jobs:
   resolve-env:
     name: Resolve Environment
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       environment: ${{ steps.set_env.outputs.environment }}
       should_run: ${{ steps.set_env.outputs.should_run }}
@@ -101,7 +101,7 @@ jobs:
 
   image:
     name: Build Image (${{ matrix.service }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: resolve-env
     if: needs.resolve-env.outputs.should_run == 'true'
     environment: ${{ needs.resolve-env.outputs.environment }}
