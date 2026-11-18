@@ -127,14 +127,24 @@ pub mod test_helpers {
         let mut signers: Vec<v2::Party> = signer_ids
             .iter()
             .enumerate()
-            .map(|(id, ids)| v2::Party::new(id.try_into().unwrap(), ids, Nk, Np, T, &mut rng))
+            .map(|(id, ids)| v2::Party::new(id.try_into().unwrap(), ids, Np, Nk, T, &mut rng))
             .collect();
 
         match compute_secrets_missing_private_shares(&mut signers, &mut rng, &missing_key_ids) {
             Ok(polys) => panic!("Got a result with missing public shares: {polys:?}"),
             Err(secret_errors) => {
                 for (_, error) in secret_errors {
-                    assert!(matches!(error, DkgError::MissingPrivateShares(_)));
+                    let DkgError::MissingPrivateShares(pairs) = error else {
+                        panic!("wrong variant: {error:?}")
+                    };
+                    assert!(
+                        !pairs.is_empty(),
+                        "expected at least one missing-share pair"
+                    );
+                    assert!(
+                        pairs.iter().all(|(dst, _)| missing_key_ids.contains(dst)),
+                        "missing-share report should mention {missing_key_ids:?}, got {pairs:?}"
+                    );
                 }
             }
         }
