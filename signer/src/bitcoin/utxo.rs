@@ -1866,7 +1866,7 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
     /// # Notes
     ///
     /// The assessment follows the [`FeeAssessmentMethod`] committed to by
-    /// the transaction's OP_RETURN version.
+    /// the transaction's `OP_RETURN` version.
     ///
     /// This function assumes that this transaction is an sBTC transaction,
     /// which implies that the first input and the first two outputs are
@@ -1901,7 +1901,7 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
     /// # Notes
     ///
     /// The assessment follows the [`FeeAssessmentMethod`] committed to by
-    /// the transaction's OP_RETURN version.
+    /// the transaction's `OP_RETURN` version.
     ///
     /// This function assumes that this transaction is an sBTC transaction,
     /// which implies that the first input and the first two outputs are
