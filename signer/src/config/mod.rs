@@ -16,12 +16,6 @@ use url::Url;
 use sbtc::SignerKeySet;
 
 use crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
-use crate::MAINNET_DKG_DISABLE_BLOCK_HEIGHT;
-use crate::MAINNET_EVEN_FEES_ACTIVATION_HEIGHT;
-use crate::MAINNET_V2_SIGNING_BLOCK_HEIGHT;
-use crate::TESTNET_DKG_DISABLE_BLOCK_HEIGHT;
-use crate::TESTNET_EVEN_FEES_ACTIVATION_HEIGHT;
-use crate::TESTNET_V2_SIGNING_BLOCK_HEIGHT;
 use crate::config::error::SignerConfigError;
 use crate::config::serialization::duration_milliseconds_deserializer;
 use crate::config::serialization::duration_seconds_deserializer;
@@ -51,6 +45,31 @@ pub const MAX_REQUESTS_PROCESSING_DELAY_SECONDS: u64 = 300;
 /// other signers, and in the role of signer potentially falling outside of the
 /// coordinator's timeouts.
 pub const MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS: u64 = 10;
+
+/// The default mainnet activation height for v2 signer UTXOs.
+///
+/// This block height corresponds to around 2026-10-20 15:00 UTC.
+const DEFAULT_MAINNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(972_295);
+
+/// The default testnet activation height for v2 signer UTXOs.
+const DEFAULT_TESTNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(245);
+
+/// The default mainnet Bitcoin height at which DKG is disabled.
+const DEFAULT_MAINNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(u64::MAX);
+
+/// The default testnet Bitcoin height at which DKG is disabled.
+const DEFAULT_TESTNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(u64::MAX);
+
+/// The default mainnet activation height for even fee assessment.
+const DEFAULT_MAINNET_EVEN_FEES_ACTIVATION_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(u64::MAX);
+
+/// The default testnet activation height for even fee assessment.
+const DEFAULT_TESTNET_EVEN_FEES_ACTIVATION_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(255);
 
 /// Trait for validating configuration values.
 trait Validatable {
@@ -573,9 +592,9 @@ impl SignerConfig {
     /// Return the Bitcoin height at which signer outputs switch to v2.
     pub fn v2_signing_block_height(&self) -> BitcoinBlockHeight {
         let default = if self.network.is_mainnet() {
-            MAINNET_V2_SIGNING_BLOCK_HEIGHT
+            DEFAULT_MAINNET_V2_SIGNING_BLOCK_HEIGHT
         } else {
-            TESTNET_V2_SIGNING_BLOCK_HEIGHT
+            DEFAULT_TESTNET_V2_SIGNING_BLOCK_HEIGHT
         };
         self.v2_signing_block_height.unwrap_or(default)
     }
@@ -589,9 +608,9 @@ impl SignerConfig {
     /// evenly.
     pub fn even_fees_activation_height(&self) -> BitcoinBlockHeight {
         let default = if self.network.is_mainnet() {
-            MAINNET_EVEN_FEES_ACTIVATION_HEIGHT
+            DEFAULT_MAINNET_EVEN_FEES_ACTIVATION_HEIGHT
         } else {
-            TESTNET_EVEN_FEES_ACTIVATION_HEIGHT
+            DEFAULT_TESTNET_EVEN_FEES_ACTIVATION_HEIGHT
         };
         self.fee_assessment_block_height.unwrap_or(default)
     }
@@ -599,9 +618,9 @@ impl SignerConfig {
     /// Return the Bitcoin height at which DKG is disabled.
     pub fn dkg_disable_block_height(&self) -> BitcoinBlockHeight {
         let default = if self.network.is_mainnet() {
-            MAINNET_DKG_DISABLE_BLOCK_HEIGHT
+            DEFAULT_MAINNET_DKG_DISABLE_BLOCK_HEIGHT
         } else {
-            TESTNET_DKG_DISABLE_BLOCK_HEIGHT
+            DEFAULT_TESTNET_DKG_DISABLE_BLOCK_HEIGHT
         };
         self.dkg_disable_block_height.unwrap_or(default)
     }
@@ -843,11 +862,11 @@ mod tests {
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
         assert_eq!(
             settings.signer.even_fees_activation_height(),
-            TESTNET_EVEN_FEES_ACTIVATION_HEIGHT
+            DEFAULT_TESTNET_EVEN_FEES_ACTIVATION_HEIGHT
         );
         assert_eq!(
             settings.signer.dkg_disable_block_height(),
-            TESTNET_DKG_DISABLE_BLOCK_HEIGHT
+            DEFAULT_TESTNET_DKG_DISABLE_BLOCK_HEIGHT
         );
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
         assert_eq!(settings.emily.timeout, Duration::from_secs(10));
@@ -1520,15 +1539,15 @@ mod tests {
 
         assert_eq!(
             settings.signer.v2_signing_block_height(),
-            MAINNET_V2_SIGNING_BLOCK_HEIGHT
+            DEFAULT_MAINNET_V2_SIGNING_BLOCK_HEIGHT
         );
         assert_eq!(
             settings.signer.even_fees_activation_height(),
-            MAINNET_EVEN_FEES_ACTIVATION_HEIGHT
+            DEFAULT_MAINNET_EVEN_FEES_ACTIVATION_HEIGHT
         );
         assert_eq!(
             settings.signer.dkg_disable_block_height(),
-            MAINNET_DKG_DISABLE_BLOCK_HEIGHT
+            DEFAULT_MAINNET_DKG_DISABLE_BLOCK_HEIGHT
         );
     }
 

@@ -106,14 +106,6 @@ pub const BASE_WITHDRAWAL_TX_VSIZE: f64 = 137.0;
 /// units, or 447 vBytes.
 pub const ABSOLUTE_MAX_BASE_TX_VSIZE: f64 = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + 447.0;
 
-/// The base transaction vsize for the expected largest 11-of-15 signer set.
-#[cfg(test)]
-const REFERENCE_11_OF_15_BASE_TX_VSIZE: f64 = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + 359.0;
-
-/// The deposit-input vsize for the expected largest 11-of-15 signer set.
-#[cfg(test)]
-const REFERENCE_11_OF_15_DEPOSIT_INPUT_VSIZE: u64 = 385;
-
 /// The virtual size (in vBytes) of the parts of a sweep transaction that
 /// don't depend on its requests or its signers' input: the transaction
 /// overhead, the signers' new output, and the largest OP_RETURN output.
@@ -2361,6 +2353,14 @@ mod tests {
     use crate::context::RollingWithdrawalLimits;
     use crate::testing;
     use crate::testing::btc::base_signer_transaction;
+
+    /// The base transaction vsize for the expected largest 11-of-15 signer
+    /// set.
+    const REFERENCE_11_OF_15_BASE_TX_VSIZE: f64 = BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT + 359.0;
+
+    /// The deposit-input vsize for the expected largest 11-of-15 signer
+    /// set.
+    const REFERENCE_11_OF_15_DEPOSIT_INPUT_VSIZE: u64 = 385;
 
     /// The maximum virtual size of a transaction package in v-bytes.
     const MEMPOOL_MAX_PACKAGE_SIZE: u32 = 101000;
