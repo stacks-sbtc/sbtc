@@ -27,8 +27,8 @@ use crate::database::accessors;
 use crate::database::entries::DepositStatusEntry;
 use crate::database::entries::chainstate::ApiStateEntry;
 use crate::database::entries::deposit::{
-    DepositEntry, DepositEntryKey, DepositEvent, DepositParametersEntry,
-    ValidatedUpdateDepositsRequest,
+    DepositEntry, DepositEntryKey, DepositEvent, DepositParametersEntry, MAX_TRANSACTION_HEX_LEN,
+    ValidatedUpdateDepositsRequest, transaction_hex_to_store,
 };
 
 /// Get deposit handler.
@@ -367,6 +367,15 @@ pub async fn create_deposit(
                 "unknown reclaim script"
             );
         }
+        let transaction_hex = transaction_hex_to_store(body.transaction_hex);
+        if transaction_hex.is_none() {
+            tracing::warn!(
+                %bitcoin_txid,
+                %bitcoin_tx_output_index,
+                max_len = MAX_TRANSACTION_HEX_LEN,
+                "transaction hex exceeds the maximum length; not storing it"
+            );
+        }
         // Make table entry.
         let deposit_entry: DepositEntry = DepositEntry {
             deposit_version: deposit_info.version().into(),
@@ -391,6 +400,7 @@ pub async fn create_deposit(
             amount: deposit_info.amount,
             reclaim_script: deposit_info.reclaim_script.to_hex_string(),
             deposit_script: deposit_info.deposit_script.to_hex_string(),
+            transaction_hex,
             reclaim_pubkeys_hash,
             ..Default::default()
         };
