@@ -10,6 +10,9 @@ use std::time::Duration;
 use super::get_rng;
 use crate::bitcoin::MockBitcoinInteract;
 use crate::bitcoin::rpc::BitcoinTxInfo;
+use crate::bitcoin::rpc::BitcoinTxVin;
+use crate::bitcoin::rpc::BitcoinTxVinPrevout;
+use crate::bitcoin::rpc::OutputScriptPubKey;
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::SignerUtxo;
 use crate::bitcoin::utxo::SignerUtxoKeySet;
@@ -764,12 +767,12 @@ where
         let sweep_tx_info = BitcoinTxInfo {
             fee: Some(bitcoin::Amount::from_sat(1000)),
             tx: sweep_tx.clone(),
-            vin: vec![crate::bitcoin::rpc::BitcoinTxVin {
+            vin: vec![BitcoinTxVin {
                 txid: Some(bitcoin::Txid::all_zeros()),
                 vout: Some(0),
-                prevout: Some(crate::bitcoin::rpc::BitcoinTxVinPrevout {
+                prevout: Some(BitcoinTxVinPrevout {
                     value: bitcoin::Amount::from_sat(1000),
-                    script_pubkey: crate::bitcoin::rpc::OutputScriptPubKey {
+                    script_pubkey: OutputScriptPubKey {
                         script: bitcoin_aggregate_key.signers_script_pubkey(),
                     },
                 }),
