@@ -151,12 +151,18 @@ importers:
 
   web/deposit-address-verifier:
     dependencies:
+      '@scure/bip32':
+        specifier: 1.7.0
+        version: 1.7.0
       '@scure/btc-signer':
         specifier: 2.0.1
         version: 2.0.1
       '@stacks/connect':
         specifier: 8.2.4
         version: 8.2.4(@types/react@19.2.18)(lit@3.3.0)(typescript@5.9.3)(zod@3.22.4)
+      '@stacks/transactions':
+        specifier: 7.4.0
+        version: 7.4.0
       sbtc:
         specifier: 0.3.2
         version: 0.3.2

@@ -1,0 +1,229 @@
+## Github workflow to build the Emily sidecar and Emily cron images, push them
+## to the ECR repository of the chosen environment, and record the pushed tag in
+## Parameter Store so a deployment can read it from there.
+
+name: Build Docker Images for Emily Sidecar and Cron
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment name"
+        required: true
+        default: environment/sbtc-private-mainnet
+        type: choice
+        options:
+          - environment/sbtc-private-mainnet
+          - environment/sbtc-mainnet
+  pull_request:
+    branches:
+      - main
+    ## labeled/unlabeled: the environment comes from a label, so a label change must re-evaluate.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  id-token: write
+  contents: read
+  attestations: write
+  packages: write
+  issues: read
+  pull-requests: read
+
+env:
+  docker_platforms: "linux/amd64,linux/arm64"
+
+jobs:
+  resolve-env:
+    name: Resolve Environment
+    runs-on: ubuntu-24.04
+    outputs:
+      environment: ${{ steps.set_env.outputs.environment }}
+      should_run: ${{ steps.set_env.outputs.should_run }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve Environment
+        id: set_env
+        run: |
+          ALLOWED_ENVS=("environment/sbtc-private-mainnet" "environment/sbtc-mainnet")
+          SHOULD_RUN=true
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ## Full ref: a tag named main must not pass.
+            if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+              echo "### The workflow_dispatch can only be run on main branch." >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+
+            VALID=false
+            for env in "${ALLOWED_ENVS[@]}"; do
+              if [ "$ENVIRONMENT" = "$env" ]; then
+                VALID=true
+                break
+              fi
+            done
+
+            if [ "$VALID" != "true" ]; then
+              echo "### Invalid workflow_dispatch environment: $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+              echo "### Allowed environments: ${ALLOWED_ENVS[*]}" >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            LABELS=$(gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels --jq '.[].name')
+
+            MATCHED_ENVS=()
+            for label in $LABELS; do
+              for env in "${ALLOWED_ENVS[@]}"; do
+                if [ "$label" = "$env" ]; then
+                  MATCHED_ENVS+=("$label")
+                fi
+              done
+            done
+
+            if [ "${#MATCHED_ENVS[@]}" -eq 0 ]; then
+              echo "### No valid environment label found on PR. Please add one of: ${ALLOWED_ENVS[*]}" >> $GITHUB_STEP_SUMMARY
+              SHOULD_RUN=false
+            elif [ "${#MATCHED_ENVS[@]}" -gt 1 ]; then
+              echo "### Multiple environment labels found: ${MATCHED_ENVS[*]}. Please use only one." >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+
+            ENVIRONMENT="${MATCHED_ENVS[0]}"
+          else
+            echo "### Unsupported trigger: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "environment=$ENVIRONMENT" >> $GITHUB_OUTPUT
+          echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+
+  image:
+    name: Build Image (${{ matrix.service }})
+    runs-on: ubuntu-24.04
+    needs: resolve-env
+    if: needs.resolve-env.outputs.should_run == 'true'
+    environment: ${{ needs.resolve-env.outputs.environment }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          ## `service` is the Dockerfile folder, the build target and the tag prefix.
+          ## `parameter_var` names the environment variable holding the parameter path.
+          - service: emily-sidecar
+            parameter_var: AWS_EMILY_SIDECAR_SSM_IMAGE_TAG_PARAMETER
+          - service: emily-cron
+            parameter_var: AWS_EMILY_CRON_SSM_IMAGE_TAG_PARAMETER
+    concurrency:
+      group: docker-build-${{ matrix.service }}-${{ needs.resolve-env.outputs.environment }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Configure AWS Credentials via OIDC
+        id: configure_aws
+        uses: stacks-sbtc/actions/aws/configure-aws-credentials@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          role-to-assume: ${{ vars.AWS_EMILY_SERVICES_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_EMILY_SERVICES_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr_login
+        uses: stacks-sbtc/actions/aws/amazon-ecr-login@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Checkout Repository
+        id: checkout_repository
+        uses: stacks-sbtc/actions/checkout@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      ## The arm64 image runs target-platform commands at build time (uv sync, apt-get).
+      - name: Setup QEMU
+        id: setup_qemu
+        uses: stacks-sbtc/actions/docker/setup-qemu-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Setup Buildx
+        id: setup_buildx
+        uses: stacks-sbtc/actions/docker/setup-buildx-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
+
+      - name: Docker Metadata
+        id: docker_metadata
+        uses: stacks-sbtc/actions/docker/metadata-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          images: |
+            ${{ steps.ecr_login.outputs.registry }}/${{ vars.AWS_EMILY_SERVICES_ECR_REPOSITORY }}
+          tags: |
+            type=raw,value=${{ matrix.service }}-${{ github.sha }}
+
+      - name: Build and Push
+        id: docker_build
+        uses: stacks-sbtc/actions/docker/build-push-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          file: ./docker/sbtc/${{ matrix.service }}/Dockerfile
+          platforms: ${{ env.docker_platforms }}
+          tags: ${{ steps.docker_metadata.outputs.tags }}
+          labels: ${{ steps.docker_metadata.outputs.labels }}
+          target: ${{ matrix.service }}
+          push: true
+
+      - name: Generate artifact attestation
+        id: generate_attestation
+        uses: stacks-sbtc/actions/attest-build-provenance@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        with:
+          ## MUST be the untagged repository name: an attestation identifies its subject by digest.
+          subject-name: ${{ steps.ecr_login.outputs.registry }}/${{ vars.AWS_EMILY_SERVICES_ECR_REPOSITORY }}
+          subject-digest: ${{ steps.docker_build.outputs.digest }}
+
+      ## Record the tag CI just pushed so a deployment can read it from Parameter Store.
+      ## Runs last: only move the parameter once the image is pushed AND attested.
+      ## Skipped on pull_request so PR builds do not advance the deployed tag.
+      - name: Publish Image Tag to Parameter Store
+        id: publish_image_tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PARAMETER_VAR: ${{ matrix.parameter_var }}
+          PARAMETER_NAME: ${{ vars[matrix.parameter_var] }}
+          IMAGE_TAG: ${{ steps.docker_metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PARAMETER_NAME}" ]; then
+            echo "::error::${PARAMETER_VAR} is not set on this environment; refusing to guess the parameter path."
+            exit 1
+          fi
+
+          if [ -z "${IMAGE_TAG}" ]; then
+            echo "::error::Docker Metadata produced an empty tag; nothing to record."
+            exit 1
+          fi
+
+          aws ssm put-parameter \
+            --name "${PARAMETER_NAME}" \
+            --value "${IMAGE_TAG}" \
+            --type String \
+            --overwrite
+
+          echo "Recorded tag ${IMAGE_TAG} at ${PARAMETER_NAME}"
+
+      - name: Build Summary
+        if: always()
+        env:
+          SERVICE: ${{ matrix.service }}
+          IMAGE_REF: ${{ steps.ecr_login.outputs.registry }}/${{ vars.AWS_EMILY_SERVICES_ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ steps.docker_metadata.outputs.version }}
+          IMAGE_DIGEST: ${{ steps.docker_build.outputs.digest }}
+          PARAMETER_NAME: ${{ vars[matrix.parameter_var] }}
+          PARAMETER_UPDATED: ${{ steps.publish_image_tag.outcome == 'success' }}
+        run: |
+          {
+            echo "### ${SERVICE} image"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Repository | \`${IMAGE_REF}\` |"
+            echo "| Tag | \`${IMAGE_TAG:-(not built)}\` |"
+            echo "| Digest | \`${IMAGE_DIGEST:-(not built)}\` |"
+            echo "| Tag parameter | \`${PARAMETER_NAME:-(unset)}\` |"
+            echo "| Parameter updated | \`${PARAMETER_UPDATED}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${IMAGE_TAG}" ]; then
+            echo "::notice title=${SERVICE} image tag::${IMAGE_TAG}"
+          fi
