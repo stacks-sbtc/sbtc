@@ -1981,14 +1981,31 @@ mod tests {
             bitcoin_block_height: 0_u64.into(),
         };
         let chain_tip_height = WITHDRAWAL_MIN_CONFIRMATIONS.into();
+        // The request was made at height 0, so any finality height above
+        // that makes the request final.
+        let finality_height = Some(1u64.into());
         let limits = SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat());
 
         assert_eq!(
-            report.validate(chain_tip_height, output_index, &tx, TX_FEE, &limits),
+            report.validate(
+                chain_tip_height,
+                finality_height,
+                output_index,
+                &tx,
+                TX_FEE,
+                &limits
+            ),
             WithdrawalValidationResult::Ok
         );
         assert_eq!(
-            report.validate(chain_tip_height, output_index, &even_tx, TX_FEE, &limits),
+            report.validate(
+                chain_tip_height,
+                finality_height,
+                output_index,
+                &even_tx,
+                TX_FEE,
+                &limits
+            ),
             WithdrawalValidationResult::FeeTooHigh
         );
     }
