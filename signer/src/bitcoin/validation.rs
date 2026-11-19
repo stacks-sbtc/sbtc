@@ -15,7 +15,6 @@ use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::MAX_DEPOSITS_PER_BITCOIN_PACKAGE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
-use crate::bitcoin::op_return::OpReturnVersion;
 use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::DepositSigningKey;
@@ -334,9 +333,10 @@ impl BitcoinPreSignRequest {
             assess_mempool_sweep_transaction_fees(&bitcoin_client, &signer_utxo).await?;
 
         let output_key_set = btc_ctx.signer_set.output_key_set();
-        let activation_height = ctx.config().signer.even_fees_block_height();
-        let op_return_version =
-            OpReturnVersion::from_chain_tip_height(btc_ctx.chain_tip_height, activation_height);
+        let op_return_version = ctx
+            .config()
+            .signer
+            .op_return_version(btc_ctx.chain_tip_height);
         let mut signer_state = SignerBtcState {
             fee_rate: self.fee_rate,
             utxo: signer_utxo,
@@ -1160,6 +1160,7 @@ mod tests {
 
     use crate::MAX_BITCOIN_FEE_RATE;
     use crate::MIN_BITCOIN_FEE_RATE;
+    use crate::bitcoin::op_return::OpReturnVersion;
     use crate::context::RollingWithdrawalLimits;
     use crate::context::SbtcLimits;
     use crate::storage::model::BitcoinBlockHeight;

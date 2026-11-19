@@ -16,6 +16,7 @@ use url::Url;
 use sbtc::SignerKeySet;
 
 use crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+use crate::bitcoin::op_return::OpReturnVersion;
 use crate::config::error::SignerConfigError;
 use crate::config::serialization::duration_milliseconds_deserializer;
 use crate::config::serialization::duration_seconds_deserializer;
@@ -614,6 +615,16 @@ impl SignerConfig {
         self.even_fees_block_height.unwrap_or(default)
     }
 
+    /// Return the `OP_RETURN` version for sweeps proposed on top of a
+    /// Bitcoin chain tip at the given height.
+    pub fn op_return_version(&self, chain_tip_height: BitcoinBlockHeight) -> OpReturnVersion {
+        if chain_tip_height >= self.even_fees_block_height() {
+            OpReturnVersion::V2
+        } else {
+            OpReturnVersion::V1
+        }
+    }
+
     /// Return the Bitcoin height at which DKG is disabled.
     pub fn dkg_disable_block_height(&self) -> BitcoinBlockHeight {
         let default = if self.network.is_mainnet() {
@@ -1051,6 +1062,20 @@ mod tests {
             settings.signer.dkg_min_bitcoin_block_height,
             Some(42u64.into())
         );
+    }
+
+    /// The even-fees block height selects the OP_RETURN version at the
+    /// boundary.
+    #[test_case(99, OpReturnVersion::V1; "before the boundary")]
+    #[test_case(100, OpReturnVersion::V2; "at the boundary")]
+    #[test_case(101, OpReturnVersion::V2; "after the boundary")]
+    fn op_return_version_at_chain_tip_height(chain_tip_height: u64, expected: OpReturnVersion) {
+        clear_env();
+        let mut settings = Settings::new_from_default_config().unwrap();
+        settings.signer.even_fees_block_height = Some(100_u64.into());
+
+        let actual = settings.signer.op_return_version(chain_tip_height.into());
+        assert_eq!(actual, expected);
     }
 
     /// The even-fees block height can be configured independently

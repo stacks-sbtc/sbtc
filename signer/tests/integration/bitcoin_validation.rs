@@ -51,10 +51,10 @@ where
         .await
         .unwrap()
         .unwrap();
-    let op_return_version = OpReturnVersion::from_chain_tip_height(
-        btc_ctx.chain_tip_height,
-        ctx.config().signer.even_fees_block_height(),
-    );
+    let op_return_version = ctx
+        .config()
+        .signer
+        .op_return_version(btc_ctx.chain_tip_height);
     SignerBtcState {
         output_key_set: btc_ctx.signer_set.output_key_set(),
         utxo: signer_utxo,

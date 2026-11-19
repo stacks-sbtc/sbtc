@@ -9,8 +9,6 @@ use bitcoin::Transaction;
 use bitcoin::opcodes::all::OP_RETURN;
 use bitcoin::script::Instruction;
 
-use crate::storage::model::BitcoinBlockHeight;
-
 /// The version byte in a sweep transaction's `OP_RETURN` output.
 ///
 /// Each version fixes the rules that a sweep follows, so code that needs
@@ -20,9 +18,8 @@ use crate::storage::model::BitcoinBlockHeight;
 /// # Notes
 ///
 /// Outside of this module, only the versions that signers write can be
-/// created, through [`OpReturnVersion::V1`], [`OpReturnVersion::V2`] and
-/// [`OpReturnVersion::from_chain_tip_height`]. Older versions only come
-/// from parsing a sweep.
+/// created, through [`OpReturnVersion::V1`] and [`OpReturnVersion::V2`].
+/// Older versions only come from parsing a sweep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpReturnVersion(Version);
 
@@ -62,19 +59,6 @@ impl OpReturnVersion {
     /// Withdrawal IDs are encoded with idpack and fees are split evenly
     /// across requests.
     pub const V2: Self = Self(Version::V2);
-
-    /// Select the version for new sweeps from the Bitcoin chain-tip block
-    /// height relative to the even-fees activation height.
-    pub fn from_chain_tip_height(
-        chain_tip_height: BitcoinBlockHeight,
-        even_fees_activation_height: BitcoinBlockHeight,
-    ) -> Self {
-        if chain_tip_height >= even_fees_activation_height {
-            Self::V2
-        } else {
-            Self::V1
-        }
-    }
 
     /// Return the byte that encodes this version in the `OP_RETURN`.
     pub fn to_byte(self) -> u8 {
@@ -148,23 +132,6 @@ mod tests {
     use test_case::test_case;
 
     use super::*;
-
-    /// The even-fees activation height selects the version at the
-    /// boundary.
-    #[test_case(99, 100, OpReturnVersion::V1; "before the boundary")]
-    #[test_case(100, 100, OpReturnVersion::V2; "at the boundary")]
-    #[test_case(101, 100, OpReturnVersion::V2; "after the boundary")]
-    fn version_at_chain_tip_height(
-        chain_height: u64,
-        activation_height: u64,
-        expected_version: OpReturnVersion,
-    ) {
-        let activation_height = BitcoinBlockHeight::from(activation_height);
-        let actual_version =
-            OpReturnVersion::from_chain_tip_height(chain_height.into(), activation_height);
-
-        assert_eq!(actual_version, expected_version);
-    }
 
     /// Each version byte parses to the rules it stands for, including
     /// version 0, which signers can read but not construct.

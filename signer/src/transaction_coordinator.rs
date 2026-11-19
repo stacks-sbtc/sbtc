@@ -23,7 +23,6 @@ use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::bitcoin::BitcoinInteract as _;
-use crate::bitcoin::op_return::OpReturnVersion;
 use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo;
 use crate::bitcoin::utxo::BitcoinSignerSet;
@@ -2009,9 +2008,11 @@ where
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
 
-        let activation_height = self.context.config().signer.even_fees_block_height();
-        let op_return_version =
-            OpReturnVersion::from_chain_tip_height(chain_tip.block_height, activation_height);
+        let op_return_version = self
+            .context
+            .config()
+            .signer
+            .op_return_version(chain_tip.block_height);
 
         // We still need to send these to the other signers, since they may
         // not have upgraded their binaries yet.
