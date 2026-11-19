@@ -18,24 +18,23 @@ use blockstack_lib::chainstate::stacks::{
     TransactionSpendingCondition, TransactionVersion,
 };
 use clap::{Args, Parser, Subcommand};
+use clarity::codec::StacksMessageCodec as _;
 use clarity::consts::{CHAIN_ID_MAINNET, CHAIN_ID_TESTNET};
 use clarity::util::secp256k1::MessageSignature;
 use clarity::vm::ClarityName;
 use clarity::vm::Value as ClarityValue;
 use clarity::vm::types::TupleData;
-use clarity::{
-    types::{Address as _, chainstate::StacksAddress},
-    vm::types::{PrincipalData, StandardPrincipalData},
-};
+use clarity::{types::chainstate::StacksAddress, vm::types::PrincipalData};
 use config::ConfigError;
 use emily_client::{
     apis::{
         configuration::{ApiKey, Configuration as EmilyConfig},
         deposit_api,
     },
-    models::CreateDepositRequestBody,
+    models::{CreateDepositRequestBody, DepositVersion},
 };
-use sbtc::deposits::{DepositScriptInputs, ReclaimScriptInputs};
+use sbtc::SignerKeySet;
+use sbtc::deposits::{DepositScriptInputs, DepositScriptInputsV2, ReclaimScriptInputs};
 use secp256k1::SECP256K1;
 use signer::config::Settings;
 use signer::context::Context as SignerCtx;
@@ -84,6 +83,10 @@ enum Error {
     InvalidDeployer(String),
     #[error("missing aggregate key in contract")]
     MissingAggregateKeyInContract,
+    /// This happens when we try to create a v2 deposit but the registry
+    /// contract does not have a current signer set.
+    #[error("missing signer set in contract")]
+    MissingSignerSetInContract,
     #[error("bitcoin address from script error: {0}")]
     AddressFromBitcoinScript(#[from] bitcoin::address::FromScriptError),
     #[error("failed to generate address from public key")]
@@ -160,6 +163,10 @@ struct DepositArgs {
     /// The beneficiary Stacks address to receive the deposit in sBTC.
     #[clap(default_value = DEMO_STACKS_ADDR)]
     recipient: String,
+    /// Create a v2 deposit, locked by the key set derived from the signer
+    /// set and threshold in the registry.
+    #[clap(long)]
+    v2: bool,
 }
 
 #[derive(Debug, Args)]
@@ -200,6 +207,43 @@ struct ReclaimArgs {
     /// The BTC recipient.
     #[clap(long, default_value = DEMO_BITCOIN_ADDR)]
     recipient: String,
+}
+
+/// The inputs for the deposit script of a new deposit.
+enum DepositScript {
+    /// A v1 deposit, locked by the signers' aggregate key.
+    V1(DepositScriptInputs),
+    /// A v2 deposit, locked by the key set derived from the signer set
+    /// and threshold in the registry.
+    V2(DepositScriptInputsV2),
+}
+
+impl DepositScript {
+    /// Return the deposit script.
+    fn deposit_script(&self) -> ScriptBuf {
+        match self {
+            DepositScript::V1(inputs) => inputs.deposit_script(),
+            DepositScript::V2(inputs) => inputs.deposit_script(),
+        }
+    }
+
+    /// Return the scriptPubKey of the deposit output.
+    ///
+    /// # Notes
+    ///
+    /// v1 and v2 deposits use different internal keys for the taproot
+    /// output, so the same scripts lead to different scriptPubKeys.
+    fn script_pubkey(&self, reclaim_script: ScriptBuf) -> ScriptBuf {
+        let deposit_script = self.deposit_script();
+        match self {
+            DepositScript::V1(_) => {
+                sbtc::deposits::to_script_pubkey(deposit_script, reclaim_script)
+            }
+            DepositScript::V2(_) => {
+                sbtc::deposits::to_v2_script_pubkey(deposit_script, reclaim_script)
+            }
+        }
+    }
 }
 
 struct Context {
@@ -372,6 +416,16 @@ async fn exec_deposit(ctx: &Context, args: DepositArgs) -> Result<(), Error> {
     let tx_id = ctx.bitcoin_client.send_raw_transaction(&signed_tx.hex)?;
     println!("Transaction sent: {tx_id}");
 
+    // A v2 deposit script only commits to a hash of the recipient and max
+    // fee, so Emily needs them alongside the script.
+    let (max_fee, recipient) = match &deposit_script {
+        DepositScript::V1(_) => (None, None),
+        DepositScript::V2(inputs) => {
+            let recipient = hex::encode(inputs.recipient.serialize_to_vec());
+            (Some(Some(inputs.max_fee)), Some(Some(recipient)))
+        }
+    };
+
     let emily_deposit = deposit_api::create_deposit(
         &ctx.emily_config,
         CreateDepositRequestBody {
@@ -380,8 +434,8 @@ async fn exec_deposit(ctx: &Context, args: DepositArgs) -> Result<(), Error> {
             deposit_script: deposit_script.deposit_script().to_hex_string(),
             reclaim_script: reclaim_script.reclaim_script().to_hex_string(),
             transaction_hex: serialize_hex(&unsigned_tx),
-            recipient: None,
-            max_fee: None,
+            max_fee,
+            recipient,
         },
     )
     .await
@@ -404,6 +458,17 @@ async fn exec_reclaim(ctx: &Context, args: ReclaimArgs) -> Result<(), Error> {
     let reclaim_script = ScriptBuf::from_hex(&deposit.reclaim_script)
         .map_err(signer::error::Error::DecodeHexScript)?;
     let reclaim_inputs = ReclaimScriptInputs::parse(&reclaim_script)?;
+
+    // Emily leaves out the version if it predates v2 deposits, in which
+    // case all of its deposits are v1 deposits.
+    let taproot = match deposit.version {
+        Some(DepositVersion::V2) => {
+            sbtc::deposits::to_v2_taproot(deposit_script, reclaim_script.clone())
+        }
+        Some(DepositVersion::V1) | None => {
+            sbtc::deposits::to_taproot(deposit_script, reclaim_script.clone())
+        }
+    };
 
     let mut reclaim_tx = Transaction {
         input: vec![TxIn {
@@ -431,10 +496,7 @@ async fn exec_reclaim(ctx: &Context, args: ReclaimArgs) -> Result<(), Error> {
 
         let prevout = TxOut {
             value: Amount::from_sat(deposit.amount),
-            script_pubkey: sbtc::deposits::to_script_pubkey(
-                deposit_script.clone(),
-                reclaim_script.clone(),
-            ),
+            script_pubkey: ScriptBuf::new_p2tr_tweaked(taproot.output_key()),
         };
 
         // Sign logic from reclaiming_rejected_deposits test
@@ -450,7 +512,7 @@ async fn exec_reclaim(ctx: &Context, args: ReclaimArgs) -> Result<(), Error> {
         witness_data.push(signature.serialize().to_vec());
     }
 
-    let control_block = sbtc::deposits::to_taproot(deposit_script, reclaim_script.clone())
+    let control_block = taproot
         .control_block(&(reclaim_script.clone(), LeafVersion::TapScript))
         .expect("reclaim script must be present in the deposit taproot tree");
     witness_data.push(reclaim_script.to_bytes());
@@ -616,22 +678,42 @@ fn address_to_clarity_arg(addr: &Address) -> (u8, Vec<u8>) {
     (version, bytes.to_vec())
 }
 
+/// Create the deposit transaction, returning it along with the inputs for
+/// its deposit and reclaim scripts.
 async fn create_bitcoin_deposit_transaction(
     ctx: &Context,
     args: &DepositArgs,
-) -> Result<(Transaction, DepositScriptInputs, ReclaimScriptInputs), Error> {
-    let aggregate_key = ctx
-        .get_current_aggregate_key()
-        .await?
-        .ok_or(Error::MissingAggregateKeyInContract)?;
+) -> Result<(Transaction, DepositScript, ReclaimScriptInputs), Error> {
+    let recipient = PrincipalData::parse(&args.recipient)
+        .map_err(|_| Error::InvalidStacksAddress(args.recipient.clone()))?;
 
-    let deposit_script = DepositScriptInputs {
-        signers_public_key: aggregate_key.into(),
-        max_fee: args.max_fee,
-        recipient: PrincipalData::Standard(StandardPrincipalData::from(
-            StacksAddress::from_string(&args.recipient)
-                .ok_or(Error::InvalidStacksAddress(args.recipient.clone()))?,
-        )),
+    let deposit_script = if args.v2 {
+        let signer_set_info = ctx
+            .stacks_client
+            .get_current_signer_set_info(&ctx.deployer)
+            .await?
+            .ok_or(Error::MissingSignerSetInContract)?;
+        let public_keys = signer_set_info.signer_set.iter().map(Into::into);
+        let signer_key_set =
+            SignerKeySet::derive(public_keys, signer_set_info.signatures_required)?;
+        println!("v2 key set id: {}", signer_key_set.id());
+
+        DepositScript::V2(DepositScriptInputsV2 {
+            signer_key_set,
+            recipient,
+            max_fee: args.max_fee,
+        })
+    } else {
+        let aggregate_key = ctx
+            .get_current_aggregate_key()
+            .await?
+            .ok_or(Error::MissingAggregateKeyInContract)?;
+
+        DepositScript::V1(DepositScriptInputs {
+            signers_public_key: aggregate_key.into(),
+            max_fee: args.max_fee,
+            recipient,
+        })
     };
 
     let public_key: secp256k1::PublicKey =
@@ -649,10 +731,7 @@ async fn create_bitcoin_deposit_transaction(
         &ctx.bitcoin_client,
         TxOut {
             value: Amount::from_sat(args.amount),
-            script_pubkey: sbtc::deposits::to_script_pubkey(
-                deposit_script.deposit_script(),
-                reclaim_script.reclaim_script(),
-            ),
+            script_pubkey: deposit_script.script_pubkey(reclaim_script.reclaim_script()),
         },
         Amount::from_sat(153),
     )?;

@@ -169,6 +169,7 @@ async fn one_tx_per_request_set(
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: None,
         signer_public_key: setup.signers.keys[0],
         signer_set: BitcoinSignerSet::V1 {
             aggregate_key,
@@ -288,6 +289,7 @@ async fn one_invalid_deposit_invalidates_tx() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: None,
         signer_public_key: setup.signers.keys[0],
         signer_set: BitcoinSignerSet::V1 {
             aggregate_key,
@@ -469,6 +471,7 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_ref.block_hash,
         chain_tip_height: chain_tip_ref.block_height,
+        withdrawal_finality_height: Some(chain_tip_ref.block_height.saturating_add(1u64)),
         signer_public_key: setup.signers.keys[0],
         signer_set: BitcoinSignerSet::V1 {
             aggregate_key,
@@ -591,6 +594,7 @@ async fn swept_withdrawals_fail_validation() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_ref.block_hash,
         chain_tip_height: chain_tip_ref.block_height,
+        withdrawal_finality_height: Some(chain_tip_ref.block_height.saturating_add(1u64)),
         signer_public_key: setup.signers.keys[0],
         signer_set: BitcoinSignerSet::V1 {
             aggregate_key,
@@ -724,6 +728,7 @@ async fn cannot_sign_deposit_is_ok() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: None,
         signer_public_key: setup.signers.keys[0],
         signer_set: BitcoinSignerSet::V1 {
             aggregate_key,
@@ -873,6 +878,7 @@ async fn sighashes_match_from_sbtc_requests_object() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: Some(chain_tip_block.block_height.saturating_add(1u64)),
         signer_public_key: setup.signers.keys[0],
         signer_set: BitcoinSignerSet::V1 {
             aggregate_key,
@@ -1028,6 +1034,7 @@ async fn outcome_is_independent_of_input_order() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: Some(chain_tip_block.block_height.saturating_add(1u64)),
         signer_public_key: setup.signers.keys[0],
         signer_set: BitcoinSignerSet::V1 {
             aggregate_key,

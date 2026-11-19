@@ -199,6 +199,7 @@ where
     Ok(BitcoinTxContext {
         chain_tip: chain_tip.block_hash,
         chain_tip_height: chain_tip.block_height,
+        withdrawal_finality_height: context.state().withdrawal_finality_height(),
         signer_public_key: context.config().signer.public_key(),
         signer_set: BitcoinSignerSet::load(context, chain_tip).await?,
     })

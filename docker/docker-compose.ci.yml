@@ -32,7 +32,22 @@ services:
       retries: 5
 
   emily-dynamodb:
-    image: "amazon/dynamodb-local:latest"
+    image: "amazon/dynamodb-local:3.3.2@sha256:6ada631ec7aa5fc83446855eb17233e3dad184fec47477e8140c6c569cfe0c86"
     command: "-jar DynamoDBLocal.jar -sharedDb -dbPath ."
     ports:
       - "127.0.0.1:8000:8000"
+    # Make a real ListTables request, so that DynamoDB Local is healthy only
+    # once it can serve the requests that we make. It doesn't verify
+    # signatures, but it rejects requests without an Authorization header.
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >-
+          curl --silent --fail --output /dev/null --request POST
+          --header 'X-Amz-Target: DynamoDB_20120810.ListTables'
+          --header 'Content-Type: application/x-amz-json-1.0'
+          --header 'Authorization: AWS4-HMAC-SHA256 Credential=healthcheck/20000101/us-west-2/dynamodb/aws4_request, SignedHeaders=host, Signature=0'
+          --data '{}' http://localhost:8000
+      interval: 1s
+      timeout: 1s
+      retries: 30
