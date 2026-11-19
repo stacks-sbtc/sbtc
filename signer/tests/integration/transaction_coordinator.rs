@@ -4453,6 +4453,7 @@ fn create_test_setup(
         withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
         signatures_required,
         client: bitcoin_client.clone(),
+        op_return_version: OpReturnVersion::V1,
     }
 }
 

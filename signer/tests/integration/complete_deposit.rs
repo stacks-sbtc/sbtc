@@ -82,12 +82,23 @@ pub fn make_complete_deposit(data: &TestSweepSetup) -> (CompleteDepositV1, ReqCo
     (complete_deposit_tx, req_ctx)
 }
 
-/// Create a "proper" [`CompleteDepositV1`] object and context with the
-/// given information. If the information here is correct then the returned
-/// [`CompleteDepositV1`] object will pass validation with the given
-/// context.
+/// Create a "proper" [`CompleteDepositV1`] object and context for the
+/// first deposit in the given setup. If the information here is correct
+/// then the returned [`CompleteDepositV1`] object will pass validation
+/// with the given context.
 pub fn make_complete_deposit2(data: &TestSweepSetup2) -> (CompleteDepositV1, ReqContext) {
-    let deposit = &data.deposits[0];
+    make_complete_deposit_for(data, 0)
+}
+
+/// Create a "proper" [`CompleteDepositV1`] object and context for the
+/// deposit at `index` in the given setup. If the information here is
+/// correct then the returned [`CompleteDepositV1`] object will pass
+/// validation with the given context.
+pub fn make_complete_deposit_for(
+    data: &TestSweepSetup2,
+    index: usize,
+) -> (CompleteDepositV1, ReqContext) {
+    let deposit = &data.deposits[index];
     let sweep_tx_info = data.sweep_tx_info.clone().unwrap();
     // The fee assessed for a deposit is subtracted from the minted amount.
     let fee = sweep_tx_info

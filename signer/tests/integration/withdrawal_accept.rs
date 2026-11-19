@@ -29,28 +29,44 @@ const WITHDRAWAL_AMOUNT: [SweepAmounts; 1] = [SweepAmounts {
     is_deposit: false,
 }];
 
-/// Create a "proper" [`AcceptWithdrawalV1`] object and context with the
-/// given information. If the information here is correct then the returned
-/// [`AcceptWithdrawalV1`] object will pass validation with the given
-/// context.
+/// Create a "proper" [`AcceptWithdrawalV1`] object and context for the
+/// first withdrawal in the given setup. If the information here is correct
+/// then the returned [`AcceptWithdrawalV1`] object will pass validation
+/// with the given context.
 fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqContext) {
+    make_withdrawal_accept_for(data, 0)
+}
+
+/// Create a "proper" [`AcceptWithdrawalV1`] object and context for the
+/// withdrawal at `index` in the given setup. If the information here is
+/// correct then the returned [`AcceptWithdrawalV1`] object will pass
+/// validation with the given context.
+pub fn make_withdrawal_accept_for(
+    data: &TestSweepSetup2,
+    index: usize,
+) -> (AcceptWithdrawalV1, ReqContext) {
+    // The sweep's first two outputs belong to the signers, and the
+    // withdrawal outputs follow in the same order as the withdrawals in
+    // the setup, which are sorted by request ID.
+    let vout = index + 2;
     // Okay now we get ready to create the transaction using the
     // `AcceptWithdrawalV1` type.
     let sweep_tx_info = data.sweep_tx_info.clone().unwrap();
-    let fee = sweep_tx_info.tx_info.assess_output_fee(2).unwrap().to_sat();
+    let fee = sweep_tx_info
+        .tx_info
+        .assess_output_fee(vout)
+        .unwrap()
+        .to_sat();
     let complete_withdrawal_tx = AcceptWithdrawalV1 {
         // This OutPoint points to the withdrawal UTXO. We look up our
         // record of the actual withdrawal to make sure that the amount
         // matches the one in the withdrawal request.
         outpoint: OutPoint {
             txid: sweep_tx_info.tx_info.compute_txid(),
-            // The sweep transaction has exactly 3 outputs, where the first
-            // two are about the signers and the third one is for the
-            // withdrawal request.
-            vout: 2,
+            vout: vout as u32,
         },
         // This points to the withdrawal request transaction.
-        id: data.withdrawal_ids()[0].clone(),
+        id: data.withdrawal_ids()[index].clone(),
         // This is the assessed transaction fee for fulfilling the withdrawal
         // request.
         tx_fee: fee,
@@ -71,7 +87,7 @@ fn make_withdrawal_accept(data: &TestSweepSetup2) -> (AcceptWithdrawalV1, ReqCon
             block_hash: sweep_tx_info.block_hash,
             block_height: sweep_tx_info.block_height,
         },
-        stacks_chain_tip: data.withdrawals[0].request.block_hash,
+        stacks_chain_tip: data.withdrawals[index].request.block_hash,
         // This value means that the signer will go back 20 blocks when
         // looking for pending and accepted withdrawal requests.
         context_window: 20,

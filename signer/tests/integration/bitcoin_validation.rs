@@ -3,6 +3,7 @@ use std::ops::Deref as _;
 
 use bitcoin::ScriptBuf;
 use bitcoin::hashes::Hash as _;
+use rand::Rng as _;
 use rand::rngs::OsRng;
 use rand::seq::SliceRandom as _;
 use sbtc::testing::containers::TestContainersBuilder;
@@ -21,6 +22,7 @@ use signer::bitcoin::validation::WithdrawalValidationResult;
 use signer::context::Context;
 use signer::context::SbtcLimits;
 use signer::message::BitcoinPreSignRequest;
+use signer::stacks::contracts::AsContractCall as _;
 use signer::storage::DbRead as _;
 use signer::storage::model::TxPrevoutType;
 use signer::testing;
@@ -28,11 +30,15 @@ use signer::testing::context::TestContext;
 use signer::testing::context::*;
 use signer::testing::get_rng;
 
+use crate::complete_deposit::make_complete_deposit_for;
 use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
 use crate::setup::backfill_bitcoin_blocks;
+use crate::setup::set_deposit_incomplete;
+use crate::setup::set_withdrawal_incomplete;
+use crate::withdrawal_accept::make_withdrawal_accept_for;
 
 const TEST_FEE_RATE: f64 = 10.0;
 
@@ -1059,6 +1065,128 @@ async fn outcome_is_independent_of_input_order() {
     let input_rows2 = set2.to_input_rows();
 
     assert_eq!(input_rows1, input_rows2);
+
+    testing::storage::drop_db(db).await;
+}
+
+/// Deposits and withdrawals swept together under the even fee rule are
+/// all charged the same share of the sweep's fee. The shares together
+/// cover the fee, none exceeds its request's max fee, and the signers
+/// accept the Stacks settlement calls that charge them.
+#[test_case(1, 1; "one deposit and one withdrawal")]
+#[test_case(25, 50; "25 deposits and 50 withdrawals")]
+#[tokio::test]
+async fn even_fee_sweep_settles_requests_equally(num_deposits: usize, num_withdrawals: usize) {
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    // The max fees are well above what the even fee rule asks of each
+    // request at the test fee rate, so every request makes it into the
+    // sweep.
+    let is_deposit =
+        std::iter::repeat_n(true, num_deposits).chain(std::iter::repeat_n(false, num_withdrawals));
+    let amounts: Vec<SweepAmounts> = is_deposit
+        .map(|is_deposit| SweepAmounts {
+            amount: if is_deposit {
+                rng.gen_range(200_000..2_000_000)
+            } else {
+                rng.gen_range(100_000..1_000_000)
+            },
+            max_fee: rng.gen_range(10_000..100_000),
+            is_deposit,
+        })
+        .collect();
+
+    let signers = TestSignerSet::new(&mut rng);
+    let mut setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &amounts);
+    setup.op_return_version = OpReturnVersion::V2;
+
+    // Normal: the signers follow the bitcoin blockchain, so we store the
+    // blocks with the deposits and the deposit transactions themselves.
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+    setup.store_deposit_txs(&db).await;
+
+    // Normal: the deposits and withdrawals are swept in one transaction,
+    // which gets confirmed.
+    setup.submit_sweep_tx(faucet);
+    backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash().unwrap()).await;
+    setup.store_sweep_tx(&db).await;
+    setup.store_bitcoin_withdrawals_outputs(&db).await;
+
+    // Normal: we need to store a row in the dkg_shares table so that we
+    // have a record of the scriptPubKey that the signers control.
+    setup.store_dkg_shares(&db).await;
+
+    // Normal: the requests and how the signers voted on them. Storing the
+    // withdrawal requests also stores the stacks blocks, including the
+    // genesis block that deposit validation needs.
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+    setup.store_withdrawal_requests(&db).await;
+    setup.store_withdrawal_decisions(&db).await;
+
+    // The sweep commits to even fees and services every request.
+    let sweep_tx = &setup.sweep_tx_info.as_ref().unwrap().tx_info;
+    assert_eq!(
+        OpReturnVersion::from_tx(&sweep_tx.tx),
+        Some(OpReturnVersion::V2)
+    );
+    assert_eq!(sweep_tx.tx.input.len(), num_deposits + 1);
+    assert_eq!(sweep_tx.tx.output.len(), num_withdrawals + 2);
+    let tx_fee = sweep_tx.fee.unwrap().to_sat();
+
+    let complete_deposits: Vec<_> = (0..num_deposits)
+        .map(|index| make_complete_deposit_for(&setup, index))
+        .collect();
+    let accept_withdrawals: Vec<_> = (0..num_withdrawals)
+        .map(|index| make_withdrawal_accept_for(&setup, index))
+        .collect();
+
+    // A deposit's charge is the difference between what was deposited and
+    // what gets minted, while a withdrawal's charge is its fee. We pair
+    // each charge with the max fee of its request.
+    let deposit_charges = setup
+        .deposits
+        .iter()
+        .zip(&complete_deposits)
+        .map(|((_, request, _), (call, _))| (request.amount - call.amount, request.max_fee));
+    let withdrawal_charges = setup
+        .withdrawals
+        .iter()
+        .zip(&accept_withdrawals)
+        .map(|(withdrawal, (call, _))| (call.tx_fee, withdrawal.request.max_fee));
+    let charges: Vec<(u64, u64)> = deposit_charges.chain(withdrawal_charges).collect();
+
+    let (first_charge, _) = charges[0];
+    let total_charged: u64 = charges.iter().map(|(charge, _)| charge).sum();
+    assert!(charges.iter().all(|&(charge, _)| charge == first_charge));
+    more_asserts::assert_ge!(total_charged, tx_fee);
+    for &(charge, max_fee) in &charges {
+        more_asserts::assert_le!(charge, max_fee);
+    }
+
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_bitcoin_client(bitcoin.get_client())
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+
+    // Normal: none of the requests are completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
+    set_withdrawal_incomplete(&mut ctx).await;
+
+    for (call, req_ctx) in &complete_deposits {
+        call.validate(&ctx, req_ctx).await.unwrap();
+    }
+    for (call, req_ctx) in &accept_withdrawals {
+        call.validate(&ctx, req_ctx).await.unwrap();
+    }
 
     testing::storage::drop_db(db).await;
 }
