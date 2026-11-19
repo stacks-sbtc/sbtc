@@ -807,6 +807,10 @@ impl BitcoinInteract for BitcoinCoreClient {
         self.get_blockchain_info()
     }
 
+    async fn get_network(&self) -> Result<bitcoin::Network, Error> {
+        self.get_blockchain_info().map(|info| info.chain)
+    }
+
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         self.get_network_info()
     }

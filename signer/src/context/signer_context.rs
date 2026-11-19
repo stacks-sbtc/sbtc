@@ -1,4 +1,6 @@
 use std::sync::Arc;
+
+use tokio::sync::OnceCell;
 use tokio::sync::broadcast::Sender;
 
 use crate::{
@@ -7,17 +9,40 @@ use crate::{
     config::{EmilyClientConfig, Settings},
     emily_client::EmilyInteract,
     error::Error,
-    stacks::api::StacksInteract,
+    stacks::api::{StacksChainId, StacksInteract},
     storage::{DbRead, DbWrite, Transactable},
 };
 
 use super::{Context, SignerSignal, SignerState, TerminationHandle};
+
+/// Network identity reported by the connected nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeNetwork {
+    /// The Stacks chain ID reported by `/v2/info` as `network_id`.
+    pub stacks_chain_id: StacksChainId,
+    /// The Bitcoin network reported by `getblockchaininfo`.
+    pub bitcoin_network: bitcoin::Network,
+}
+
+impl NodeNetwork {
+    /// Returns true if the connected Stacks node is on mainnet.
+    pub fn is_stacks_mainnet(&self) -> bool {
+        self.stacks_chain_id.is_mainnet()
+    }
+
+    /// Returns true if the connected Bitcoin node is on mainnet.
+    pub fn is_bitcoin_mainnet(&self) -> bool {
+        self.bitcoin_network == bitcoin::Network::Bitcoin
+    }
+}
 
 /// Signer context which is passed to different components within the
 /// signer binary.
 #[derive(Debug, Clone)]
 pub struct SignerContext<S, BC, ST, EM> {
     config: Settings,
+    /// The Bitcoin and Stacks network identities.
+    node_network: Arc<OnceCell<NodeNetwork>>,
     // Handle to the app signalling channel. This keeps the channel alive
     // for the duration of the program and is used both to send messages
     // and to hand out new receivers.
@@ -80,7 +105,7 @@ where
     ST: StacksInteract + Clone + Sync + Send,
     EM: EmilyInteract + Clone + Sync + Send,
 {
-    /// Create a new signer context.
+    /// Create a signer context.
     pub fn new(
         config: Settings,
         db: S,
@@ -100,6 +125,7 @@ where
 
         Self {
             config,
+            node_network: Arc::new(OnceCell::new()),
             state: Arc::new(state),
             signal_tx,
             term_tx,
@@ -108,6 +134,15 @@ where
             stacks_client,
             emily_client,
         }
+    }
+
+    /// Set the network identity instead of discovering it from the
+    /// connected nodes. Passing `None` clears it so that it is discovered
+    /// on first use.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_node_network(mut self, network: Option<NodeNetwork>) -> Self {
+        self.node_network = Arc::new(OnceCell::new_with(network));
+        self
     }
 }
 
@@ -120,6 +155,33 @@ where
 {
     fn config(&self) -> &Settings {
         &self.config
+    }
+
+    async fn node_network(&self) -> Result<NodeNetwork, Error> {
+        self.node_network
+            .get_or_try_init(|| async {
+                let (bitcoin_network, stacks_chain_id) = tokio::try_join!(
+                    self.bitcoin_client.get_network(),
+                    self.stacks_client.get_chain_id()
+                )?;
+                let network = NodeNetwork {
+                    stacks_chain_id,
+                    bitcoin_network,
+                };
+                self.config
+                    .validate_network(&network)
+                    .inspect_err(|error| {
+                        // A configuration validation failure is fatal.
+                        tracing::error!(%error, ?network, "node network validation failed; shutting down");
+                        self.get_termination_handle().signal_shutdown();
+                    })
+                    .map_err(Error::SignerConfig)?;
+
+                tracing::debug!(?network, "discovered node network identity");
+                Ok(network)
+            })
+            .await
+            .copied()
     }
 
     fn state(&self) -> &Arc<SignerState> {
@@ -200,18 +262,108 @@ impl<Storage, Bitcoin, Stacks, Emily> SignerContext<Storage, Bitcoin, Stacks, Em
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicU8, Ordering},
-    };
+    use super::*;
+    use std::assert_matches;
+    use std::sync::atomic::{AtomicU8, Ordering};
 
     use tokio::sync::Notify;
 
-    use crate::storage::model::BitcoinBlockRef;
     use crate::{
-        context::{Context as _, SignerEvent, SignerSignal},
+        context::{SignerCommand, SignerEvent},
+        storage::{memory::SharedStore, model::BitcoinBlockRef},
         testing::context::*,
     };
+
+    type MockContext = TestContext<
+        SharedStore,
+        WrappedMockBitcoinInteract,
+        WrappedMockStacksInteract,
+        WrappedMockEmilyInteract,
+    >;
+
+    const EXPECTED_NETWORK: NodeNetwork = NodeNetwork {
+        stacks_chain_id: StacksChainId::TESTNET,
+        bitcoin_network: bitcoin::Network::Regtest,
+    };
+
+    /// Start with an empty cache and return the supplied Stacks responses in order.
+    /// Bitcoin always reports regtest. Each response allows one discovery attempt.
+    async fn context_with_network_responses<const N: usize>(
+        responses: [Result<StacksChainId, Error>; N],
+    ) -> MockContext {
+        let mut context = TestContext::default_mocked();
+        // TestContext normally seeds a known network, bypassing discovery.
+        context.inner = context.inner.with_node_network(None);
+        context
+            .with_bitcoin_client(|client| {
+                client.expect_get_network().times(N).returning(|| {
+                    Box::pin(async {
+                        // Allow concurrent callers to reach the uninitialized cache.
+                        tokio::task::yield_now().await;
+                        Ok(bitcoin::Network::Regtest)
+                    })
+                });
+            })
+            .await;
+        context
+            .with_stacks_client(|client| {
+                for response in responses {
+                    client
+                        .expect_get_chain_id()
+                        .once()
+                        .return_once(move || Box::pin(async move { response }));
+                }
+            })
+            .await;
+        context
+    }
+
+    #[tokio::test]
+    async fn node_network_retries_after_rpc_error() {
+        let context =
+            context_with_network_responses([Err(Error::Dummy), Ok(StacksChainId::TESTNET)]).await;
+
+        let termination = context.get_termination_handle();
+
+        assert_matches!(context.node_network().await, Err(Error::Dummy));
+        assert!(context.inner.node_network.get().is_none());
+        assert!(!termination.shutdown_signalled());
+
+        assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
+        assert_eq!(context.node_network().await.unwrap(), EXPECTED_NETWORK);
+        assert!(!termination.shutdown_signalled());
+    }
+
+    #[tokio::test]
+    async fn node_network_validation_error_signals_shutdown() {
+        // The test config uses a testnet deployer, so mainnet fails validation.
+        let context = context_with_network_responses([Ok(StacksChainId::MAINNET)]).await;
+        let other_component = context.clone();
+        let mut termination = other_component.get_termination_handle();
+        assert!(!termination.shutdown_signalled());
+
+        // Handling the error must not prevent other components from shutting down.
+        assert_matches!(context.node_network().await, Err(Error::SignerConfig(_)));
+        assert!(context.inner.node_network.get().is_none());
+        assert!(termination.shutdown_signalled());
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            termination.wait_for_shutdown(),
+        )
+        .await
+        .expect("network validation failure must notify shutdown listeners");
+
+        // Components still starting when validation failed must also stop.
+        let mut late_subscriber = context.get_termination_handle();
+        assert!(late_subscriber.shutdown_signalled());
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            late_subscriber.wait_for_shutdown(),
+        )
+        .await
+        .expect("listeners created after shutdown must not wait for another signal");
+    }
 
     /// This test shows that cloning a context and signalling on the original
     /// context will also signal on the cloned context. But it also demonstrates
@@ -272,5 +424,24 @@ mod tests {
 
         // Ensure that the signal was received.
         assert_eq!(recv_count.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+
+    /// The signal stream forwards the shutdown command and then ends, even
+    /// when shutdown was signalled before the stream was created.
+    #[tokio::test]
+    async fn signal_stream_ends_after_shutdown() {
+        use futures::StreamExt as _;
+
+        let context = TestContext::default_mocked();
+        context.get_termination_handle().signal_shutdown();
+
+        let mut stream = context.as_signal_stream(|_| true);
+        let timeout = std::time::Duration::from_secs(3);
+
+        let signal = tokio::time::timeout(timeout, stream.next()).await.unwrap();
+        assert_matches!(signal, Some(SignerSignal::Command(SignerCommand::Shutdown)));
+
+        let signal = tokio::time::timeout(timeout, stream.next()).await.unwrap();
+        assert!(signal.is_none());
     }
 }

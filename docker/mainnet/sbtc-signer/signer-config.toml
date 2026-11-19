@@ -82,12 +82,6 @@ endpoint = "http://blocklist-client:3032"
 # Environment: SIGNER_SIGNER__PRIVATE_KEY
 # private_key = "0000000000000000000000000000000000000000000000000000000000000001"
 
-# Specifies which network to use when constructing and sending transactions
-# on stacks and bitcoin. This corresponds to the `chain` flag in the
-# bitcoin.conf file of the connected bitcoin-core node, and the
-# `burnchain.mode` flag int he config.toml of the connected stacks-core
-# node.
-network = "mainnet"
 
 # The address that deployed the sbtc smart contracts.
 deployer = "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4"
