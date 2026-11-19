@@ -138,8 +138,8 @@ network = "regtest"
 # fees evenly across requests.
 #
 # Required: false
-# Environment: SIGNER_SIGNER__FEE_ASSESSMENT_BLOCK_HEIGHT
-# fee_assessment_block_height = 245
+# Environment: SIGNER_SIGNER__EVEN_FEES_BLOCK_HEIGHT
+# even_fees_block_height = 255
 
 # Bitcoin height at which signers disable DKG and switch rotate-keys calls to
 # the v2 registry-key encoding. The height must not be lower than the effective

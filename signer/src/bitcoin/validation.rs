@@ -15,11 +15,11 @@ use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
 use crate::MAX_DEPOSITS_PER_BITCOIN_PACKAGE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
+use crate::bitcoin::op_return::OpReturnVersion;
 use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::DepositSigningKey;
 use crate::bitcoin::utxo::FeeAssessment;
-use crate::bitcoin::utxo::FeeAssessmentMethod;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::context::Context;
 use crate::context::SbtcLimits;
@@ -334,15 +334,15 @@ impl BitcoinPreSignRequest {
             assess_mempool_sweep_transaction_fees(&bitcoin_client, &signer_utxo).await?;
 
         let output_key_set = btc_ctx.signer_set.output_key_set();
-        let activation_height = ctx.config().signer.even_fees_activation_height();
-        let fee_assessment_method =
-            FeeAssessmentMethod::from_chain_tip_height(btc_ctx.chain_tip_height, activation_height);
+        let activation_height = ctx.config().signer.even_fees_block_height();
+        let op_return_version =
+            OpReturnVersion::from_chain_tip_height(btc_ctx.chain_tip_height, activation_height);
         let mut signer_state = SignerBtcState {
             fee_rate: self.fee_rate,
             utxo: signer_utxo,
             output_key_set,
             last_fees,
-            fee_assessment_method,
+            op_return_version,
             magic_bytes: *b"T3",
         };
         let mut outputs = Vec::new();
@@ -1586,7 +1586,7 @@ mod tests {
             .to_sat();
         let mut even_tx = tx.clone();
         even_tx.output[1].script_pubkey =
-            ScriptBuf::new_op_return([b'T', b'3', FeeAssessmentMethod::Even.op_return_version()]);
+            ScriptBuf::new_op_return([b'T', b'3', OpReturnVersion::V2.to_byte()]);
         let even_fee = even_tx
             .assess_input_fee(&deposit_outpoint, TX_FEE)
             .unwrap()
@@ -1962,7 +1962,7 @@ mod tests {
 
         let mut even_tx = tx.clone();
         even_tx.output[1].script_pubkey =
-            ScriptBuf::new_op_return([b'T', b'3', FeeAssessmentMethod::Even.op_return_version()]);
+            ScriptBuf::new_op_return([b'T', b'3', OpReturnVersion::V2.to_byte()]);
         let even_fee = even_tx.assess_output_fee(output_index, TX_FEE).unwrap();
 
         more_asserts::assert_gt!(even_fee, proportional_fee);

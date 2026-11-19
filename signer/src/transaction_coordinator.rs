@@ -23,12 +23,12 @@ use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::WITHDRAWAL_DUST_LIMIT;
 use crate::WITHDRAWAL_EXPIRY_BUFFER;
 use crate::bitcoin::BitcoinInteract as _;
+use crate::bitcoin::op_return::OpReturnVersion;
 use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
 use crate::bitcoin::utxo;
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::DepositSigningKey;
 use crate::bitcoin::utxo::FeeAssessmentError;
-use crate::bitcoin::utxo::FeeAssessmentMethod;
 use crate::bitcoin::utxo::SignatureCollector;
 use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
@@ -2009,9 +2009,9 @@ where
             .await?
             .ok_or(Error::MissingSignerUtxo)?;
 
-        let activation_height = self.context.config().signer.even_fees_activation_height();
-        let fee_assessment_method =
-            FeeAssessmentMethod::from_chain_tip_height(chain_tip.block_height, activation_height);
+        let activation_height = self.context.config().signer.even_fees_block_height();
+        let op_return_version =
+            OpReturnVersion::from_chain_tip_height(chain_tip.block_height, activation_height);
 
         // We still need to send these to the other signers, since they may
         // not have upgraded their binaries yet.
@@ -2022,7 +2022,7 @@ where
             utxo,
             output_key_set: output_key_set.clone(),
             last_fees,
-            fee_assessment_method,
+            op_return_version,
             magic_bytes: *b"T3",
         })
     }

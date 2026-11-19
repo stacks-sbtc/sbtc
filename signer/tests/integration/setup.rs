@@ -25,10 +25,10 @@ use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::BitcoinInteract as _;
+use signer::bitcoin::op_return::OpReturnVersion;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
 use signer::bitcoin::utxo;
-use signer::bitcoin::utxo::FeeAssessmentMethod;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
@@ -218,7 +218,7 @@ impl TestSweepSetup {
                 },
                 fee_rate: 10.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,
@@ -942,7 +942,7 @@ impl TestSweepSetup2 {
                 },
                 fee_rate: 10.0,
                 last_fees,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,

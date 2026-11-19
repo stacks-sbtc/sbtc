@@ -18,6 +18,7 @@ use crate::bitcoin::rpc::OutPointSummary;
 use crate::error::Error;
 
 pub mod client;
+pub mod op_return;
 pub mod packaging;
 pub mod poller;
 pub mod rpc;

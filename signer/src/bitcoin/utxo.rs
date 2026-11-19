@@ -21,8 +21,6 @@ use bitcoin::Weight;
 use bitcoin::Witness;
 use bitcoin::absolute::LockTime;
 use bitcoin::consensus::Encodable as _;
-use bitcoin::opcodes::all::OP_RETURN;
-use bitcoin::script::Instruction;
 use bitcoin::script::PushBytesBuf;
 use bitcoin::sighash::Prevouts;
 use bitcoin::sighash::SighashCache;
@@ -50,6 +48,8 @@ use crate::DEPOSIT_DUST_LIMIT;
 use crate::MAX_BITCOIN_BLOCK_VSIZE;
 use crate::MAX_DEPOSITS_PER_BITCOIN_PACKAGE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
+use crate::bitcoin::op_return::FeeAssessmentMethod;
+use crate::bitcoin::op_return::OpReturnVersion;
 use crate::bitcoin::packaging::Weighted;
 use crate::bitcoin::packaging::compute_optimal_packages;
 use crate::bitcoin::rpc::BitcoinTxInfo;
@@ -63,7 +63,6 @@ use crate::proto;
 use crate::stacks::api::SignerSetInfo;
 use crate::storage::DbRead as _;
 use crate::storage::model;
-use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::KeySetId;
 use crate::storage::model::QualifiedRequestId;
@@ -117,12 +116,6 @@ pub const BASE_TX_VSIZE_WITHOUT_SIGNER_INPUT: f64 = 79.25;
 /// is the smallest detectable increment for bumping the fee rate in sats
 /// per vbyte.
 const SATS_PER_VBYTE_INCREMENT: f64 = 0.001;
-
-/// The OP_RETURN version used by sweeps with proportional fee assessment.
-const OP_RETURN_VERSION_PROPORTIONAL_FEES: u8 = 1;
-
-/// The OP_RETURN version used by sweeps with even fee assessment.
-const OP_RETURN_VERSION_EVEN_FEES: u8 = 2;
 
 /// The OP_RETURN header size (magic bytes + version)
 const OP_RETURN_HEADER_SIZE: usize = 3;
@@ -387,9 +380,10 @@ pub struct SignerBtcState {
     /// The total fee amount and the fee rate for the last transaction that
     /// used this UTXO as an input.
     pub last_fees: Option<Fees>,
-    /// The rule used to apportion transaction fees to requests. This is
+    /// The `OP_RETURN` version of sweeps built from this state, which
+    /// also determines how fees are apportioned to requests. This is
     /// selected from the pre-sign chain tip and retained across a package.
-    pub fee_assessment_method: FeeAssessmentMethod,
+    pub op_return_version: OpReturnVersion,
     /// Two byte prefix for BTC transactions that are related to the Stacks
     /// blockchain.
     pub magic_bytes: [u8; 2],
@@ -442,7 +436,7 @@ impl SbtcRequests {
             signer_input_vsize: signer_input_vsize as f64,
             max_signer_input_vsize: max_signer_input_vsize as f64,
             max_request_vsize: self.max_request_vsize(),
-            fee_assessment_method: self.signer_state.fee_assessment_method,
+            fee_assessment_method: self.signer_state.op_return_version.fee_assessment_method(),
         };
         let deposits = request_preprocessor
             .filter_deposits(&self.deposits)
@@ -1092,14 +1086,32 @@ impl SignerUtxoKeySet {
         }
     }
 
+    /// Return the witness for spending a signer UTXO locked by this key
+    /// set, with placeholder signatures.
+    ///
+    /// The v1 witness is a key-path spend and the v2 witness is a
+    /// script-path spend, so the variant determines the witness size.
+    fn placeholder_witness(&self) -> Witness {
+        match self {
+            Self::V1(_) => Witness::p2tr_key_spend(&DUMMY_SIGNATURE),
+            Self::V2(key_set) => {
+                let signatures = dummy_threshold_signatures(key_set, *V2_DUMMY_SIGNATURE);
+                SignerUtxo::construct_v2_witness(key_set, &signatures)
+            }
+        }
+    }
+
     /// Return the virtual size of a signer input controlled by this key set.
     fn input_vsize(&self) -> u64 {
-        SignerUtxo {
-            outpoint: OutPoint::null(),
-            amount: 0,
-            key_set: self.clone(),
-        }
-        .input_vsize()
+        // Every outpoint has the same encoded size, so the null outpoint
+        // gives the same size as the real one.
+        let tx_in = TxIn {
+            previous_output: OutPoint::null(),
+            sequence: Sequence::ZERO,
+            witness: self.placeholder_witness(),
+            script_sig: ScriptBuf::new(),
+        };
+        tx_in.segwit_weight().to_vbytes_ceil()
     }
 }
 
@@ -1109,17 +1121,10 @@ impl SignerUtxo {
     /// The key-set variant determines whether the witness uses the v1 key
     /// path or the v2 script path.
     fn as_tx_input(&self) -> TxIn {
-        let witness = match &self.key_set {
-            SignerUtxoKeySet::V1(_) => Witness::p2tr_key_spend(&DUMMY_SIGNATURE),
-            SignerUtxoKeySet::V2(key_set) => {
-                let signatures = dummy_threshold_signatures(key_set, *V2_DUMMY_SIGNATURE);
-                Self::construct_v2_witness(key_set, &signatures)
-            }
-        };
         TxIn {
             previous_output: self.outpoint,
             sequence: Sequence::ZERO,
-            witness,
+            witness: self.key_set.placeholder_witness(),
             script_sig: ScriptBuf::new(),
         }
     }
@@ -1127,7 +1132,7 @@ impl SignerUtxo {
     /// Return the virtual size of this UTXO's input in a sweep
     /// transaction.
     fn input_vsize(&self) -> u64 {
-        self.as_tx_input().segwit_weight().to_vbytes_ceil()
+        self.key_set.input_vsize()
     }
 
     /// Construct the UTXO associated with this outpoint.
@@ -1728,9 +1733,8 @@ impl<'a> UnsignedTransaction<'a> {
     ///
     /// In the above layout:
     /// - magic: UTF-8 encoded string indicator (2 bytes)
-    /// - op: version byte (1 byte); version 1 indicates the proportional
-    ///   fee assessment rule should be used, while version 2 indicates the
-    ///   even fees rule should be used.
+    /// - op: version byte (1 byte); see [`OpReturnVersion`] for what each
+    ///   version means.
     /// - encoded IDs: withdrawal request IDs encoded using idpack (variable
     ///   length, if there are withdrawals serviced by the transaction)
     ///
@@ -1740,7 +1744,7 @@ impl<'a> UnsignedTransaction<'a> {
         // Create OP_RETURN data
         let mut data = PushBytesBuf::with_capacity(OP_RETURN_MAX_SIZE);
         data.extend_from_slice(&state.magic_bytes)?;
-        data.push(state.fee_assessment_method.op_return_version())?;
+        data.push(state.op_return_version.to_byte())?;
 
         // Extract all withdrawal request IDs
         let withdrawal_ids: Vec<u64> = reqs.iter().filter_map(|req| req.withdrawal_id()).collect();
@@ -1934,7 +1938,9 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
 
     /// Return a request's assessed share of the transaction fee.
     fn assess_fee(&self, item_weight: u64, tx_fee: Amount) -> Result<u64, FeeAssessmentError> {
-        let fee = match FeeAssessmentMethod::try_from_tx(self.tx_ref())? {
+        let version =
+            OpReturnVersion::from_tx(self.tx_ref()).ok_or(FeeAssessmentError::InvalidOpReturn)?;
+        let fee = match version.fee_assessment_method() {
             FeeAssessmentMethod::Proportional => {
                 // The Weight::to_wu function just returns the inner weight
                 // units as an u64, so this is really just the weight.
@@ -1944,10 +1950,9 @@ pub trait FeeAssessment: BitcoinInputsOutputs {
                 (item_weight * tx_fee.to_sat()).div_ceil(total_request_weight)
             }
             FeeAssessmentMethod::Even => {
-                // SAFETY: The number of inputs and outputs are limited by
-                // the weight allowed in a standard bitcoin transaction,
-                // which is probably less than u32::MAX. So this as-cast
-                // is fine, and so is the saturating_add call.
+                // SAFETY: The usize-to-u64 casts are lossless on every
+                // target we build for, and saturating_add cannot overflow,
+                // so neither needs a bound on the transaction's size.
                 let deposits = self.inputs().len().saturating_sub(1) as u64;
                 let withdrawals = self.outputs().len().saturating_sub(2) as u64;
                 let request_count = deposits.saturating_add(withdrawals);
@@ -1974,77 +1979,6 @@ pub enum FeeAssessmentError {
     /// The sweep OP_RETURN is missing, malformed, or uses an unsupported
     /// version.
     InvalidOpReturn,
-}
-
-/// The rule used to apportion a sweep transaction's miner fee to requests.
-///
-/// See <https://github.com/stacks-sbtc/sbtc/issues/2144>.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FeeAssessmentMethod {
-    /// Apportion fees according to each request's transaction weight.
-    Proportional,
-    /// Split fees evenly across all requests, rounding each share up.
-    Even,
-}
-
-impl FeeAssessmentMethod {
-    /// Select the fee rule from the Bitcoin chain-tip block height
-    /// relative to the activation height.
-    pub fn from_chain_tip_height(
-        chain_tip_height: BitcoinBlockHeight,
-        activation_height: BitcoinBlockHeight,
-    ) -> Self {
-        if chain_tip_height >= activation_height {
-            Self::Even
-        } else {
-            Self::Proportional
-        }
-    }
-
-    /// Return the sweep OP_RETURN version that commits to this fee rule.
-    pub fn op_return_version(self) -> u8 {
-        match self {
-            Self::Proportional => OP_RETURN_VERSION_PROPORTIONAL_FEES,
-            Self::Even => OP_RETURN_VERSION_EVEN_FEES,
-        }
-    }
-
-    /// Select the fee rule committed to by an OP_RETURN version byte.
-    fn from_op_return_version(version: u8) -> Option<Self> {
-        match version {
-            0 | OP_RETURN_VERSION_PROPORTIONAL_FEES => Some(Self::Proportional),
-            OP_RETURN_VERSION_EVEN_FEES => Some(Self::Even),
-            _ => None,
-        }
-    }
-
-    /// Read the fee-assessment method encoded in a sweep transaction's
-    /// OP_RETURN.
-    fn try_from_tx(value: &Transaction) -> Result<Self, FeeAssessmentError> {
-        // The second output is always the OP_RETURN output.
-        let script = &value
-            .outputs()
-            .get(1)
-            .ok_or(FeeAssessmentError::InvalidOpReturn)?
-            .script_pubkey;
-        let mut instructions = script.instructions();
-
-        let Some(Ok(Instruction::Op(OP_RETURN))) = instructions.next() else {
-            return Err(FeeAssessmentError::InvalidOpReturn);
-        };
-        let Some(Ok(Instruction::PushBytes(data))) = instructions.next() else {
-            return Err(FeeAssessmentError::InvalidOpReturn);
-        };
-        if instructions.next().is_some() {
-            return Err(FeeAssessmentError::InvalidOpReturn);
-        }
-
-        let version = data
-            .as_bytes()
-            .get(2)
-            .ok_or(FeeAssessmentError::InvalidOpReturn)?;
-        Self::from_op_return_version(*version).ok_or(FeeAssessmentError::InvalidOpReturn)
-    }
 }
 
 impl BitcoinInputsOutputs for Transaction {
@@ -2206,44 +2140,16 @@ pub trait TxDeconstructor: BitcoinInputsOutputs {
             return Err(Error::SbtcTxMalformed);
         }
 
-        let op_return_instructions: Vec<_> = op_return_output
-            .script_pubkey
-            .as_script()
-            .instructions()
-            .collect();
-
-        // The op return script must be a OP_RETURN and a push bytes
-        let [
-            Ok(Instruction::Op(OP_RETURN)),
-            Ok(Instruction::PushBytes(push_bytes)),
-        ] = op_return_instructions[..]
+        let Some((version, encoded_withdrawal_ids)) =
+            OpReturnVersion::from_script(&op_return_output.script_pubkey)
         else {
             return Err(Error::SbtcTxOpReturnFormatError);
         };
 
-        let raw_bytes = push_bytes.as_bytes();
-        if raw_bytes.len() < OP_RETURN_HEADER_SIZE {
-            return Err(Error::SbtcTxOpReturnFormatError);
-        }
-
-        // First two bytes are magic bytes, we don't care about them.
-        // The third one is the version byte.
-        // SAFETY: 2 < OP_RETURN_HEADER_SIZE (3)
-        let version = raw_bytes[2];
-
-        if version == 0 {
-            // In version 0 we didn't store withdrawal ids
+        if !version.encodes_withdrawal_ids() {
             return Ok(Vec::new());
-        } else if FeeAssessmentMethod::from_op_return_version(version).is_none() {
-            // Unknown version byte
-            return Err(Error::SbtcTxOpReturnFormatError);
         }
 
-        // SAFETY: We've verified raw_bytes.len() >= OP_RETURN_HEADER_SIZE (3),
-        // so starting a slice at index 3 is safe due to slice behavior.
-        // If raw_bytes.len() is exactly 3, this produces an empty slice rather
-        // than panicking.
-        let encoded_withdrawal_ids = &raw_bytes[OP_RETURN_HEADER_SIZE..];
         let withdrawal_ids: Vec<_> = Segments::decode(encoded_withdrawal_ids)
             .map_err(Error::IdPackDecode)?
             .values()
@@ -2859,7 +2765,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 15,
@@ -2897,7 +2803,7 @@ mod tests {
                 },
                 fee_rate: 5.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3016,7 +2922,7 @@ mod tests {
                 },
                 fee_rate,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 15,
@@ -3061,7 +2967,7 @@ mod tests {
             },
             fee_rate,
             last_fees: None,
-            fee_assessment_method: FeeAssessmentMethod::Even,
+            op_return_version: OpReturnVersion::V2,
             magic_bytes: *b"T3",
         };
         let mut withdrawal = create_withdrawal(100_000, u64::MAX, 0);
@@ -3184,7 +3090,7 @@ mod tests {
                 fee_rate,
                 output_key_set,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Even,
+                op_return_version: OpReturnVersion::V2,
                 magic_bytes: *b"T3",
             },
             num_signers: 15,
@@ -3448,7 +3354,7 @@ mod tests {
                         fee_rate: f64::from(test_case.fee_rate),
                         output_key_set: output_key_set.clone(),
                         last_fees,
-                        fee_assessment_method: FeeAssessmentMethod::Even,
+                        op_return_version: OpReturnVersion::V2,
                         magic_bytes: *b"T3",
                     },
                     num_signers: 15,
@@ -3630,7 +3536,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3694,7 +3600,7 @@ mod tests {
             },
             fee_rate: 0.0,
             last_fees: None,
-            fee_assessment_method: FeeAssessmentMethod::Proportional,
+            op_return_version: OpReturnVersion::V1,
             magic_bytes: [0; 2],
         };
 
@@ -3728,7 +3634,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: *b"ST",
             },
             num_signers: 10,
@@ -3808,7 +3714,8 @@ mod tests {
 
             assert_eq!(&data[0..2], b"ST", "magic bytes should be 'ST'");
             assert_eq!(
-                data[2], OP_RETURN_VERSION_PROPORTIONAL_FEES,
+                data[2],
+                OpReturnVersion::V1.to_byte(),
                 "version should commit to proportional fee assessment"
             );
 
@@ -3843,7 +3750,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3889,7 +3796,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3941,7 +3848,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -3990,7 +3897,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Even,
+                op_return_version: OpReturnVersion::V2,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4002,8 +3909,8 @@ mod tests {
         let transactions = requests.construct_transactions().unwrap();
         more_asserts::assert_gt!(transactions.len(), 1);
         assert!(transactions.iter().all(|tx| {
-            tx.signer_utxo.fee_assessment_method == FeeAssessmentMethod::Even
-                && FeeAssessmentMethod::try_from_tx(&tx.tx) == Ok(FeeAssessmentMethod::Even)
+            tx.signer_utxo.op_return_version == OpReturnVersion::V2
+                && OpReturnVersion::from_tx(&tx.tx) == Some(OpReturnVersion::V2)
         }));
 
         transactions.windows(2).for_each(|unsigned| {
@@ -4055,7 +3962,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4156,7 +4063,7 @@ mod tests {
                 },
                 fee_rate: 25.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4223,7 +4130,7 @@ mod tests {
                 },
                 fee_rate: 25.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4301,7 +4208,7 @@ mod tests {
                 },
                 fee_rate: 25.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4347,7 +4254,7 @@ mod tests {
                 },
                 fee_rate: 0.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4406,7 +4313,7 @@ mod tests {
                 },
                 fee_rate,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 10,
@@ -4731,8 +4638,8 @@ mod tests {
         let fee = Amount::from_sat(10_007);
         let mut tx2 = tx1.clone();
 
-        let even_op_return = [b'T', b'3', OP_RETURN_VERSION_EVEN_FEES];
-        let proportional_op_return = [b'T', b'3', OP_RETURN_VERSION_PROPORTIONAL_FEES];
+        let even_op_return = [b'T', b'3', OpReturnVersion::V2.to_byte()];
+        let proportional_op_return = [b'T', b'3', OpReturnVersion::V1.to_byte()];
 
         tx1.output[1].script_pubkey = ScriptBuf::new_op_return(even_op_return);
         let even_tx_info = BitcoinTxInfo::from_tx(tx1, fee);
@@ -4750,9 +4657,9 @@ mod tests {
         assert_eq!(even_output_fee, even_input_fee);
     }
 
-    /// Malformed OP_RETURN layouts that must not select a fee rule.
+    /// Malformed OP_RETURN layouts that must not parse to a version.
     #[derive(Debug, Clone, Copy)]
-    enum MalformedFeeAssessmentCommitment {
+    enum MalformedOpReturn {
         /// The transaction has no OP_RETURN output.
         MissingOutput,
         /// The second output does not begin with OP_RETURN.
@@ -4767,62 +4674,55 @@ mod tests {
         ExtraInstruction,
     }
 
-    /// Fee assessment reports malformed or unsupported sweep OP_RETURN data.
-    #[test_case(MalformedFeeAssessmentCommitment::MissingOutput; "missing output")]
-    #[test_case(MalformedFeeAssessmentCommitment::MissingOpReturn; "missing OP_RETURN")]
-    #[test_case(MalformedFeeAssessmentCommitment::MissingData; "missing data push")]
-    #[test_case(MalformedFeeAssessmentCommitment::MissingVersion; "missing version")]
-    #[test_case(MalformedFeeAssessmentCommitment::UnsupportedVersion; "unsupported version")]
-    #[test_case(MalformedFeeAssessmentCommitment::ExtraInstruction; "extra instruction")]
-    fn malformed_op_return_does_not_select_fee_assessment(
-        malformed: MalformedFeeAssessmentCommitment,
-    ) {
+    /// Malformed or unsupported sweep OP_RETURN data has no version, so
+    /// fee assessment reports it as invalid.
+    #[test_case(MalformedOpReturn::MissingOutput; "missing output")]
+    #[test_case(MalformedOpReturn::MissingOpReturn; "missing OP_RETURN")]
+    #[test_case(MalformedOpReturn::MissingData; "missing data push")]
+    #[test_case(MalformedOpReturn::MissingVersion; "missing version")]
+    #[test_case(MalformedOpReturn::UnsupportedVersion; "unsupported version")]
+    #[test_case(MalformedOpReturn::ExtraInstruction; "extra instruction")]
+    fn malformed_op_return_has_no_version(malformed: MalformedOpReturn) {
         let mut tx = base_signer_transaction();
 
         match malformed {
-            MalformedFeeAssessmentCommitment::MissingOutput => tx.output.truncate(1),
-            MalformedFeeAssessmentCommitment::MissingOpReturn => {
+            MalformedOpReturn::MissingOutput => tx.output.truncate(1),
+            MalformedOpReturn::MissingOpReturn => {
                 tx.output[1].script_pubkey = ScriptBuf::new();
             }
-            MalformedFeeAssessmentCommitment::MissingData => {
+            MalformedOpReturn::MissingData => {
                 tx.output[1].script_pubkey =
                     ScriptBuf::builder().push_opcode(OP_RETURN).into_script();
             }
-            MalformedFeeAssessmentCommitment::MissingVersion => {
+            MalformedOpReturn::MissingVersion => {
                 tx.output[1].script_pubkey = ScriptBuf::new_op_return(*b"T3");
             }
-            MalformedFeeAssessmentCommitment::UnsupportedVersion => {
+            MalformedOpReturn::UnsupportedVersion => {
                 tx.output[1].script_pubkey = ScriptBuf::new_op_return(*b"T3\x03");
             }
-            MalformedFeeAssessmentCommitment::ExtraInstruction => {
+            MalformedOpReturn::ExtraInstruction => {
                 tx.output[1].script_pubkey = ScriptBuf::builder()
                     .push_opcode(OP_RETURN)
-                    .push_slice([b'T', b'3', OP_RETURN_VERSION_EVEN_FEES])
+                    .push_slice([b'T', b'3', OpReturnVersion::V2.to_byte()])
                     .push_int(1)
                     .into_script();
             }
         }
 
+        assert_eq!(OpReturnVersion::from_tx(&tx), None);
+
+        // Give the transaction a deposit so that fee assessment gets as
+        // far as reading the version. We add an input rather than an
+        // output so that the outputs stay as each case set them up.
+        let deposit_outpoint = OutPoint::new(Txid::from_byte_array([1; 32]), 0);
+        tx.input.push(TxIn {
+            previous_output: deposit_outpoint,
+            ..Default::default()
+        });
         assert_eq!(
-            FeeAssessmentMethod::try_from_tx(&tx),
+            tx.assess_input_fee(&deposit_outpoint, Amount::from_sat(1_000)),
             Err(FeeAssessmentError::InvalidOpReturn)
         );
-    }
-
-    /// The activation height selects the fee rule at the boundary.
-    #[test_case(99, 100, FeeAssessmentMethod::Proportional; "proportional")]
-    #[test_case(100, 100, FeeAssessmentMethod::Even; "at the boundary")]
-    #[test_case(101, 100, FeeAssessmentMethod::Even; "after the boundary")]
-    fn fee_assessment_at_chain_tip_height(
-        chain_height: u64,
-        activation_height: u64,
-        expected_method: FeeAssessmentMethod,
-    ) {
-        let activation_height = BitcoinBlockHeight::from(activation_height);
-        let actual_method =
-            FeeAssessmentMethod::from_chain_tip_height(chain_height.into(), activation_height);
-
-        assert_eq!(actual_method, expected_method);
     }
 
     #[test_case(0, true; "deposit amounts over the dust limit accepted")]
@@ -4866,7 +4766,7 @@ mod tests {
                 utxo,
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             num_signers: 11,
@@ -4913,7 +4813,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             accept_threshold: 127,
@@ -4967,7 +4867,7 @@ mod tests {
                 },
                 fee_rate: 1.0,
                 last_fees: None,
-                fee_assessment_method: FeeAssessmentMethod::Proportional,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: [0; 2],
             },
             accept_threshold: 10,
@@ -5425,11 +5325,11 @@ mod tests {
         assert!(matches!(withdrawal_outs, Error::SbtcTxOpReturnFormatError));
     }
 
-    #[test_case(OP_RETURN_VERSION_PROPORTIONAL_FEES; "proportional fees")]
-    #[test_case(OP_RETURN_VERSION_EVEN_FEES; "even fees")]
-    fn test_to_withdrawal_outputs_happy_path(version: u8) {
+    #[test_case(OpReturnVersion::V1; "proportional fees")]
+    #[test_case(OpReturnVersion::V2; "even fees")]
+    fn test_to_withdrawal_outputs_happy_path(version: OpReturnVersion) {
         let mut pb = PushBytesBuf::new();
-        pb.extend_from_slice(&[0, 0, version]).unwrap();
+        pb.extend_from_slice(&[0, 0, version.to_byte()]).unwrap();
         pb.extend_from_slice(&BitmapSegmenter.package(&[42, 51]).unwrap().encode())
             .unwrap();
 

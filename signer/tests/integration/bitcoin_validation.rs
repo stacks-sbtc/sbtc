@@ -9,8 +9,8 @@ use sbtc::testing::containers::TestContainersBuilder;
 use test_case::test_case;
 
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
+use signer::bitcoin::op_return::OpReturnVersion;
 use signer::bitcoin::utxo::BitcoinSignerSet;
-use signer::bitcoin::utxo::FeeAssessmentMethod;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::validation::BitcoinTxContext;
@@ -51,9 +51,9 @@ where
         .await
         .unwrap()
         .unwrap();
-    let fee_assessment_method = FeeAssessmentMethod::from_chain_tip_height(
+    let op_return_version = OpReturnVersion::from_chain_tip_height(
         btc_ctx.chain_tip_height,
-        ctx.config().signer.even_fees_activation_height(),
+        ctx.config().signer.even_fees_block_height(),
     );
     SignerBtcState {
         output_key_set: btc_ctx.signer_set.output_key_set(),
@@ -64,7 +64,7 @@ where
             .map(TryInto::try_into)
             .transpose()
             .unwrap(),
-        fee_assessment_method,
+        op_return_version,
         magic_bytes: *b"T3",
     }
 }
@@ -104,14 +104,14 @@ impl AssertConstantInvariants for Vec<BitcoinTxValidationData> {
     }
 }
 
-/// Signer validation commits to the configured fee rule on both sides of
-/// the activation boundary.
-#[test_case(1, FeeAssessmentMethod::Proportional; "before activation")]
-#[test_case(0, FeeAssessmentMethod::Even; "at activation")]
+/// Signer validation commits to the configured OP_RETURN version on both
+/// sides of the even-fees activation boundary.
+#[test_case(1, OpReturnVersion::V1; "before activation")]
+#[test_case(0, OpReturnVersion::V2; "at activation")]
 #[tokio::test]
 async fn one_tx_per_request_set(
     activation_offset: u64,
-    expected_fee_assessment: FeeAssessmentMethod,
+    expected_op_return_version: OpReturnVersion,
 ) {
     let db = testing::storage::new_test_database().await;
     let mut rng = get_rng();
@@ -149,7 +149,7 @@ async fn one_tx_per_request_set(
 
     let chain_tip = db.get_bitcoin_canonical_chain_tip().await.unwrap().unwrap();
     let chain_tip_block = db.get_bitcoin_block(&chain_tip).await.unwrap().unwrap();
-    ctx.config_mut().signer.fee_assessment_block_height =
+    ctx.config_mut().signer.even_fees_block_height =
         Some(chain_tip_block.block_height + activation_offset);
 
     let stacks_chain_tip = db.get_stacks_chain_tip(&chain_tip).await.unwrap().unwrap();
@@ -195,7 +195,7 @@ async fn one_tx_per_request_set(
     let set = &validation_data[0];
     assert!(set.to_withdrawal_rows().is_empty());
     let expected_script_pubkey =
-        ScriptBuf::new_op_return([b'T', b'3', expected_fee_assessment.op_return_version()]);
+        ScriptBuf::new_op_return([b'T', b'3', expected_op_return_version.to_byte()]);
     assert_eq!(set.tx.output[1].script_pubkey, expected_script_pubkey);
 
     // This transaction package
