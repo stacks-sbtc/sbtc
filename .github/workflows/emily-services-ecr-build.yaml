@@ -137,7 +137,7 @@ jobs:
       ## The arm64 image runs target-platform commands at build time (uv sync, apt-get).
       - name: Setup QEMU
         id: setup_qemu
-        uses: stacks-sbtc/actions/docker/setup-qemu-action@505c42b153ba2ac261c276e96bc5dc7b68d61039
+        uses: stacks-sbtc/actions/docker/setup-qemu-action@381b4fcd97e9240200566ec68736d61e239e4082
 
       - name: Setup Buildx
         id: setup_buildx
