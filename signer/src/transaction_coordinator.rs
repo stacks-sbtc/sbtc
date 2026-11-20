@@ -3023,10 +3023,10 @@ mod tests {
             utxo: SignerUtxo {
                 outpoint: bitcoin::OutPoint::null(),
                 amount: 1_000_000,
-                public_key: x_only,
+                key_set: SignerUtxoKeySet::V1(x_only),
             },
             fee_rate: 1.0,
-            public_key: x_only,
+            output_key_set: SignerUtxoKeySet::V1(x_only),
             last_fees: None,
             magic_bytes: *b"T3",
         };
