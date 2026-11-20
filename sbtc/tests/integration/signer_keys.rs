@@ -3,6 +3,7 @@
 use bitcoin::Address;
 use bitcoin::Network;
 use bitcoin::NetworkKind;
+use bitcoincore_rpc::Auth;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi as _;
 use rand::rngs::OsRng;
@@ -36,7 +37,11 @@ fn derive_address(rpc: &Client, descriptor: &str) -> Address {
 #[test_case(15, 11; "11-of-15")]
 #[test_case(16, 16; "16-of-16")]
 fn key_set_script_pubkey_matches_bitcoin_core(signer_count: usize, signatures_required: u16) {
-    let (rpc, _) = regtest::initialize_blockchain();
+    let auth = Auth::UserPass(
+        regtest::BITCOIN_CORE_RPC_USERNAME.to_string(),
+        regtest::BITCOIN_CORE_RPC_PASSWORD.to_string(),
+    );
+    let rpc = Client::new(regtest::BITCOIN_CORE_RPC_ENDPOINT, auth).unwrap();
 
     let public_keys: Vec<PublicKey> = (0..signer_count)
         .map(|_| PublicKey::from_secret_key(SECP256K1, &SecretKey::new(&mut OsRng)))
@@ -44,10 +49,10 @@ fn key_set_script_pubkey_matches_bitcoin_core(signer_count: usize, signatures_re
     let key_set = SignerKeySet::derive(public_keys.clone(), signatures_required).unwrap();
     let expected = Address::from_script(&key_set.script_pubkey(), Network::Regtest).unwrap();
 
-    let address = derive_address(rpc, &key_set.descriptor());
+    let address = derive_address(&rpc, &key_set.descriptor());
     assert_eq!(address, expected);
 
     let descriptor = signer_set_descriptor(public_keys, signatures_required, NetworkKind::Test);
-    let address = derive_address(rpc, &descriptor);
+    let address = derive_address(&rpc, &descriptor);
     assert_eq!(address, expected);
 }

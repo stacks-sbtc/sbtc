@@ -16,6 +16,7 @@ mod e2e;
 mod emily;
 mod malicious;
 mod postgres;
+mod postgres_performance;
 mod rbf;
 mod request_decider;
 mod rotate_keys;

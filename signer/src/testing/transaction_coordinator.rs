@@ -289,6 +289,10 @@ where
 
         // Get the chain tips from storage.
         let (bitcoin_chain_tip, stacks_chain_tip) = storage.get_chain_tips().await;
+        let withdrawal_finality_height = bitcoin_chain_tip.block_height.saturating_add(1u64);
+        context
+            .state()
+            .set_withdrawal_finality_height(Some(withdrawal_finality_height));
 
         // Get pending withdrawals from coordinator
         let pending_requests = coordinator
@@ -303,7 +307,8 @@ where
             .block_height
             .saturating_sub(crate::WITHDRAWAL_BLOCKS_EXPIRY);
 
-        // Get pending withdrawals from storage.
+        // Get pending withdrawals before applying the in-memory finality
+        // constraint.
         let withdrawals_in_storage = storage
             .get_pending_accepted_withdrawal_requests(
                 bitcoin_chain_tip.as_ref(),
@@ -314,9 +319,6 @@ where
             .await
             .expect("Error extracting withdrawals from db");
 
-        let max_processable_height = bitcoin_chain_tip
-            .block_height
-            .saturating_sub(sbtc::WITHDRAWAL_MIN_CONFIRMATIONS);
         let min_processable_height = bitcoin_chain_tip
             .block_height
             .saturating_sub(crate::WITHDRAWAL_BLOCKS_EXPIRY)
@@ -325,18 +327,6 @@ where
         // Assert that there are some withdrawals for test consistency
         assert!(!withdrawals_in_storage.is_empty());
         for withdrawal in withdrawals_in_storage {
-            if withdrawal.bitcoin_block_height > max_processable_height {
-                assert!(!withdrawals
-                    .iter()
-                    .any(|w| w.request_id == withdrawal.request_id && w.txid == withdrawal.txid));
-                tracing::info!(
-                    request_id = %withdrawal.request_id,
-                    block_height = %withdrawal.bitcoin_block_height,
-                    %max_processable_height,
-                    "skipping asserting withdrawal exists as it doesn't have enough confirmations");
-                continue;
-            }
-
             if withdrawal.bitcoin_block_height <= min_processable_height {
                 assert!(!withdrawals
                     .iter()
@@ -349,10 +339,21 @@ where
                 continue;
             }
 
+            if withdrawal.bitcoin_block_height >= withdrawal_finality_height {
+                assert!(!withdrawals
+                    .iter()
+                    .any(|w| w.request_id == withdrawal.request_id && w.txid == withdrawal.txid));
+                tracing::info!(
+                    request_id = %withdrawal.request_id,
+                    block_height = %withdrawal.bitcoin_block_height,
+                    %withdrawal_finality_height,
+                    "skipping asserting withdrawal exists as it is not final");
+                continue;
+            }
+
             tracing::info!(
                 request_id = %withdrawal.request_id,
                 block_height = %withdrawal.bitcoin_block_height,
-                %max_processable_height,
                 "checking withdrawal");
             assert!(
                 withdrawals

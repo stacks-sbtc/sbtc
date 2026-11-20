@@ -240,6 +240,34 @@ pub trait DbRead {
         signature_threshold: u16,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
 
+    /// Return the exclusive upper bound for final withdrawal-request
+    /// burn-view heights.
+    ///
+    /// The returned height is the Bitcoin anchor height of the parent of
+    /// the newest Stacks tenure on the supplied tip's ancestry with at
+    /// least [`crate::WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS`] consecutive
+    /// blocks. That tenure's Bitcoin anchor must have at least
+    /// `min_confirmations` descendants. Its winning block-commit commits
+    /// to the first block of its parent tenure, so requests with burn-view
+    /// heights below the returned height are in an earlier tenure and are
+    /// part of the committed Stacks ancestry.
+    ///
+    /// The caller must supply the canonical Stacks tip. This returns `None`
+    /// when there are fewer than `min_confirmations + 1` canonical Bitcoin
+    /// blocks, fewer than two Stacks tenures on the supplied ancestry,
+    /// no child tenure has enough Stacks blocks and Bitcoin confirmations,
+    /// the supplied Stacks chain has incomplete ancestry, or one of the
+    /// required tenure anchors is not on the canonical Bitcoin chain. The
+    /// ancestry walk also stops before an anchor below
+    /// `minimum_withdrawal_height`, since such a checkpoint cannot finalize
+    /// a withdrawal request that the caller still considers live.
+    fn get_withdrawal_finality_height(
+        &self,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
+    ) -> impl Future<Output = Result<Option<BitcoinBlockHeight>, Error>> + Send;
+
     /// Get pending rejected withdrawal requests that have failed but are not
     /// rejected yet
     fn get_pending_rejected_withdrawal_requests(
