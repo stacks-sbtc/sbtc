@@ -51,6 +51,7 @@ use signer::testing;
 use signer::testing::context::*;
 use signer::transaction_coordinator::TxCoordinatorEventLoop;
 use signer::transaction_coordinator::coordinator_public_key;
+use signer::transaction_signer::BITCOIN_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::TxSignerEventLoop;
 use signer::util::FutureExt as _;
@@ -291,6 +292,7 @@ async fn start_signers(
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         let counter = start_count.clone();
         tokio::spawn(async move {
@@ -370,6 +372,8 @@ where
         deposit_script: deposit_request.deposit_script.to_hex_string(),
         reclaim_script: deposit_info.reclaim_script.to_hex_string(),
         transaction_hex: serialize_hex(&deposit_tx),
+        recipient: None,
+        max_fee: None,
     };
 
     deposit_api::create_deposit(emily.config(), emily_request)
@@ -443,7 +447,9 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
         .get_current_signers_aggregate_key(&deployer)
         .await
         .unwrap()
-        .expect("no aggregate key in contract after first rotate-key");
+        .expect("no aggregate key in contract after first rotate-key")
+        .v1_public_key()
+        .expect("test requires a v1 signer key");
 
     let verified_dkg = signers[0]
         .storage
@@ -559,7 +565,7 @@ async fn dkg_verification_failure_does_not_block_deposit_sweep() {
             .get_current_signers_aggregate_key(&deployer)
             .await
             .unwrap(),
-        Some(first_aggregate_key),
+        Some(first_aggregate_key.into()),
         "failed DKG verification should not rotate the registry key"
     );
 

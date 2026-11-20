@@ -12,8 +12,12 @@ use bitcoin::relative::LockTime;
 use crate::BITCOIN_FEE_RATE_RANGE;
 use crate::DEPOSIT_DUST_LIMIT;
 use crate::DEPOSIT_LOCKTIME_BLOCK_BUFFER;
+use crate::MAX_DEPOSITS_PER_BITCOIN_PACKAGE;
+use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::bitcoin::rpc::assess_mempool_sweep_transaction_fees;
+use crate::bitcoin::utxo::BitcoinSignerSet;
+use crate::bitcoin::utxo::DepositSigningKey;
 use crate::bitcoin::utxo::FeeAssessment;
 use crate::bitcoin::utxo::SignerBtcState;
 use crate::context::Context;
@@ -31,8 +35,9 @@ use crate::storage::model::BitcoinWithdrawalOutput;
 use crate::storage::model::DkgSharesStatus;
 use crate::storage::model::QualifiedRequestId;
 use crate::storage::model::SignerVotes;
+use crate::storage::model::StacksPrincipal;
 use crate::storage::model::TaprootScriptHash;
-use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
+use sbtc::SignerKeySet;
 
 use super::utxo::DepositRequest;
 use super::utxo::RequestRef;
@@ -59,12 +64,14 @@ pub struct BitcoinTxContext {
     /// The block height of the bitcoin chain tip identified by the
     /// `chain_tip` field.
     pub chain_tip_height: BitcoinBlockHeight,
+    /// The exclusive upper bound for final withdrawal burn-view heights.
+    /// `None` means withdrawal finality is unavailable.
+    pub withdrawal_finality_height: Option<BitcoinBlockHeight>,
     /// This signer's public key.
     pub signer_public_key: PublicKey,
-    /// The current aggregate key that was the output of DKG. The DKG
-    /// shares associated with this aggregate key must have passed
-    /// verification.
-    pub aggregate_key: PublicKey,
+    /// The active signer set and its version-specific Bitcoin signing
+    /// material, including the key set that must lock the next signer UTXO.
+    pub signer_set: BitcoinSignerSet,
 }
 
 /// This type is a container for all deposits and withdrawals that are part
@@ -144,6 +151,27 @@ impl BitcoinPreSignRequest {
             return Err(Error::PreSignContainsNoRequests);
         }
 
+        let transaction_count = self.request_package.len();
+        let max_transaction_count = MAX_MEMPOOL_PACKAGE_TX_COUNT as usize;
+        if transaction_count > max_transaction_count {
+            return Err(Error::PreSignTooManyTransactions {
+                count: transaction_count,
+                max: max_transaction_count,
+            });
+        }
+
+        let deposit_count = self
+            .request_package
+            .iter()
+            .map(|requests| requests.deposits.len())
+            .sum();
+        if deposit_count > MAX_DEPOSITS_PER_BITCOIN_PACKAGE {
+            return Err(Error::PreSignTooManyDeposits {
+                count: deposit_count,
+                max: MAX_DEPOSITS_PER_BITCOIN_PACKAGE,
+            });
+        }
+
         if !is_unique(&self.request_package) {
             return Err(Error::DuplicateRequests);
         }
@@ -189,7 +217,11 @@ impl BitcoinPreSignRequest {
                 };
 
                 let votes = db
-                    .get_deposit_request_signer_votes(&txid, output_index, &btc_ctx.aggregate_key)
+                    .get_deposit_request_signer_votes(
+                        &txid,
+                        output_index,
+                        btc_ctx.signer_set.signer_public_keys(),
+                    )
                     .await?;
 
                 cache.deposit_reports.insert(outpoint, (report, votes));
@@ -208,7 +240,10 @@ impl BitcoinPreSignRequest {
                 };
 
                 let votes = db
-                    .get_withdrawal_request_signer_votes(qualified_id, &btc_ctx.aggregate_key)
+                    .get_withdrawal_request_signer_votes(
+                        qualified_id,
+                        btc_ctx.signer_set.signer_public_keys(),
+                    )
                     .await?;
 
                 cache
@@ -297,10 +332,11 @@ impl BitcoinPreSignRequest {
         let last_fees =
             assess_mempool_sweep_transaction_fees(&bitcoin_client, &signer_utxo).await?;
 
+        let output_key_set = btc_ctx.signer_set.output_key_set();
         let mut signer_state = SignerBtcState {
             fee_rate: self.fee_rate,
             utxo: signer_utxo,
-            public_key: bitcoin::XOnlyPublicKey::from(btc_ctx.aggregate_key),
+            output_key_set,
             last_fees,
             magic_bytes: *b"T3",
         };
@@ -360,7 +396,7 @@ impl BitcoinPreSignRequest {
         let reports = SbtcReports {
             deposits,
             withdrawals,
-            signer_state,
+            signer_state: signer_state.clone(),
         };
         let mut signer_state = signer_state;
         let tx = reports.create_transaction()?;
@@ -382,6 +418,7 @@ impl BitcoinPreSignRequest {
             tx_fee: Amount::from_sat(tx.tx_fee),
             reports,
             chain_tip_height: btc_ctx.chain_tip_height,
+            withdrawal_finality_height: btc_ctx.withdrawal_finality_height,
             sbtc_limits: ctx.state().get_current_limits(),
         };
 
@@ -409,6 +446,9 @@ pub struct BitcoinTxValidationData {
     pub tx_fee: Amount,
     /// the chain tip height.
     pub chain_tip_height: BitcoinBlockHeight,
+    /// The exclusive upper bound for final withdrawal burn-view heights.
+    /// `None` means withdrawal finality is unavailable.
+    pub withdrawal_finality_height: Option<BitcoinBlockHeight>,
     /// The current sBTC limits.
     pub sbtc_limits: SbtcLimits,
 }
@@ -464,7 +504,7 @@ impl BitcoinTxValidationData {
                 txid: sighash.txid.into(),
                 sighash: sighash.sighash.into(),
                 chain_tip: self.chain_tip,
-                aggregate_key: sighash.aggregate_key.into(),
+                key_set_id: sighash.key_set_id,
                 prevout_txid: sighash.outpoint.txid.into(),
                 prevout_output_index: sighash.outpoint.vout,
                 prevout_type: sighash.prevout_type,
@@ -498,6 +538,7 @@ impl BitcoinTxValidationData {
                 stacks_block_hash: report.id.block_hash,
                 validation_result: report.validate(
                     self.chain_tip_height,
+                    self.withdrawal_finality_height,
                     output_index + 2,
                     &self.tx,
                     self.tx_fee,
@@ -526,6 +567,7 @@ impl BitcoinTxValidationData {
         }
 
         let chain_tip_height = self.chain_tip_height;
+        let withdrawal_finality_height = self.withdrawal_finality_height;
         let tx = &self.tx;
         let tx_fee = self.tx_fee;
         let sbtc_limits = &self.sbtc_limits;
@@ -547,8 +589,14 @@ impl BitcoinTxValidationData {
                 .enumerate()
                 .all(|(index, (_, report))| {
                     let output_index = index + 2;
-                    let result =
-                        report.validate(chain_tip_height, output_index, tx, tx_fee, sbtc_limits);
+                    let result = report.validate(
+                        chain_tip_height,
+                        withdrawal_finality_height,
+                        output_index,
+                        tx,
+                        tx_fee,
+                        sbtc_limits,
+                    );
                     result == WithdrawalValidationResult::Ok
                 });
 
@@ -589,8 +637,9 @@ impl SbtcReports {
 }
 
 /// The responses for validation of a sweep transaction on bitcoin.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, sqlx::Type, strum::Display)]
 #[sqlx(type_name = "TEXT", rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 #[cfg_attr(feature = "testing", derive(fake::Dummy))]
 pub enum InputValidationResult {
     /// The deposit request passed validation
@@ -677,10 +726,8 @@ pub enum WithdrawalValidationResult {
     /// transaction that has been confirmed on the canonical bitcoin
     /// blockchain.
     RequestFulfilled,
-    /// The withdrawal request is not deemed final. This means that not
-    /// enough bitcoin blocks have been observed since observing the Stacks
-    /// block that confirmed the transaction creating the withdrawal
-    /// request.
+    /// Withdrawal finality is unavailable, or the request's burn-view
+    /// height is at or above the exclusive finality bound.
     RequestNotFinal,
     /// The signer has rejected the withdrawal request.
     RequestRejected,
@@ -810,11 +857,27 @@ pub struct DepositRequestReport {
     pub deposit_script: ScriptBuf,
     /// The reclaim script hash for the deposit.
     pub reclaim_script_hash: TaprootScriptHash,
-    /// The public key used in the deposit script.
-    pub signers_public_key: XOnlyPublicKey,
-    /// The status of the DKG shares associated with the above
-    /// `signers_public_key`.
-    pub dkg_shares_status: Option<DkgSharesStatus>,
+    /// Version-specific signing data for the deposit.
+    pub signing_data: DepositRequestSigningData,
+}
+
+/// Version-specific data needed to validate and sign a deposit input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DepositRequestSigningData {
+    /// A legacy deposit locked by a WSTS aggregate key.
+    V1 {
+        /// The aggregate x-only public key locking the deposit.
+        signers_public_key: XOnlyPublicKey,
+        /// The status of the DKG shares associated with the aggregate key.
+        dkg_shares_status: Option<DkgSharesStatus>,
+    },
+    /// A deposit locked by independent signatures over a `multi_a` script.
+    V2 {
+        /// The key set in the deposit script's `multi_a` script.
+        key_set: SignerKeySet,
+        /// The Stacks principal committed to by the deposit script.
+        recipient: StacksPrincipal,
+    },
 }
 
 impl DepositRequestReport {
@@ -909,14 +972,19 @@ impl DepositRequestReport {
             None => return InputValidationResult::NoVote,
         }
 
-        // We do not sign for inputs where we have not verified the
-        // aggregate key locking the UTXO. If our shares have not been
-        // verified then sending signature shares could be harmful overall.
-        match self.dkg_shares_status {
-            Some(DkgSharesStatus::Verified) => {}
-            Some(DkgSharesStatus::Unverified) => return InputValidationResult::DkgSharesUnverified,
-            Some(DkgSharesStatus::Failed) => return InputValidationResult::DkgSharesVerifyFailed,
-            None => return InputValidationResult::CannotSignUtxo,
+        // Only legacy deposits depend on verified DKG shares. V2 deposits
+        // use the independently derived key material validated by `can_sign`.
+        if let DepositRequestSigningData::V1 { dkg_shares_status, .. } = &self.signing_data {
+            match dkg_shares_status {
+                Some(DkgSharesStatus::Verified) => {}
+                Some(DkgSharesStatus::Unverified) => {
+                    return InputValidationResult::DkgSharesUnverified;
+                }
+                Some(DkgSharesStatus::Failed) => {
+                    return InputValidationResult::DkgSharesVerifyFailed;
+                }
+                None => return InputValidationResult::CannotSignUtxo,
+            }
         }
 
         InputValidationResult::Ok
@@ -924,13 +992,22 @@ impl DepositRequestReport {
 
     /// As deposit request.
     fn to_deposit_request(&self, votes: &SignerVotes) -> DepositRequest {
+        let signers_public_key = match &self.signing_data {
+            DepositRequestSigningData::V1 { signers_public_key, .. } => {
+                DepositSigningKey::V1(*signers_public_key)
+            }
+            DepositRequestSigningData::V2 { key_set, recipient } => DepositSigningKey::V2 {
+                key_set: key_set.clone(),
+                recipient: recipient.clone(),
+            },
+        };
         DepositRequest {
             outpoint: self.outpoint,
             max_fee: self.max_fee,
             amount: self.amount,
             deposit_script: self.deposit_script.clone(),
             reclaim_script_hash: self.reclaim_script_hash.clone(),
-            signers_public_key: self.signers_public_key,
+            signers_public_key,
             signer_bitmap: votes.into(),
         }
     }
@@ -988,6 +1065,7 @@ impl WithdrawalRequestReport {
     pub fn validate<F>(
         &self,
         bitcoin_chain_tip_height: BitcoinBlockHeight,
+        withdrawal_finality_height: Option<BitcoinBlockHeight>,
         output_index: usize,
         tx: &F,
         tx_fee: Amount,
@@ -1020,12 +1098,16 @@ impl WithdrawalRequestReport {
             return WithdrawalValidationResult::AmountIsDust;
         }
 
-        let block_wait = *bitcoin_chain_tip_height.saturating_sub(self.bitcoin_block_height);
-        if block_wait < WITHDRAWAL_MIN_CONFIRMATIONS {
+        let Some(withdrawal_finality_height) = withdrawal_finality_height else {
+            return WithdrawalValidationResult::RequestNotFinal;
+        };
+
+        if self.bitcoin_block_height >= withdrawal_finality_height {
             return WithdrawalValidationResult::RequestNotFinal;
         }
 
-        if block_wait > WITHDRAWAL_BLOCKS_EXPIRY {
+        let request_age = *bitcoin_chain_tip_height.saturating_sub(self.bitcoin_block_height);
+        if request_age > WITHDRAWAL_BLOCKS_EXPIRY {
             return WithdrawalValidationResult::RequestExpired;
         }
 
@@ -1065,7 +1147,10 @@ mod tests {
     use bitcoin::Txid;
     use bitcoin::Witness;
     use bitcoin::hashes::Hash as _;
+    use clarity::vm::types::PrincipalData;
+    use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
     use secp256k1::SECP256K1;
+    use stacks_common::types::chainstate::StacksAddress;
     use test_case::test_case;
 
     use crate::MAX_BITCOIN_FEE_RATE;
@@ -1089,6 +1174,14 @@ mod tests {
 
     const TX_FEE: Amount = Amount::from_sat(10000);
 
+    /// Construct legacy signing data for deposit-report validation tests.
+    fn v1_signing_data(dkg_shares_status: Option<DkgSharesStatus>) -> DepositRequestSigningData {
+        DepositRequestSigningData::V1 {
+            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
+            dkg_shares_status,
+        }
+    }
+
     #[test_case(DepositReportErrorMapping {
         report: DepositRequestReport {
             status: DepositConfirmationStatus::Unconfirmed,
@@ -1100,8 +1193,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::TxNotOnBestChain,
         chain_tip_height: 2u64.into(),
@@ -1118,8 +1210,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::DepositUtxoSpent,
         chain_tip_height: 2u64.into(),
@@ -1136,8 +1227,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::NoVote,
         chain_tip_height: 2u64.into(),
@@ -1154,8 +1244,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::CannotSignUtxo,
         chain_tip_height: 2u64.into(),
@@ -1172,8 +1261,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::RejectedRequest,
         chain_tip_height: 2u64.into(),
@@ -1190,8 +1278,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::LockTimeExpiry,
         chain_tip_height: 2u64.into(),
@@ -1208,8 +1295,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::LockTimeExpiry,
         chain_tip_height: 2u64.into(),
@@ -1226,8 +1312,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::UnsupportedLockTime,
         chain_tip_height: 2u64.into(),
@@ -1244,8 +1329,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::Ok,
         chain_tip_height: 2u64.into(),
@@ -1257,13 +1341,32 @@ mod tests {
             can_sign: Some(true),
             can_accept: Some(true),
             amount: 100_000_000,
+            max_fee: u64::MAX,
+            lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
+            outpoint: OutPoint::null(),
+            deposit_script: ScriptBuf::new(),
+            reclaim_script_hash: TaprootScriptHash::zeros(),
+            signing_data: DepositRequestSigningData::V2 {
+                key_set: SignerKeySet::new([*sbtc::UNSPENDABLE_TAPROOT_KEY], 1).unwrap(),
+                recipient: PrincipalData::from(StacksAddress::burn_address(false)).into(),
+            },
+        },
+        status: InputValidationResult::Ok,
+        chain_tip_height: 2u64.into(),
+        limits: SbtcLimits::new_per_deposit(0, u64::MAX),
+    } ; "v2-does-not-require-dkg-shares")]
+    #[test_case(DepositReportErrorMapping {
+        report: DepositRequestReport {
+            status: DepositConfirmationStatus::Confirmed(0u64.into(), BitcoinBlockHash::from([0; 32])),
+            can_sign: Some(true),
+            can_accept: Some(true),
+            amount: 100_000_000,
             max_fee: TX_FEE.to_sat(),
             lock_time: LockTime::from_height(DEPOSIT_LOCKTIME_BLOCK_BUFFER + 3),
             outpoint: OutPoint::new(bitcoin::Txid::from_byte_array([1; 32]), 0),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::Unknown,
         chain_tip_height: 2u64.into(),
@@ -1280,8 +1383,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::Ok,
         chain_tip_height: 2u64.into(),
@@ -1298,8 +1400,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::FeeTooHigh,
         chain_tip_height: 2u64.into(),
@@ -1316,8 +1417,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::MintAmountBelowDustLimit,
         chain_tip_height: 2u64.into(),
@@ -1334,8 +1434,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::Ok,
         chain_tip_height: 2u64.into(),
@@ -1352,8 +1451,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::FeeTooHigh,
         chain_tip_height: 2u64.into(),
@@ -1370,8 +1468,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::AmountTooHigh,
         chain_tip_height: 2u64.into(),
@@ -1388,8 +1485,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Verified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
         },
         status: InputValidationResult::AmountTooLow,
         chain_tip_height: 2u64.into(),
@@ -1406,8 +1502,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Unverified),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Unverified)),
         },
         status: InputValidationResult::DkgSharesUnverified,
         chain_tip_height: 2u64.into(),
@@ -1424,8 +1519,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: Some(DkgSharesStatus::Failed),
+            signing_data: v1_signing_data(Some(DkgSharesStatus::Failed)),
         },
         status: InputValidationResult::DkgSharesVerifyFailed,
         chain_tip_height: 2u64.into(),
@@ -1442,8 +1536,7 @@ mod tests {
             outpoint: OutPoint::null(),
             deposit_script: ScriptBuf::new(),
             reclaim_script_hash: TaprootScriptHash::zeros(),
-            signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-            dkg_shares_status: None,
+            signing_data: v1_signing_data(None),
         },
         status: InputValidationResult::CannotSignUtxo,
         chain_tip_height: 2u64.into(),
@@ -1472,6 +1565,7 @@ mod tests {
         report: WithdrawalRequestReport,
         status: WithdrawalValidationResult,
         chain_tip_height: BitcoinBlockHeight,
+        withdrawal_finality_height: Option<BitcoinBlockHeight>,
         limits: SbtcLimits,
     }
 
@@ -1498,12 +1592,13 @@ mod tests {
             max_fee: TX_FEE.to_sat(),
             // This is used for computing the dust amount during validation.
             recipient: TEST_RECIPIENT.clone(),
-            // This needs to be WITHDRAWAL_MIN_CONFIRMATIONS less than the
-            // chain_tip_height.
+            // The request's burn view must be strictly below the cached
+            // withdrawal finality height.
             bitcoin_block_height: 0u64.into(),
         },
         // This is part of sBTC consensus.
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: Some(1u64.into()),
         // This is set by Emily.
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::Ok,
@@ -1524,6 +1619,7 @@ mod tests {
         },
         status: WithdrawalValidationResult::AmountTooHigh,
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: Some(1u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
     } ; "amount-too-high")]
     #[test_case(WithdrawalReportErrorMapping {
@@ -1541,6 +1637,7 @@ mod tests {
             bitcoin_block_height: 0u64.into(),
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: Some(1u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::AmountIsDust,
     } ; "amount-is-dust")]
@@ -1559,6 +1656,7 @@ mod tests {
             bitcoin_block_height: 0u64.into(),
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: Some(1u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::Ok,
     } ; "amount-and-fee-divorced")]
@@ -1577,6 +1675,7 @@ mod tests {
             bitcoin_block_height: 0u64.into(),
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: Some(1u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::FeeTooHigh,
     } ; "fee-too-high")]
@@ -1595,6 +1694,7 @@ mod tests {
             bitcoin_block_height: 0u64.into(),
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: Some(1u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::NoVote,
     } ; "no-vote")]
@@ -1613,6 +1713,7 @@ mod tests {
             bitcoin_block_height: 0u64.into(),
         },
         chain_tip_height: (WITHDRAWAL_BLOCKS_EXPIRY + 1).into(),
+        withdrawal_finality_height: Some(1u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::RequestExpired,
     } ; "request-expired")]
@@ -1634,6 +1735,7 @@ mod tests {
             bitcoin_block_height: 0u64.into(),
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: Some(1u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::RequestFulfilled,
     } ; "request-fulfilled")]
@@ -1652,9 +1754,29 @@ mod tests {
             bitcoin_block_height: 0u64.into(),
         },
         chain_tip_height: (WITHDRAWAL_MIN_CONFIRMATIONS - 1).into(),
+        withdrawal_finality_height: Some(0u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::RequestNotFinal,
     } ; "request-not-final")]
+    #[test_case(WithdrawalReportErrorMapping {
+        report: WithdrawalRequestReport {
+            status: WithdrawalRequestStatus::Confirmed,
+            id: QualifiedRequestId {
+                request_id: 0,
+                txid: StacksTxId::from([0; 32]),
+                block_hash: StacksBlockHash::from([0; 32]),
+            },
+            is_accepted: Some(true),
+            amount: Amount::ONE_BTC.to_sat(),
+            max_fee: TX_FEE.to_sat(),
+            recipient: TEST_RECIPIENT.clone(),
+            bitcoin_block_height: 0u64.into(),
+        },
+        chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: None,
+        limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
+        status: WithdrawalValidationResult::RequestNotFinal,
+    } ; "request-not-final-without-finality-height")]
     #[test_case(WithdrawalReportErrorMapping {
         report: WithdrawalRequestReport {
             status: WithdrawalRequestStatus::Confirmed,
@@ -1670,6 +1792,7 @@ mod tests {
             bitcoin_block_height: 0u64.into(),
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: Some(1u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::RequestRejected,
     } ; "request-rejected")]
@@ -1688,6 +1811,7 @@ mod tests {
             bitcoin_block_height: 0u64.into(),
         },
         chain_tip_height: WITHDRAWAL_MIN_CONFIRMATIONS.into(),
+        withdrawal_finality_height: Some(1u64.into()),
         limits: SbtcLimits::new_per_withdrawal(Amount::ONE_BTC.to_sat()),
         status: WithdrawalValidationResult::TxNotOnBestChain,
     } ; "tx-not-on-best-chain")]
@@ -1700,11 +1824,17 @@ mod tests {
 
         let output_index = tx.output.len() - 1;
         let chain_tip_height = mapping.chain_tip_height;
+        let withdrawal_finality_height = mapping.withdrawal_finality_height;
         let limits = &mapping.limits;
 
-        let status = mapping
-            .report
-            .validate(chain_tip_height, output_index, &tx, TX_FEE, limits);
+        let status = mapping.report.validate(
+            chain_tip_height,
+            withdrawal_finality_height,
+            output_index,
+            &tx,
+            TX_FEE,
+            limits,
+        );
 
         assert_eq!(status, mapping.status);
     }
@@ -1738,7 +1868,14 @@ mod tests {
         let bitcoin_chain_tip_height = WITHDRAWAL_MIN_CONFIRMATIONS.into();
         let limits = &SbtcLimits::unlimited();
 
-        let status = report.validate(bitcoin_chain_tip_height, output_index, &tx, TX_FEE, limits);
+        let status = report.validate(
+            bitcoin_chain_tip_height,
+            Some(1u64.into()),
+            output_index,
+            &tx,
+            TX_FEE,
+            limits,
+        );
 
         assert_eq!(status, WithdrawalValidationResult::Unknown);
     }
@@ -2080,6 +2217,74 @@ mod tests {
         assert_eq!(requests.pre_validation().is_ok(), result);
     }
 
+    fn presign_request_with_deposits(count: usize) -> BitcoinPreSignRequest {
+        let deposits: Vec<_> = (0..count)
+            .map(|vout| OutPoint {
+                txid: Txid::from_byte_array([1; 32]),
+                vout: vout as u32,
+            })
+            .collect();
+
+        BitcoinPreSignRequest {
+            request_package: deposits
+                .chunks(crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX as usize)
+                .map(|deposits| TxRequestIds {
+                    deposits: deposits.to_vec(),
+                    withdrawals: Vec::new(),
+                })
+                .collect(),
+            fee_rate: 1.0,
+            last_fees: None,
+        }
+    }
+
+    #[test]
+    fn presign_request_enforces_package_deposit_limit() {
+        let request = presign_request_with_deposits(MAX_DEPOSITS_PER_BITCOIN_PACKAGE);
+        assert!(request.pre_validation().is_ok());
+
+        let count = MAX_DEPOSITS_PER_BITCOIN_PACKAGE + 1;
+        let request = presign_request_with_deposits(count);
+        assert!(matches!(
+            request.pre_validation(),
+            Err(Error::PreSignTooManyDeposits { count: actual, max })
+                if actual == count && max == MAX_DEPOSITS_PER_BITCOIN_PACKAGE
+        ));
+    }
+
+    #[test]
+    fn presign_request_enforces_package_transaction_limit() {
+        let max = MAX_MEMPOOL_PACKAGE_TX_COUNT as usize;
+        let request = BitcoinPreSignRequest {
+            request_package: (0..max)
+                .map(|vout| TxRequestIds {
+                    deposits: vec![OutPoint {
+                        txid: Txid::from_byte_array([1; 32]),
+                        vout: vout as u32,
+                    }],
+                    withdrawals: Vec::new(),
+                })
+                .collect(),
+            fee_rate: 1.0,
+            last_fees: None,
+        };
+        assert!(request.pre_validation().is_ok());
+
+        let mut request = request;
+        request.request_package.push(TxRequestIds {
+            deposits: vec![OutPoint {
+                txid: Txid::from_byte_array([1; 32]),
+                vout: max as u32,
+            }],
+            withdrawals: Vec::new(),
+        });
+        assert!(matches!(
+            request.pre_validation(),
+            Err(Error::PreSignTooManyTransactions { count, max: actual_max })
+                if count == max + 1 && actual_max == max
+        ));
+    }
+
     fn create_deposit_report(idx: u8, amount: u64) -> (DepositRequestReport, SignerVotes) {
         (
             DepositRequestReport {
@@ -2095,8 +2300,7 @@ mod tests {
                 lock_time: LockTime::from_height(100),
                 deposit_script: ScriptBuf::new(),
                 reclaim_script_hash: TaprootScriptHash::zeros(),
-                signers_public_key: *sbtc::UNSPENDABLE_TAPROOT_KEY,
-                dkg_shares_status: Some(DkgSharesStatus::Verified),
+                signing_data: v1_signing_data(Some(DkgSharesStatus::Verified)),
             },
             SignerVotes::from(Vec::new()),
         )

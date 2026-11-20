@@ -3,6 +3,7 @@ use std::borrow::Cow;
 
 use bitcoin::script::PushBytesError;
 
+use crate::bitcoin::validation::InputValidationResult;
 use crate::bitcoin::validation::WithdrawalCapContext;
 use crate::blocklist_client::BlocklistClientError;
 use crate::codec;
@@ -98,10 +99,6 @@ pub enum Error {
         /// The expected aggregate key.
         expected: Box<PublicKeyXOnly>,
     },
-
-    /// The aggregate key for the given block hash could not be determined.
-    #[error("the signer set aggregate key could not be determined for bitcoin block {0}")]
-    MissingAggregateKey(bitcoin::BlockHash),
 
     /// Indicates an error when decoding a protobuf
     #[error("could not decode protobuf {0}")]
@@ -237,13 +234,18 @@ pub enum Error {
 
     /// This happens when the tx-signer is validating the sighash and it is
     /// known but has failed validation.
-    #[error("the given sighash is known and failed validation: {0}")]
-    InvalidSigHash(SigHash),
+    #[error("the given sighash is known and failed validation: {0}, reason: {1}")]
+    InvalidSigHash(SigHash, InputValidationResult),
 
     /// This happens when the tx-signer is validating the sighash and it
     /// does not have a row for it in the database.
     #[error("the given sighash is unknown: {0}")]
     UnknownSigHash(SigHash),
+
+    /// A v1 WSTS signing round has already been started for this sighash at
+    /// the given Bitcoin chain tip.
+    #[error("a bitcoin signing round for sighash {0} was already started at chain tip {1}")]
+    BitcoinSigningRoundAlreadyStarted(SigHash, BitcoinBlockHash),
 
     /// This happens when the coordinator requested a WSTS signature type
     /// that does not match the prevout type this sighash was approved for.
@@ -422,6 +424,10 @@ pub enum Error {
     /// The given signature was invalid
     #[error("could not convert the given compact bytes into an ECDSA signature: {0}")]
     InvalidEcdsaSignatureBytes(#[source] secp256k1::Error),
+
+    /// The given BIP340 signature bytes were invalid.
+    #[error("could not convert the given bytes into a Schnorr signature: {0}")]
+    InvalidSchnorrSignatureBytes(#[source] secp256k1::Error),
 
     /// This happens when we attempt to convert a `[u8; 65]` into a
     /// recoverable ECDSA signature.
@@ -642,9 +648,18 @@ pub enum Error {
     #[error("invalid signature")]
     InvalidSignature,
 
+    /// A signature was offered for a key outside the key set being signed
+    /// for.
+    #[error("public key {0} is not in the signing key set")]
+    SigningKeyNotInKeySet(secp256k1::XOnlyPublicKey),
+
     /// Invalid ECDSA signature
     #[error("invalid ECDSA signature")]
     InvalidEcdsaSignature(#[source] secp256k1::Error),
+
+    /// A Schnorr signature failed to verify against the expected message.
+    #[error("invalid Schnorr signature failed verification")]
+    SchnorrSignatureFailedVerification(#[source] secp256k1::Error),
 
     /// Codec error
     #[error("codec error: {0}")]
@@ -765,7 +780,7 @@ pub enum Error {
     /// current signer is not a member of the signer set indicated by the
     /// aggregate key.
     #[error("current signer not part of signer set indicated by: {0}")]
-    ValidationSignerSet(crate::keys::PublicKey),
+    ValidationSignerSet(crate::storage::model::RegistryKey),
 
     /// Transaction coordinator timed out
     #[error("coordinator timed out after {0} seconds")]
@@ -791,6 +806,26 @@ pub enum Error {
     /// any deposit or withdrawal requests.
     #[error("the BitcoinPreSignRequest object does not contain deposit or withdrawal requests")]
     PreSignContainsNoRequests,
+
+    /// Indicates that a Bitcoin pre-sign request contains too many deposits.
+    #[error("the BitcoinPreSignRequest contains {count} deposits, exceeding the maximum of {max}")]
+    PreSignTooManyDeposits {
+        /// Number of deposits in the request.
+        count: usize,
+        /// Maximum number of deposits allowed in one request package.
+        max: usize,
+    },
+
+    /// Indicates that a Bitcoin pre-sign request contains too many transactions.
+    #[error(
+        "the BitcoinPreSignRequest contains {count} transactions, exceeding the maximum of {max}"
+    )]
+    PreSignTooManyTransactions {
+        /// Number of transactions in the request package.
+        count: usize,
+        /// Maximum number of transactions allowed in one request package.
+        max: usize,
+    },
 
     /// Indicates that we tried to create an UnsignedTransaction object
     /// without any deposit or withdrawal requests.

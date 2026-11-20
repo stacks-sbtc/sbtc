@@ -8,6 +8,7 @@ use sbtc::testing::containers::TestContainersBuilder;
 use test_case::test_case;
 
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
+use signer::bitcoin::utxo::BitcoinSignerSet;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::validation::BitcoinTxContext;
@@ -49,9 +50,9 @@ where
         .unwrap()
         .unwrap();
     SignerBtcState {
+        output_key_set: btc_ctx.signer_set.output_key_set(),
         utxo: signer_utxo,
         fee_rate: request.fee_rate,
-        public_key: btc_ctx.aggregate_key.into(),
         last_fees: request
             .last_fees
             .map(TryInto::try_into)
@@ -152,8 +153,13 @@ async fn one_tx_per_request_set() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: None,
         signer_public_key: setup.signers.keys[0],
-        aggregate_key,
+        signer_set: BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys: setup.signers.keys.iter().copied().collect(),
+            signatures_required: setup.signatures_required,
+        },
     };
 
     let validation_data = request
@@ -264,8 +270,13 @@ async fn one_invalid_deposit_invalidates_tx() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: None,
         signer_public_key: setup.signers.keys[0],
-        aggregate_key,
+        signer_set: BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys: setup.signers.keys.iter().copied().collect(),
+            signatures_required: setup.signatures_required,
+        },
     };
 
     let validation_data = request
@@ -441,8 +452,13 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_ref.block_hash,
         chain_tip_height: chain_tip_ref.block_height,
+        withdrawal_finality_height: Some(chain_tip_ref.block_height.saturating_add(1u64)),
         signer_public_key: setup.signers.keys[0],
-        aggregate_key,
+        signer_set: BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys: setup.signers.keys.iter().copied().collect(),
+            signatures_required: setup.signatures_required,
+        },
     };
 
     let validation_data = request
@@ -559,8 +575,13 @@ async fn swept_withdrawals_fail_validation() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_ref.block_hash,
         chain_tip_height: chain_tip_ref.block_height,
+        withdrawal_finality_height: Some(chain_tip_ref.block_height.saturating_add(1u64)),
         signer_public_key: setup.signers.keys[0],
-        aggregate_key,
+        signer_set: BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys: setup.signers.keys.iter().copied().collect(),
+            signatures_required: setup.signatures_required,
+        },
     };
 
     let validation_data = request
@@ -688,8 +709,13 @@ async fn cannot_sign_deposit_is_ok() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: None,
         signer_public_key: setup.signers.keys[0],
-        aggregate_key,
+        signer_set: BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys: setup.signers.keys.iter().copied().collect(),
+            signatures_required: setup.signatures_required,
+        },
     };
 
     let validation_data = request
@@ -833,8 +859,13 @@ async fn sighashes_match_from_sbtc_requests_object() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: Some(chain_tip_block.block_height.saturating_add(1u64)),
         signer_public_key: setup.signers.keys[0],
-        aggregate_key,
+        signer_set: BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys: setup.signers.keys.iter().copied().collect(),
+            signatures_required: setup.signatures_required,
+        },
     };
 
     let validation_data = request
@@ -984,8 +1015,13 @@ async fn outcome_is_independent_of_input_order() {
     let btc_ctx = BitcoinTxContext {
         chain_tip: chain_tip_block.block_hash,
         chain_tip_height: chain_tip_block.block_height,
+        withdrawal_finality_height: Some(chain_tip_block.block_height.saturating_add(1u64)),
         signer_public_key: setup.signers.keys[0],
-        aggregate_key,
+        signer_set: BitcoinSignerSet::V1 {
+            aggregate_key,
+            signer_public_keys: setup.signers.keys.iter().copied().collect(),
+            signatures_required: setup.signatures_required,
+        },
     };
 
     let validation_data1 = request

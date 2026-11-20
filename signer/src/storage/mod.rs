@@ -240,6 +240,34 @@ pub trait DbRead {
         signature_threshold: u16,
     ) -> impl Future<Output = Result<Vec<model::WithdrawalRequest>, Error>> + Send;
 
+    /// Return the exclusive upper bound for final withdrawal-request
+    /// burn-view heights.
+    ///
+    /// The returned height is the Bitcoin anchor height of the parent of
+    /// the newest Stacks tenure on the supplied tip's ancestry with at
+    /// least [`crate::WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS`] consecutive
+    /// blocks. That tenure's Bitcoin anchor must have at least
+    /// `min_confirmations` descendants. Its winning block-commit commits
+    /// to the first block of its parent tenure, so requests with burn-view
+    /// heights below the returned height are in an earlier tenure and are
+    /// part of the committed Stacks ancestry.
+    ///
+    /// The caller must supply the canonical Stacks tip. This returns `None`
+    /// when there are fewer than `min_confirmations + 1` canonical Bitcoin
+    /// blocks, fewer than two Stacks tenures on the supplied ancestry,
+    /// no child tenure has enough Stacks blocks and Bitcoin confirmations,
+    /// the supplied Stacks chain has incomplete ancestry, or one of the
+    /// required tenure anchors is not on the canonical Bitcoin chain. The
+    /// ancestry walk also stops before an anchor below
+    /// `minimum_withdrawal_height`, since such a checkpoint cannot finalize
+    /// a withdrawal request that the caller still considers live.
+    fn get_withdrawal_finality_height(
+        &self,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
+    ) -> impl Future<Output = Result<Option<BitcoinBlockHeight>, Error>> + Send;
+
     /// Get pending rejected withdrawal requests that have failed but are not
     /// rejected yet
     fn get_pending_rejected_withdrawal_requests(
@@ -335,13 +363,12 @@ pub trait DbRead {
         &self,
         stacks_chain_tip: &model::StacksBlockHash,
         signer_set: &BTreeSet<PublicKey>,
-        aggregate_key: &PublicKey,
+        aggregate_key: &model::RegistryKey,
         signatures_required: u16,
     ) -> impl Future<Output = Result<bool, Error>> + Send;
 
-    /// Get the last 365 days worth of the signers' `scriptPubkey`s. If no
-    /// keys are available within the last 365, then return the most recent
-    /// key.
+    /// Get the `scriptPubKey` for every persisted signer key set and
+    /// signer output.
     fn get_signers_script_pubkeys(
         &self,
     ) -> impl Future<Output = Result<Vec<model::Bytes>, Error>> + Send;
@@ -362,21 +389,21 @@ pub trait DbRead {
         chain_tip: &model::BitcoinBlockHash,
     ) -> impl Future<Output = Result<Option<SignerUtxo>, Error>> + Send;
 
-    /// For the given outpoint and aggregate key, get the list all signer
-    /// votes in the signer set.
+    /// For the given outpoint, get the votes for every member of the supplied
+    /// signer set.
     fn get_deposit_request_signer_votes(
         &self,
         txid: &model::BitcoinTxId,
         output_index: u32,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> impl Future<Output = Result<model::SignerVotes, Error>> + Send;
 
-    /// For the given withdrawal request identifier, and aggregate key, get
-    /// the list for how the signers voted against the request.
+    /// For the given withdrawal request identifier, get the votes for every
+    /// member of the supplied signer set.
     fn get_withdrawal_request_signer_votes(
         &self,
         id: &model::QualifiedRequestId,
-        aggregate_key: &PublicKey,
+        signer_set: &BTreeSet<PublicKey>,
     ) -> impl Future<Output = Result<model::SignerVotes, Error>> + Send;
 
     /// Check for whether  the given block hash is in the database.
@@ -462,12 +489,12 @@ pub trait DbRead {
         output_index: u32,
     ) -> impl Future<Output = Result<Option<model::DepositRequest>, Error>> + Send;
 
-    /// Get whether this signer will sign the given bitcoin sighash, the
-    /// aggregate key locking the prevout, and the prevout type.
+    /// Get this signer's decision and the script metadata for a Bitcoin sighash.
     fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
-    ) -> impl Future<Output = Result<Option<(bool, PublicKeyXOnly, model::TxPrevoutType)>, Error>> + Send;
+        chain_tip: &model::BitcoinBlockHash,
+    ) -> impl Future<Output = Result<Option<model::BitcoinTxSigHashSigningInfo>, Error>> + Send;
 
     /// Returns the list of stored peers.
     fn get_p2p_peers(&self) -> impl Future<Output = Result<Vec<model::P2PPeer>, Error>> + Send;
@@ -475,6 +502,12 @@ pub trait DbRead {
 
 /// Represents the ability to write data to the signer storage.
 pub trait DbWrite {
+    /// Persist a signer key set, leaving an existing identical identifier in place.
+    fn write_signer_key_set(
+        &self,
+        _key_set: &model::SignerKeySet,
+    ) -> impl Future<Output = Result<(), Error>> + Send;
+
     /// Write a bitcoin block.
     fn write_bitcoin_block(
         &self,

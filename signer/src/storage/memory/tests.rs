@@ -7,6 +7,17 @@ use crate::testing::blocks::{BitcoinChain, StacksChain};
 use assert_matches::assert_matches;
 use test_log::test;
 
+/// Check that the in-memory withdrawal-finality query requires a three-block
+/// checkpoint tenure and matches the Postgres query's fail-closed behavior.
+#[tokio::test]
+async fn withdrawal_finality_height_is_an_exclusive_canonical_bound() {
+    let store = Store::new_shared();
+    crate::testing::storage::assert_withdrawal_finality_height_is_an_exclusive_canonical_bound(
+        &store,
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn test_in_memory_transaction_commit() -> Result<(), Error> {
     let shared_store = Store::new_shared();

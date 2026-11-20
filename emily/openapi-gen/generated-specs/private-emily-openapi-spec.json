@@ -2771,6 +2771,18 @@
             "type": "string",
             "description": "Deposit script."
           },
+          "maxFee": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Maximum fee in satoshis. Required for v2 deposits.",
+            "nullable": true,
+            "minimum": 0
+          },
+          "recipient": {
+            "type": "string",
+            "description": "The consensus-encoded Stacks principal, represented as hex. Required\nfor v2 deposits.",
+            "nullable": true
+          },
           "reclaimScript": {
             "type": "string",
             "description": "Reclaim script."
@@ -2911,6 +2923,9 @@
           "statusMessage": {
             "type": "string",
             "description": "The status message of the deposit."
+          },
+          "version": {
+            "$ref": "#/components/schemas/DepositVersion"
           }
         }
       },
@@ -2959,6 +2974,12 @@
             "description": "The most recent Stacks block height the API was aware of when the deposit was last\nupdated. If the most recent update is tied to an artifact on the Stacks blockchain\nthen this height is the Stacks block height that contains that artifact.",
             "minimum": 0
           },
+          "maxFee": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Maximum fee the signers may spend while sweeping this deposit.\nDefaults to zero so that clients can read responses from an Emily\nthat predates this field.",
+            "minimum": 0
+          },
           "recipient": {
             "type": "string",
             "description": "Stacks address to received the deposited sBTC."
@@ -2969,6 +2990,9 @@
           },
           "status": {
             "$ref": "#/components/schemas/DepositStatus"
+          },
+          "version": {
+            "$ref": "#/components/schemas/DepositVersion"
           }
         }
       },
@@ -3046,6 +3070,14 @@
             "description": "The status message of the deposit."
           }
         }
+      },
+      "DepositVersion": {
+        "type": "string",
+        "description": "The deposit script format version.",
+        "enum": [
+          "v1",
+          "v2"
+        ]
       },
       "DepositWithStatus": {
         "type": "object",

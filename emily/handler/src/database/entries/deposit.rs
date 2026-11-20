@@ -10,7 +10,7 @@ use crate::{
     api::models::{
         chainstate::Chainstate,
         common::{DepositStatus, Fulfillment},
-        deposit::{Deposit, DepositInfo, DepositParameters},
+        deposit::{Deposit, DepositInfo, DepositParameters, DepositVersion},
     },
     common::error::{Error, Inconsistency, ValidationError},
 };
@@ -56,6 +56,9 @@ pub struct DepositEntry {
     pub reclaim_script: String,
     /// The raw deposit script.
     pub deposit_script: String,
+    /// Deposit script format version.
+    #[serde(default)]
+    pub deposit_version: DepositVersion,
     /// The most recent Stacks block height the API was aware of when the deposit was last
     /// updated. If the most recent update is tied to an artifact on the Stacks blockchain
     /// then this height is the Stacks block height that contains that artifact.
@@ -261,6 +264,7 @@ impl TryFrom<DepositEntry> for Deposit {
 
         // Create deposit from table entry.
         Ok(Deposit {
+            version: deposit_entry.deposit_version,
             bitcoin_txid: deposit_entry.key.bitcoin_txid,
             bitcoin_tx_output_index: deposit_entry.key.bitcoin_tx_output_index,
             recipient: deposit_entry.recipient,
@@ -376,6 +380,11 @@ pub struct DepositInfoEntry {
     pub primary_index_key: DepositEntryKey,
     /// Stacks address to received the deposited sBTC encoded in hex.
     pub recipient: String,
+    /// Deposit script format version.
+    #[serde(default)]
+    pub deposit_version: DepositVersion,
+    /// Maximum fee in satoshis.
+    pub max_fee: u64,
     /// Amount of BTC being deposited in satoshis.
     pub amount: u64,
     /// The raw reclaim script.
@@ -421,16 +430,18 @@ pub type DepositTableSecondaryIndex = SecondaryIndex<DepositTableSecondaryIndexI
 impl SecondaryIndexTrait for DepositTableSecondaryIndexInner {
     type PrimaryIndex = DepositTablePrimaryIndex;
     type Entry = DepositInfoEntry;
-    const INDEX_NAME: &'static str = "DepositStatus";
+    const INDEX_NAME: &'static str = "DepositStatusV2";
 }
 
 impl From<DepositInfoEntry> for DepositInfo {
     fn from(deposit_info_entry: DepositInfoEntry) -> Self {
         // Create deposit info resource from deposit info table entry.
         DepositInfo {
+            version: deposit_info_entry.deposit_version,
             bitcoin_txid: deposit_info_entry.primary_index_key.bitcoin_txid,
             bitcoin_tx_output_index: deposit_info_entry.primary_index_key.bitcoin_tx_output_index,
             recipient: deposit_info_entry.recipient,
+            max_fee: deposit_info_entry.max_fee,
             amount: deposit_info_entry.amount,
             last_update_height: deposit_info_entry.key.last_update_height,
             last_update_block_hash: deposit_info_entry.last_update_block_hash,
@@ -482,6 +493,11 @@ pub struct DepositInfoByRecipientEntry {
     pub status: DepositStatus,
     /// Amount of BTC being deposited in satoshis.
     pub amount: u64,
+    /// Deposit script format version.
+    #[serde(default)]
+    pub deposit_version: DepositVersion,
+    /// Maximum fee in satoshis.
+    pub max_fee: u64,
     /// The raw reclaim script.
     pub reclaim_script: String,
     /// The raw deposit script.
@@ -526,16 +542,18 @@ pub type DepositTableByRecipientSecondaryIndex =
 impl SecondaryIndexTrait for DepositTableByRecipientSecondaryIndexInner {
     type PrimaryIndex = DepositTablePrimaryIndex;
     type Entry = DepositInfoByRecipientEntry;
-    const INDEX_NAME: &'static str = "DepositRecipient";
+    const INDEX_NAME: &'static str = "DepositRecipientV2";
 }
 
 impl From<DepositInfoByRecipientEntry> for DepositInfo {
     fn from(deposit_info_entry: DepositInfoByRecipientEntry) -> Self {
         // Create deposit info resource from deposit info table entry.
         DepositInfo {
+            version: deposit_info_entry.deposit_version,
             bitcoin_txid: deposit_info_entry.primary_index_key.bitcoin_txid,
             bitcoin_tx_output_index: deposit_info_entry.primary_index_key.bitcoin_tx_output_index,
             recipient: deposit_info_entry.key.recipient,
+            max_fee: deposit_info_entry.max_fee,
             amount: deposit_info_entry.amount,
             last_update_height: deposit_info_entry.key.last_update_height,
             last_update_block_hash: deposit_info_entry.last_update_block_hash,
@@ -587,6 +605,11 @@ pub struct DepositInfoByReclaimPubkeysEntry {
     pub recipient: String,
     /// Amount of BTC being deposited in satoshis.
     pub amount: u64,
+    /// Deposit script format version.
+    #[serde(default)]
+    pub deposit_version: DepositVersion,
+    /// Maximum fee in satoshis.
+    pub max_fee: u64,
     /// The raw reclaim script.
     pub reclaim_script: String,
     /// The raw deposit script.
@@ -631,16 +654,18 @@ pub type DepositTableByReclaimPubkeysSecondaryIndex =
 impl SecondaryIndexTrait for DepositTableByReclaimPubkeysSecondaryIndexInner {
     type PrimaryIndex = DepositTablePrimaryIndex;
     type Entry = DepositInfoByReclaimPubkeysEntry;
-    const INDEX_NAME: &'static str = "DepositReclaimPubkeysHashIndex";
+    const INDEX_NAME: &'static str = "DepositReclaimPubkeysHashIndexV2";
 }
 
 impl From<DepositInfoByReclaimPubkeysEntry> for DepositInfo {
     fn from(deposit_info_entry: DepositInfoByReclaimPubkeysEntry) -> Self {
         // Create deposit info resource from deposit info table entry.
         DepositInfo {
+            version: deposit_info_entry.deposit_version,
             bitcoin_txid: deposit_info_entry.primary_index_key.bitcoin_txid,
             bitcoin_tx_output_index: deposit_info_entry.primary_index_key.bitcoin_tx_output_index,
             recipient: deposit_info_entry.recipient,
+            max_fee: deposit_info_entry.max_fee,
             amount: deposit_info_entry.amount,
             last_update_height: deposit_info_entry.key.last_update_height,
             last_update_block_hash: deposit_info_entry.last_update_block_hash,
@@ -723,6 +748,22 @@ mod tests {
     use test_case::test_case;
 
     #[test]
+    fn deposit_queries_use_replacement_indexes() {
+        assert_eq!(
+            DepositTableSecondaryIndexInner::INDEX_NAME,
+            "DepositStatusV2"
+        );
+        assert_eq!(
+            DepositTableByRecipientSecondaryIndexInner::INDEX_NAME,
+            "DepositRecipientV2"
+        );
+        assert_eq!(
+            DepositTableByReclaimPubkeysSecondaryIndexInner::INDEX_NAME,
+            "DepositReclaimPubkeysHashIndexV2"
+        );
+    }
+
+    #[test]
     fn deposit_update_should_be_unnecessary_when_event_is_present() {
         let pending = DepositEvent {
             status: DepositStatusEntry::Pending,
@@ -739,6 +780,7 @@ mod tests {
         };
 
         let deposit = DepositEntry {
+            deposit_version: DepositVersion::V1,
             key: Default::default(),
             version: 0,
             recipient: "".to_string(),
@@ -780,6 +822,7 @@ mod tests {
         };
 
         let deposit = DepositEntry {
+            deposit_version: DepositVersion::V1,
             key: Default::default(),
             version: 0,
             recipient: "".to_string(),
@@ -839,6 +882,7 @@ mod tests {
         };
 
         let mut deposit = DepositEntry {
+            deposit_version: DepositVersion::V1,
             key: Default::default(),
             version: 3,
             recipient: "test-recipient".to_string(),

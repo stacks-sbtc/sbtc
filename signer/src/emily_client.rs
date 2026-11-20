@@ -8,6 +8,8 @@ use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::Txid;
+use clarity::codec::StacksMessageCodec as _;
+use clarity::vm::types::PrincipalData;
 use emily_client::apis::Error as EmilyError;
 use emily_client::apis::ResponseContent;
 use emily_client::apis::configuration::ApiKey;
@@ -132,6 +134,12 @@ pub struct EmilyClient {
 }
 
 impl EmilyClient {
+    /// Parse the consensus-encoded Stacks principal returned by Emily.
+    fn parse_recipient(recipient: &str) -> Result<PrincipalData, Error> {
+        let bytes = hex::decode(recipient).map_err(Error::DecodeHexBytes)?;
+        PrincipalData::consensus_deserialize(&mut bytes.as_slice()).map_err(Error::StacksCodec)
+    }
+
     /// Get the client config
     pub fn config(&self) -> &EmilyApiConfig {
         &self.config
@@ -216,6 +224,8 @@ impl EmilyClient {
                 .map_err(Error::DecodeHexScript)?,
             deposit_script: ScriptBuf::from_hex(&deposit.deposit_script)
                 .map_err(Error::DecodeHexScript)?,
+            recipient: Some(Self::parse_recipient(&deposit.recipient)?),
+            max_fee: deposit.max_fee,
         })
     }
 }
@@ -250,6 +260,8 @@ impl EmilyInteract for EmilyClient {
                 .map_err(Error::DecodeHexScript)?,
             deposit_script: ScriptBuf::from_hex(&deposit.deposit_script)
                 .map_err(Error::DecodeHexScript)?,
+            recipient: Some(Self::parse_recipient(&deposit.recipient)?),
+            max_fee: Some(deposit.parameters.max_fee),
         }))
     }
 
@@ -548,5 +560,46 @@ mod tests {
         // Assert.
         assert_eq!(client.config.base_path, "http://localhost:8080");
         assert!(client.config.api_key.is_none());
+    }
+
+    #[test]
+    fn parse_v1_deposit_includes_recipient_and_max_fee() {
+        let recipient = PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y").unwrap();
+        let deposit = DepositInfo {
+            bitcoin_txid: "00".repeat(32),
+            recipient: hex::encode(recipient.serialize_to_vec()),
+            max_fee: Some(12_345),
+            version: Some(emily_client::models::DepositVersion::V1),
+            ..Default::default()
+        };
+
+        let request = EmilyClient::parse_deposit(&deposit).unwrap();
+
+        assert_eq!(request.recipient, Some(recipient));
+        assert_eq!(request.max_fee, Some(12_345));
+    }
+
+    /// An Emily that predates v2 deposits omits `maxFee` and `version`,
+    /// and its deposits must still parse.
+    #[test]
+    fn parse_deposit_from_an_emily_without_v2_fields() {
+        let recipient = PrincipalData::parse("ST1RQHF4VE5CZ6EK3MZPZVQBA0JVSMM9H5PMHMS1Y").unwrap();
+        let response = serde_json::json!({
+            "bitcoinTxid": "00".repeat(32),
+            "bitcoinTxOutputIndex": 0,
+            "recipient": hex::encode(recipient.serialize_to_vec()),
+            "amount": 100_000,
+            "lastUpdateHeight": 1,
+            "lastUpdateBlockHash": "00".repeat(32),
+            "status": "pending",
+            "reclaimScript": "",
+            "depositScript": "",
+        });
+        let deposit: DepositInfo = serde_json::from_value(response).unwrap();
+
+        let request = EmilyClient::parse_deposit(&deposit).unwrap();
+
+        assert_eq!(request.recipient, Some(recipient));
+        assert_eq!(request.max_fee, None);
     }
 }

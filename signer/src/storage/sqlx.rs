@@ -22,6 +22,9 @@ use crate::keys::PublicKeyXOnly;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
 use crate::storage::model::BitcoinTxId;
+use crate::storage::model::KeySetId;
+use crate::storage::model::RegistryKey;
+use crate::storage::model::RegistryKeyBytes;
 use crate::storage::model::ScriptPubKey;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
@@ -42,6 +45,68 @@ const POSTGRES_EPOCH_DATETIME: OffsetDateTime = datetime!(2000-01-01 00:00:00 UT
 /// OID for PostgreSQL's TIMESTAMPTZ type.
 /// https://github.com/postgres/postgres/blob/5d6eac80cdce7aa7c5f4ec74208ddc1feea9eef3/src/include/catalog/pg_type.dat#L306
 const TIMESTAMPTZ_OID: Oid = Oid(1184);
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for KeySetId {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let bytes = <&[u8] as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(KeySetId::from_slice(bytes)?)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for KeySetId {
+    fn type_info() -> PgTypeInfo {
+        <Vec<u8> as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Encode<'r, sqlx::Postgres> for KeySetId {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        <Vec<u8> as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&self.to_bytes(), buf)
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for KeySetId {
+    fn array_type_info() -> PgTypeInfo {
+        <Vec<u8> as sqlx::postgres::PgHasArrayType>::array_type_info()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for RegistryKey {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let bytes = <[u8; 33] as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(RegistryKey::from_slice(&bytes)?)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for RegistryKey {
+    fn type_info() -> PgTypeInfo {
+        <[u8; 33] as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Encode<'r, sqlx::Postgres> for RegistryKey {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        <[u8; 33] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&self.to_bytes(), buf)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for RegistryKeyBytes {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        <[u8; 33] as sqlx::Decode<sqlx::Postgres>>::decode(value).map(Into::into)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for RegistryKeyBytes {
+    fn type_info() -> PgTypeInfo {
+        <[u8; 33] as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Encode<'r, sqlx::Postgres> for RegistryKeyBytes {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        <[u8; 33] as sqlx::Encode<'r, sqlx::Postgres>>::encode_by_ref(&self.to_bytes(), buf)
+    }
+}
 
 // For the [`TaprootScriptHash`]
 
@@ -535,7 +600,7 @@ impl<'a> sqlx::FromRow<'a, PgRow> for DepositRequest {
             amount,
             max_fee: u64::from_be_bytes(max_fee_bytes),
             lock_time,
-            signers_public_key: row.try_get("signers_public_key")?,
+            key_set_id: row.try_get("key_set_id")?,
             sender_script_pub_keys: row.try_get("sender_script_pub_keys")?,
         })
     }
