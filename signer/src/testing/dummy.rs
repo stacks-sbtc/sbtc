@@ -50,6 +50,7 @@ use wsts::traits::PartyState;
 use wsts::traits::SignerState;
 
 use crate::MAX_BITCOIN_BLOCK_VSIZE;
+use crate::bitcoin::op_return::OpReturnVersion;
 use crate::bitcoin::rpc::BitcoinBlockInfo;
 use crate::bitcoin::rpc::BitcoinTxInfo;
 use crate::bitcoin::rpc::BitcoinTxVin;
@@ -583,6 +584,7 @@ impl fake::Dummy<&[PublicKey]> for SignerBtcState {
         Self {
             fee_rate: Faker.fake_with_rng(rng),
             last_fees: Faker.fake_with_rng(rng),
+            op_return_version: OpReturnVersion::V1,
             magic_bytes: [1, 2],
             output_key_set: SignerUtxoKeySet::V1(aggregate_key_x_only),
             utxo: SignerUtxo {

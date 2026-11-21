@@ -55,6 +55,7 @@ use secp256k1::SECP256K1;
 use signer::MAX_BITCOIN_FEE_RATE;
 use signer::MIN_BITCOIN_FEE_RATE;
 use signer::bitcoin::BitcoinInteract;
+use signer::bitcoin::op_return::OpReturnVersion;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::BASE_WITHDRAWAL_TX_VSIZE;
@@ -4015,6 +4016,9 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     let db = testing::storage::new_test_database().await;
 
     let context = TestContext::builder()
+        .modify_settings(|settings| {
+            settings.signer.even_fees_block_height = Some(2_u64.into());
+        })
         .with_storage(db.clone())
         .with_mocked_clients()
         .build();
@@ -4147,21 +4151,27 @@ async fn test_get_btc_state_with_no_available_sweep_transactions() {
     );
     assert_eq!(btc_state.fee_rate, 1.3);
     assert_eq!(btc_state.last_fees, None);
+    assert_eq!(btc_state.op_return_version, OpReturnVersion::V1);
     assert_eq!(btc_state.magic_bytes, [b'T', b'3']);
 
     // Let's grab the state again, this time we expect fees from
     // "bitcoin-core" that are too high.
+    let chain_tip_at_activation = model::BitcoinBlockRef {
+        block_height: 2_u64.into(),
+        ..chain_tip
+    };
     let btc_state = coord
-        .get_btc_state(&chain_tip, &signer_set.output_key_set())
+        .get_btc_state(&chain_tip_at_activation, &signer_set.output_key_set())
         .await
         .unwrap();
 
     assert_eq!(btc_state.fee_rate, MAX_BITCOIN_FEE_RATE);
+    assert_eq!(btc_state.op_return_version, OpReturnVersion::V2);
 
     // Let's grab the state one last time, where this time we expect fees
     // from "bitcoin-core" that are too low.
     let btc_state = coord
-        .get_btc_state(&chain_tip, &signer_set.output_key_set())
+        .get_btc_state(&chain_tip_at_activation, &signer_set.output_key_set())
         .await
         .unwrap();
 
@@ -4443,6 +4453,7 @@ fn create_test_setup(
         withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
         signatures_required,
         client: bitcoin_client.clone(),
+        op_return_version: OpReturnVersion::V1,
     }
 }
 
@@ -6821,6 +6832,7 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
             // This test signs with a v1 signer set, and the chain tip
             // below has a random height.
             settings.signer.v2_signing_block_height = Some(u64::MAX.into());
+            settings.signer.even_fees_block_height = Some(u64::MAX.into());
         })
         .build();
 

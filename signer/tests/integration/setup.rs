@@ -25,6 +25,7 @@ use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::BitcoinInteract as _;
+use signer::bitcoin::op_return::OpReturnVersion;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
 use signer::bitcoin::utxo;
@@ -217,6 +218,7 @@ impl TestSweepSetup {
                 },
                 fee_rate: 10.0,
                 last_fees: None,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,
@@ -696,6 +698,9 @@ pub struct TestSweepSetup2 {
     pub signatures_required: u16,
     /// The bitcoin client to use when needed
     pub client: BitcoinCoreClient,
+    /// The `OP_RETURN` version of the sweep transaction, which determines
+    /// how its fee is assessed to each request.
+    pub op_return_version: OpReturnVersion,
 }
 
 impl TestSweepSetup2 {
@@ -732,6 +737,10 @@ impl TestSweepSetup2 {
                 (depositor, *dep)
             })
             .collect();
+        // Each send spends the change from the faucet's previous send, and
+        // bitcoin core rejects chains of more than 25 unconfirmed
+        // transactions, so we confirm the sends before making more.
+        faucet.generate_blocks(1);
 
         // Start off with some initial UTXOs to work with.
 
@@ -816,6 +825,7 @@ impl TestSweepSetup2 {
             withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
             signatures_required: 2,
             client,
+            op_return_version: OpReturnVersion::V1,
         }
     }
 
@@ -940,6 +950,7 @@ impl TestSweepSetup2 {
                 },
                 fee_rate: 10.0,
                 last_fees,
+                op_return_version: self.op_return_version,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,

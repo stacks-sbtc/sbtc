@@ -7,7 +7,7 @@ use crate::GOSSIPSUB_MAX_TRANSMIT_SIZE;
 use crate::MAX_MEMPOOL_PACKAGE_SIZE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 
-use super::utxo::MAX_BASE_TX_VSIZE;
+use super::utxo::ABSOLUTE_MAX_BASE_TX_VSIZE;
 use super::utxo::OP_RETURN_AVAILABLE_SIZE;
 
 /// Protobuf overhead per `TxRequestIds` element in the
@@ -109,7 +109,7 @@ pub const MAX_PRESIGN_REQUEST_SIZE: usize = GOSSIPSUB_MAX_TRANSMIT_SIZE - SIGNED
 /// are under this limit, then the transaction package will be under the
 /// bitcoin vsize limit, whatever the signers' key set.
 const PACKAGE_MAX_VSIZE: u64 = ((MAX_MEMPOOL_PACKAGE_SIZE as f64
-    - MAX_MEMPOOL_PACKAGE_TX_COUNT as f64 * MAX_BASE_TX_VSIZE)
+    - MAX_MEMPOOL_PACKAGE_TX_COUNT as f64 * ABSOLUTE_MAX_BASE_TX_VSIZE)
     / 5000.0) as u64
     * 5000;
 

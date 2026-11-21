@@ -26,6 +26,7 @@ use sbtc::deposits::DepositInfo;
 use sbtc::deposits::DepositScriptInputs;
 use sbtc::deposits::ReclaimScriptInputs;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+use signer::bitcoin::op_return::OpReturnVersion;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::DepositSigningKey;
@@ -269,6 +270,7 @@ mod serial {
                 },
                 fee_rate: 10.0,
                 last_fees: None,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,
@@ -334,6 +336,7 @@ mod serial {
                 },
                 fee_rate: FEE_RATE,
                 last_fees: None,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,
@@ -479,6 +482,7 @@ mod serial {
                 },
                 fee_rate: FEE_RATE,
                 last_fees: None,
+                op_return_version: OpReturnVersion::V1,
                 magic_bytes: *b"T3",
             },
             accept_threshold: 4,

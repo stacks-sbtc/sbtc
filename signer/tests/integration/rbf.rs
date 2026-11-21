@@ -13,6 +13,7 @@ mod serial {
     use rand::Rng as _;
     use rand::distributions::Uniform;
     use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
+    use signer::bitcoin::op_return::OpReturnVersion;
     use signer::bitcoin::utxo::DepositRequest;
     use signer::bitcoin::utxo::Fees;
     use signer::bitcoin::utxo::RequestRef;
@@ -225,6 +226,7 @@ mod serial {
                 },
                 fee_rate: ctx.initial_fee_rate,
                 last_fees: None,
+                op_return_version: OpReturnVersion::V1,
                 // The value here isn't important, but it matches what happens
                 // in Nakamoto testnet.
                 magic_bytes: *b"T3",

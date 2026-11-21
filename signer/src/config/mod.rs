@@ -16,10 +16,7 @@ use url::Url;
 use sbtc::SignerKeySet;
 
 use crate::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
-use crate::MAINNET_DKG_DISABLE_BLOCK_HEIGHT;
-use crate::MAINNET_V2_SIGNING_BLOCK_HEIGHT;
-use crate::TESTNET_DKG_DISABLE_BLOCK_HEIGHT;
-use crate::TESTNET_V2_SIGNING_BLOCK_HEIGHT;
+use crate::bitcoin::op_return::OpReturnVersion;
 use crate::config::error::SignerConfigError;
 use crate::config::serialization::duration_milliseconds_deserializer;
 use crate::config::serialization::duration_seconds_deserializer;
@@ -49,6 +46,30 @@ pub const MAX_REQUESTS_PROCESSING_DELAY_SECONDS: u64 = 300;
 /// other signers, and in the role of signer potentially falling outside of the
 /// coordinator's timeouts.
 pub const MAX_BITCOIN_CHAIN_TIP_POLLING_INTERVAL_SECONDS: u64 = 10;
+
+/// The default mainnet activation height for v2 signer UTXOs.
+///
+/// This block height corresponds to around 2026-10-20 15:00 UTC.
+const DEFAULT_MAINNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(972_295);
+
+/// The default testnet activation height for v2 signer UTXOs.
+const DEFAULT_TESTNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(245);
+
+/// The default mainnet Bitcoin height at which DKG is disabled.
+const DEFAULT_MAINNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(u64::MAX);
+
+/// The default testnet Bitcoin height at which DKG is disabled.
+const DEFAULT_TESTNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(u64::MAX);
+
+/// The default mainnet activation height for even fee assessment.
+const DEFAULT_MAINNET_EVEN_FEES_BLOCK_HEIGHT: BitcoinBlockHeight =
+    BitcoinBlockHeight::new(u64::MAX);
+
+/// The default testnet activation height for even fee assessment.
+const DEFAULT_TESTNET_EVEN_FEES_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(255);
 
 /// Trait for validating configuration values.
 trait Validatable {
@@ -378,6 +399,11 @@ pub struct SignerConfig {
     /// Activation height for v2 signer UTXOs.
     #[serde(default)]
     pub v2_signing_block_height: Option<BitcoinBlockHeight>,
+    /// Bitcoin chain-tip height at which newly proposed sweeps split
+    /// transaction fees evenly across requests. If omitted, the compiled
+    /// default for the configured network is used.
+    #[serde(default)]
+    pub even_fees_block_height: Option<BitcoinBlockHeight>,
     /// Bitcoin height at which DKG is disabled and rotate-keys calls
     /// switch to the v2 registry-key encoding. This must be greater than
     /// or equal to the effective v2 signing block height.
@@ -566,9 +592,9 @@ impl SignerConfig {
     /// Return the Bitcoin height at which signer outputs switch to v2.
     pub fn v2_signing_block_height(&self) -> BitcoinBlockHeight {
         let default = if self.network.is_mainnet() {
-            MAINNET_V2_SIGNING_BLOCK_HEIGHT
+            DEFAULT_MAINNET_V2_SIGNING_BLOCK_HEIGHT
         } else {
-            TESTNET_V2_SIGNING_BLOCK_HEIGHT
+            DEFAULT_TESTNET_V2_SIGNING_BLOCK_HEIGHT
         };
         self.v2_signing_block_height.unwrap_or(default)
     }
@@ -578,12 +604,33 @@ impl SignerConfig {
         block_height >= self.v2_signing_block_height()
     }
 
+    /// Return the pre-sign chain-tip height at which request fees are split
+    /// evenly.
+    pub fn even_fees_block_height(&self) -> BitcoinBlockHeight {
+        let default = if self.network.is_mainnet() {
+            DEFAULT_MAINNET_EVEN_FEES_BLOCK_HEIGHT
+        } else {
+            DEFAULT_TESTNET_EVEN_FEES_BLOCK_HEIGHT
+        };
+        self.even_fees_block_height.unwrap_or(default)
+    }
+
+    /// Return the `OP_RETURN` version for sweeps proposed on top of a
+    /// Bitcoin chain tip at the given height.
+    pub fn op_return_version(&self, chain_tip_height: BitcoinBlockHeight) -> OpReturnVersion {
+        if chain_tip_height >= self.even_fees_block_height() {
+            OpReturnVersion::V2
+        } else {
+            OpReturnVersion::V1
+        }
+    }
+
     /// Return the Bitcoin height at which DKG is disabled.
     pub fn dkg_disable_block_height(&self) -> BitcoinBlockHeight {
         let default = if self.network.is_mainnet() {
-            MAINNET_DKG_DISABLE_BLOCK_HEIGHT
+            DEFAULT_MAINNET_DKG_DISABLE_BLOCK_HEIGHT
         } else {
-            TESTNET_DKG_DISABLE_BLOCK_HEIGHT
+            DEFAULT_TESTNET_DKG_DISABLE_BLOCK_HEIGHT
         };
         self.dkg_disable_block_height.unwrap_or(default)
     }
@@ -824,8 +871,12 @@ mod tests {
         assert_eq!(settings.signer.dkg_verification_window, 10);
         assert_eq!(settings.signer.dkg_min_bitcoin_block_height, None);
         assert_eq!(
+            settings.signer.even_fees_block_height(),
+            DEFAULT_TESTNET_EVEN_FEES_BLOCK_HEIGHT
+        );
+        assert_eq!(
             settings.signer.dkg_disable_block_height(),
-            TESTNET_DKG_DISABLE_BLOCK_HEIGHT
+            DEFAULT_TESTNET_DKG_DISABLE_BLOCK_HEIGHT
         );
         assert_eq!(settings.emily.pagination_timeout, Duration::from_secs(10));
         assert_eq!(settings.emily.timeout, Duration::from_secs(10));
@@ -1010,6 +1061,35 @@ mod tests {
         assert_eq!(
             settings.signer.dkg_min_bitcoin_block_height,
             Some(42u64.into())
+        );
+    }
+
+    /// The even-fees block height selects the OP_RETURN version at the
+    /// boundary.
+    #[test_case(99, OpReturnVersion::V1; "before the boundary")]
+    #[test_case(100, OpReturnVersion::V2; "at the boundary")]
+    #[test_case(101, OpReturnVersion::V2; "after the boundary")]
+    fn op_return_version_at_chain_tip_height(chain_tip_height: u64, expected: OpReturnVersion) {
+        clear_env();
+        let mut settings = Settings::new_from_default_config().unwrap();
+        settings.signer.even_fees_block_height = Some(100_u64.into());
+
+        let actual = settings.signer.op_return_version(chain_tip_height.into());
+        assert_eq!(actual, expected);
+    }
+
+    /// The even-fees block height can be configured independently
+    /// through the signer environment.
+    #[test]
+    fn default_config_toml_loads_even_fees_block_height() {
+        clear_env();
+
+        set_var("SIGNER_SIGNER__EVEN_FEES_BLOCK_HEIGHT", "42");
+        let settings = Settings::new_from_default_config().unwrap();
+        assert_eq!(settings.signer.even_fees_block_height(), 42_u64.into());
+        assert_ne!(
+            settings.signer.even_fees_block_height(),
+            settings.signer.v2_signing_block_height()
         );
     }
 
@@ -1453,16 +1533,21 @@ mod tests {
     }
 
     #[test]
-    fn mainnet_uses_configured_v2_and_dkg_disable_heights() {
+    fn mainnet_uses_configured_activation_heights() {
         clear_env();
         let mut settings = Settings::new_from_default_config().unwrap();
         settings.signer.network = NetworkKind::Mainnet;
         settings.signer.v2_signing_block_height = Some(300_u64.into());
+        settings.signer.even_fees_block_height = Some(350_u64.into());
         settings.signer.dkg_disable_block_height = Some(400_u64.into());
 
         assert_eq!(
             settings.signer.v2_signing_block_height(),
             BitcoinBlockHeight::from(300_u64)
+        );
+        assert_eq!(
+            settings.signer.even_fees_block_height(),
+            BitcoinBlockHeight::from(350_u64)
         );
         assert_eq!(
             settings.signer.dkg_disable_block_height(),
@@ -1478,11 +1563,15 @@ mod tests {
 
         assert_eq!(
             settings.signer.v2_signing_block_height(),
-            MAINNET_V2_SIGNING_BLOCK_HEIGHT
+            DEFAULT_MAINNET_V2_SIGNING_BLOCK_HEIGHT
+        );
+        assert_eq!(
+            settings.signer.even_fees_block_height(),
+            DEFAULT_MAINNET_EVEN_FEES_BLOCK_HEIGHT
         );
         assert_eq!(
             settings.signer.dkg_disable_block_height(),
-            MAINNET_DKG_DISABLE_BLOCK_HEIGHT
+            DEFAULT_MAINNET_DKG_DISABLE_BLOCK_HEIGHT
         );
     }
 

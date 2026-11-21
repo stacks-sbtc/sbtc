@@ -10,6 +10,9 @@ use std::time::Duration;
 use super::get_rng;
 use crate::bitcoin::MockBitcoinInteract;
 use crate::bitcoin::rpc::BitcoinTxInfo;
+use crate::bitcoin::rpc::BitcoinTxVin;
+use crate::bitcoin::rpc::BitcoinTxVinPrevout;
+use crate::bitcoin::rpc::OutputScriptPubKey;
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::SignerUtxo;
 use crate::bitcoin::utxo::SignerUtxoKeySet;
@@ -734,6 +737,10 @@ where
         let output_index: u32 = (2..200).choose(&mut rng).unwrap();
 
         let mut output = vec![bitcoin::TxOut::NULL; output_index as usize];
+        output[1] = bitcoin::TxOut {
+            value: bitcoin::Amount::ZERO,
+            script_pubkey: bitcoin::ScriptBuf::new_op_return([0; 3]),
+        };
         output.push(bitcoin::TxOut {
             value: bitcoin::Amount::from_sat(withdrawal_req.amount),
             script_pubkey: bitcoin_aggregate_key.signers_script_pubkey(),
@@ -742,7 +749,10 @@ where
         // Create test data for the withdrawal sweep tx
         let sweep_block_hash = bitcoin::BlockHash::all_zeros();
         let sweep_tx = bitcoin::Transaction {
-            input: vec![],
+            input: vec![bitcoin::TxIn {
+                previous_output: bitcoin::OutPoint::new(bitcoin::Txid::all_zeros(), 0),
+                ..Default::default()
+            }],
             output,
             version: bitcoin::transaction::Version::TWO,
             lock_time: bitcoin::absolute::LockTime::ZERO,
@@ -758,7 +768,16 @@ where
         let sweep_tx_info = BitcoinTxInfo {
             fee: Some(bitcoin::Amount::from_sat(1000)),
             tx: sweep_tx.clone(),
-            vin: Vec::new(),
+            vin: vec![BitcoinTxVin {
+                txid: Some(bitcoin::Txid::all_zeros()),
+                vout: Some(0),
+                prevout: Some(BitcoinTxVinPrevout {
+                    value: bitcoin::Amount::from_sat(1000),
+                    script_pubkey: OutputScriptPubKey {
+                        script: bitcoin_aggregate_key.signers_script_pubkey(),
+                    },
+                }),
+            }],
         };
 
         let withdrawal_req = model::SweptWithdrawalRequest {
