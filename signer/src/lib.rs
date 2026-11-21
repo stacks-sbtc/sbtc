@@ -127,6 +127,10 @@ pub const BITCOIN_SIGN_REQUEST_LRU_SIZE: NonZeroUsize = NonZeroUsize::new(
 /// next bitcoin block. This assumes signing rounds take ~16 seconds.
 pub const DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX: u16 = 25;
 
+/// Default `max_deposit_validations_per_block`: twice one sweep package.
+pub const DEFAULT_MAX_DEPOSIT_VALIDATIONS_PER_BLOCK: u16 =
+    2 * MAX_DEPOSITS_PER_BITCOIN_PACKAGE as u16;
+
 /// This is the dust limit for deposits in the sBTC smart contracts.
 /// Deposit amounts that is less than this amount will be rejected by the
 /// smart contract.
