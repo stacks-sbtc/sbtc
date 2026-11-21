@@ -5,6 +5,7 @@
 mod bitcoin_client;
 mod bitcoin_forks;
 mod bitcoin_poller;
+mod bitcoin_reorg;
 mod bitcoin_rpc;
 mod bitcoin_validation;
 mod block_observer;
