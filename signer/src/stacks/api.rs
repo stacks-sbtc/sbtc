@@ -57,6 +57,7 @@ use crate::storage::model::StacksBlockHeight;
 use crate::storage::model::StacksTxId;
 use crate::storage::model::ToLittleEndianOrder as _;
 use crate::util::ApiFallbackClient;
+use crate::util::single_value;
 
 use super::contracts::AsTxPayload;
 use super::contracts::SmartContract;
@@ -299,6 +300,12 @@ pub trait StacksInteract: Send + Sync {
 
     /// Get information about the current node.
     fn get_node_info(&self) -> impl Future<Output = Result<GetNodeInfoResponse, Error>> + Send;
+
+    /// Get the chain ID of the connected Stacks node.
+    ///
+    /// Clients that connect to several nodes return an error if the nodes
+    /// report different chain IDs.
+    fn get_chain_id(&self) -> impl Future<Output = Result<StacksChainId, Error>> + Send;
 
     /// Get the source of a deployed smart contract.
     ///
@@ -551,6 +558,46 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
     }
 }
 
+/// A Stacks chain identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(transparent)]
+pub struct StacksChainId(u32);
+
+impl StacksChainId {
+    /// The canonical Stacks mainnet chain ID.
+    pub const MAINNET: Self = Self(stacks_common::consts::CHAIN_ID_MAINNET);
+    /// The canonical Stacks testnet chain ID.
+    pub const TESTNET: Self = Self(stacks_common::consts::CHAIN_ID_TESTNET);
+
+    /// Create a chain ID for tests, including custom development chains.
+    #[cfg(any(test, feature = "testing"))]
+    pub const fn new(chain_id: u32) -> Self {
+        Self(chain_id)
+    }
+
+    /// Return the raw chain ID for RPC responses and transaction encoding.
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
+
+    /// Whether this is the canonical Stacks mainnet chain.
+    pub const fn is_mainnet(self) -> bool {
+        self.0 == Self::MAINNET.0
+    }
+}
+
+impl From<StacksChainId> for u32 {
+    fn from(chain_id: StacksChainId) -> Self {
+        chain_id.as_u32()
+    }
+}
+
+impl std::fmt::Display for StacksChainId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_u32())
+    }
+}
+
 /// The response from a GET /v2/info request to stacks-core
 ///
 /// This type contains only a subset of the full response from stacks-core,
@@ -561,6 +608,8 @@ impl TryFrom<AccountEntryResponse> for AccountInfo {
 /// corresponding fields returned from the `/v3/tenures/info` response.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetNodeInfoResponse {
+    /// The chain ID of the connected Stacks node.
+    pub network_id: StacksChainId,
     /// The height of the tip of the canonical bitcoin blockchain.
     pub burn_block_height: BitcoinBlockHeight,
     /// The version of the stacks node that is connected to this signer.
@@ -1601,6 +1650,10 @@ impl StacksInteract for StacksClient {
         self.get_node_info().await
     }
 
+    async fn get_chain_id(&self) -> Result<StacksChainId, Error> {
+        self.get_node_info().await.map(|info| info.network_id)
+    }
+
     /// Get the source of a deployed smart contract.
     ///
     /// # Notes
@@ -1754,6 +1807,14 @@ impl StacksInteract for ApiFallbackClient<StacksClient> {
         self.exec(|client, _| client.get_node_info()).await
     }
 
+    async fn get_chain_id(&self) -> Result<StacksChainId, Error> {
+        let chain_ids = self
+            .exec_all(|client| async { client.get_node_info().await.map(|info| info.network_id) })
+            .await?;
+
+        single_value(&chain_ids).ok_or_else(|| Error::StacksNodeChainIdMismatch(chain_ids))
+    }
+
     async fn get_contract_source(
         &self,
         address: &StacksAddress,
@@ -1793,7 +1854,6 @@ impl TryFrom<&Settings> for ApiFallbackClient<StacksClient> {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::NetworkKind;
     use crate::keys::{PrivateKey, PublicKey};
     use crate::stacks::wallet::get_full_tx_size;
     use crate::storage::memory::Store;
@@ -1818,14 +1878,12 @@ mod tests {
     }
 
     fn generate_wallet(num_keys: u16, signatures_required: u16) -> SignerWallet {
-        let network_kind = NetworkKind::Regtest;
-
         let public_keys = std::iter::repeat_with(|| Keypair::new_global(&mut OsRng))
             .map(|kp| kp.public_key().into())
             .take(num_keys as usize)
             .collect::<Vec<_>>();
 
-        SignerWallet::new(&public_keys, signatures_required, network_kind, 0).unwrap()
+        SignerWallet::new(&public_keys, signatures_required, StacksChainId::TESTNET).unwrap()
     }
 
     #[ignore = "This is an integration test that hasn't been setup for CI yet"]
@@ -2629,6 +2687,74 @@ mod tests {
         mock.assert();
     }
 
+    #[test_case(StacksChainId::MAINNET; "mainnet")]
+    #[test_case(StacksChainId::TESTNET; "testnet")]
+    #[test_case(StacksChainId::new(0x8000_1234); "custom_chain")]
+    fn node_info_chain_id_serializes_as_a_number(chain_id: StacksChainId) {
+        let mut json: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/stacksapi-get-node-info-test-data.json"
+        ))
+        .unwrap();
+        json["network_id"] = serde_json::json!(chain_id.as_u32());
+
+        let info: GetNodeInfoResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(info.network_id, chain_id);
+        assert_eq!(
+            serde_json::to_value(info).unwrap()["network_id"],
+            serde_json::json!(chain_id.as_u32())
+        );
+    }
+
+    /// The fallback client checks every Stacks node, skipping the ones
+    /// that cannot be reached, and errors if the others disagree.
+    #[test_case(StacksChainId::TESTNET, Some(StacksChainId::TESTNET); "nodes agree")]
+    #[test_case(StacksChainId::MAINNET, None; "nodes disagree")]
+    #[tokio::test]
+    async fn fallback_client_chain_id_checks_every_node(
+        last_chain_id: StacksChainId,
+        expected: Option<StacksChainId>,
+    ) {
+        let mut json: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/stacksapi-get-node-info-test-data.json"
+        ))
+        .unwrap();
+
+        let mut servers = Vec::new();
+        let mut mocks = Vec::new();
+        for chain_id in [Some(StacksChainId::TESTNET), None, Some(last_chain_id)] {
+            let mut server = mockito::Server::new_async().await;
+            let mock = match chain_id {
+                Some(chain_id) => {
+                    json["network_id"] = serde_json::json!(chain_id.as_u32());
+                    server
+                        .mock("GET", "/v2/info")
+                        .with_status(200)
+                        .with_header("content-type", "application/json")
+                        .with_body(json.to_string())
+                }
+                None => server.mock("GET", "/v2/info").with_status(500),
+            };
+            mocks.push(mock.expect(1).create_async().await);
+            servers.push(server);
+        }
+
+        let clients = servers
+            .iter()
+            .map(|server| StacksClient::new(url::Url::parse(&server.url()).unwrap()).unwrap())
+            .collect();
+        let client = ApiFallbackClient::new(clients).unwrap();
+
+        let result = client.get_chain_id().await;
+        match expected {
+            Some(chain_id) => assert_eq!(result.unwrap(), chain_id),
+            None => std::assert_matches!(result, Err(Error::StacksNodeChainIdMismatch(_))),
+        }
+
+        for mock in mocks {
+            mock.assert_async().await;
+        }
+    }
+
     #[tokio::test]
     async fn get_node_info_works() {
         let raw_json_response =
@@ -2651,6 +2777,7 @@ mod tests {
         let expected: GetNodeInfoResponse = serde_json::from_str(raw_json_response).unwrap();
 
         assert_eq!(resp, expected);
+        assert_eq!(resp.network_id, StacksChainId::TESTNET);
         mock.assert();
     }
 

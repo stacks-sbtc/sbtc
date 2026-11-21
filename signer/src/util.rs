@@ -55,6 +55,13 @@ impl Sleep {
     }
 }
 
+/// Return the value shared by every item in the slice, or `None` if the
+/// slice is empty or its items differ.
+pub fn single_value<T: Copy + PartialEq>(values: &[T]) -> Option<T> {
+    let (first, rest) = values.split_first()?;
+    rest.iter().all(|value| value == first).then_some(*first)
+}
+
 /// Extension trait for `Vec`.
 pub trait CollectionExt {
     /// Returns `true` if the collection is not empty.
@@ -237,6 +244,37 @@ impl<T> InnerApiFallbackClient<T> {
         }
 
         Err(FallbackClientError::AllClientsFailed.into())
+    }
+
+    /// Execute a closure on every client, returning the results from the
+    /// clients that succeed.
+    ///
+    /// Clients that return an error are logged and skipped. If every
+    /// client fails then the last error is returned.
+    pub async fn exec_all<'a, R, E, F>(&'a self, f: impl Fn(&'a T) -> F) -> Result<Vec<R>, Error>
+    where
+        E: std::error::Error + Into<Error>,
+        F: Future<Output = Result<R, E>> + 'a,
+    {
+        let mut results = Vec::with_capacity(self.inner_clients.len());
+        let mut last_error = None;
+        for (client_index, client) in self.inner_clients.iter().enumerate() {
+            match f(client).await {
+                Ok(result) => results.push(result),
+                Err(error) => {
+                    tracing::warn!(%error, client_index, "fallback client call failed");
+                    last_error = Some(error.into());
+                }
+            }
+        }
+
+        if results.is_empty()
+            && let Some(error) = last_error
+        {
+            return Err(error);
+        }
+
+        Ok(results)
     }
 }
 
@@ -472,6 +510,38 @@ mod tests {
 
         // Assert that the error is the error that the mock client returns
         // (which was just randomly chosen, it has no significance)
+        assert!(matches!(result.unwrap_err(), Error::Dummy));
+    }
+
+    #[tokio::test]
+    async fn exec_all_skips_failed_clients() {
+        let client = ApiFallbackClient::<MockClient>::from(
+            &[
+                Url::parse("http://ok/1").unwrap(),
+                Url::parse("http://fail/2").unwrap(),
+                Url::parse("http://ok/3").unwrap(),
+            ][..],
+        );
+
+        let urls = client
+            .exec_all(|client| async { client.call().await.map(|_| client.url.clone()) })
+            .await
+            .unwrap();
+
+        assert_eq!(urls, ["http://ok/1", "http://ok/3"]);
+    }
+
+    #[tokio::test]
+    async fn exec_all_returns_error_when_all_clients_fail() {
+        let client = ApiFallbackClient::<MockClient>::from(
+            &[
+                Url::parse("http://fail/1").unwrap(),
+                Url::parse("http://fail/2").unwrap(),
+            ][..],
+        );
+
+        let result = client.exec_all(|client| client.call()).await;
+
         assert!(matches!(result.unwrap_err(), Error::Dummy));
     }
 }

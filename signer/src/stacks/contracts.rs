@@ -1653,7 +1653,7 @@ mod tests {
     use secp256k1::SECP256K1;
     use secp256k1::SecretKey;
 
-    use crate::config::NetworkKind;
+    use crate::stacks::api::StacksChainId;
     use crate::storage::DbWrite as _;
     use crate::storage::model::StacksBlockHash;
     use crate::storage::model::StacksTxId;
@@ -1735,7 +1735,7 @@ mod tests {
             SecretKey::new(&mut rng),
         ];
         let public_keys = secret_keys.map(|sk| sk.public_key(SECP256K1).into());
-        let wallet = SignerWallet::new(&public_keys, 2, NetworkKind::Testnet, 0).unwrap();
+        let wallet = SignerWallet::new(&public_keys, 2, StacksChainId::TESTNET).unwrap();
         let deployer = StacksAddress::burn_address(false);
         let aggregate_key: PublicKey = fake::Faker.fake_with_rng(&mut rng);
 

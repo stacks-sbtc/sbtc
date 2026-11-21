@@ -41,6 +41,7 @@ use crate::stacks::api::GetNodeInfoResponse;
 use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::SignerSetInfo;
 use crate::stacks::api::StacksBlockHeader;
+use crate::stacks::api::StacksChainId;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract;
 use crate::stacks::api::SubmitTxResponse;
@@ -330,6 +331,10 @@ impl BitcoinInteract for TestHarness {
         unimplemented!()
     }
 
+    async fn get_network(&self) -> Result<bitcoin::Network, Error> {
+        unimplemented!()
+    }
+
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         unimplemented!()
     }
@@ -503,6 +508,10 @@ impl StacksInteract for TestHarness {
             Some(start) => Ok(StacksEpochStatus::PostNakamoto { nakamoto_start_height: start }),
             None => Err(Error::MissingNakamotoStartHeight),
         }
+    }
+
+    async fn get_chain_id(&self) -> Result<StacksChainId, Error> {
+        Ok(get_node_info_data().network_id)
     }
 
     async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {

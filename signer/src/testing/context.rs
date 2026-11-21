@@ -18,11 +18,13 @@ use tokio::time::error::Elapsed;
 use crate::bitcoin::GetTransactionFeeResult;
 use crate::bitcoin::rpc::OutPointSummary;
 use crate::bitcoin::rpc::{BitcoinBlockHeader, BitcoinBlockInfo};
+use crate::context::NodeNetwork;
 use crate::context::SbtcLimits;
 use crate::keys::PrivateKey;
 use crate::stacks::api::GetNodeInfoResponse;
 use crate::stacks::api::GetTenureInfoResponse;
 use crate::stacks::api::SignerSetInfo;
+use crate::stacks::api::StacksChainId;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::TenureBlockHeaders;
 use crate::stacks::wallet::SignerWallet;
@@ -103,7 +105,11 @@ where
             bitcoin_client.clone(),
             stacks_client.clone(),
             emily_client.clone(),
-        );
+        )
+        .with_node_network(Some(NodeNetwork {
+            stacks_chain_id: StacksChainId::TESTNET,
+            bitcoin_network: bitcoin::Network::Regtest,
+        }));
 
         Self {
             inner: context,
@@ -262,6 +268,10 @@ where
 {
     fn config(&self) -> &Settings {
         self.inner.config()
+    }
+
+    async fn node_network(&self) -> Result<NodeNetwork, Error> {
+        self.inner.node_network().await
     }
 
     fn state(&self) -> &Arc<SignerState> {
@@ -424,6 +434,10 @@ impl BitcoinInteract for WrappedMockBitcoinInteract {
         self.inner.lock().await.get_blockchain_info().await
     }
 
+    async fn get_network(&self) -> Result<bitcoin::Network, Error> {
+        self.inner.lock().await.get_network().await
+    }
+
     async fn get_network_info(&self) -> Result<bitcoincore_rpc_json::GetNetworkInfoResult, Error> {
         self.inner.lock().await.get_network_info().await
     }
@@ -540,6 +554,10 @@ impl StacksInteract for WrappedMockStacksInteract {
 
     async fn get_node_info(&self) -> Result<GetNodeInfoResponse, Error> {
         self.inner.lock().await.get_node_info().await
+    }
+
+    async fn get_chain_id(&self) -> Result<StacksChainId, Error> {
+        self.inner.lock().await.get_chain_id().await
     }
 
     async fn get_contract_source(

@@ -11,6 +11,7 @@ use crate::dkg;
 use crate::emily_client::EmilyClientError;
 use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
+use crate::stacks::api::StacksChainId;
 use crate::stacks::contracts::DepositValidationError;
 use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
@@ -544,6 +545,14 @@ pub enum Error {
     /// Could not make a successful request to the Stacks node.
     #[error("failed to make a request to the stacks Node: {0}")]
     StacksNodeRequest(#[source] reqwest::Error),
+
+    /// The connected Bitcoin nodes report different networks.
+    #[error("the connected bitcoin nodes report different networks: {0:?}")]
+    BitcoinNodeNetworkMismatch(Vec<bitcoin::Network>),
+
+    /// The connected Stacks nodes report different chain IDs.
+    #[error("the connected stacks nodes report different chain IDs: {0:?}")]
+    StacksNodeChainIdMismatch(Vec<StacksChainId>),
 
     /// We failed to submit the transaction to the mempool.
     #[error("stacks transaction rejected: {0}")]

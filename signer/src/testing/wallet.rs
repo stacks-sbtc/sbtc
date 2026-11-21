@@ -11,11 +11,11 @@ use secp256k1::Keypair;
 use secp256k1::SECP256K1;
 use stacks_common::types::chainstate::StacksAddress;
 
-use crate::config::NetworkKind;
 use crate::context::Context;
 use crate::error::Error;
 use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
+use crate::stacks::api::StacksChainId;
 use crate::stacks::contracts::AsContractCall;
 use crate::stacks::contracts::AsTxPayload;
 use crate::stacks::contracts::ReqContext;
@@ -40,7 +40,7 @@ pub fn regtest_bootstrap_wallet() -> (SignerWallet, [Keypair; 3]) {
 
     let public_keys = key_pairs.map(|kp| kp.public_key().into());
     let wallet =
-        SignerWallet::new(&public_keys, signatures_required, NetworkKind::Testnet, 0).unwrap();
+        SignerWallet::new(&public_keys, signatures_required, StacksChainId::TESTNET).unwrap();
 
     (wallet, key_pairs)
 }
