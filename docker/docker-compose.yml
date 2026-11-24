@@ -188,6 +188,25 @@ services:
       - emily-server
       - mempool-api
 
+  # Opt-in Rust worker; see emily_cron2/README.md for dependency profiles.
+  emily-cron2:
+    build:
+      context: ../
+      dockerfile: docker/sbtc/emily-cron2/Dockerfile
+      target: emily-cron2
+    restart: on-failure
+    environment:
+      - EMILY_API_KEY=testApiKey
+      - PRIVATE_EMILY_ENDPOINT=http://emily-server:3031
+      - MEMPOOL_API_URL=http://mempool-api:8999/api
+      - ELECTRS_API_URL=http://electrs:3002
+      - HIRO_API_URL=https://api.hiro.so
+    profiles:
+      - emily-cron2
+    depends_on:
+      - emily-server
+      - mempool-api
+
   # sBTC Signers.
   # ------------------
   # sbtc signer 1 ----
