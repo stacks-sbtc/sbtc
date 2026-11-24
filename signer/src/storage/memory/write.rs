@@ -346,7 +346,8 @@ impl DbWrite for SharedStore {
         sighashes.iter().for_each(|sighash| {
             store
                 .bitcoin_sighashes
-                .insert(sighash.sighash, sighash.clone());
+                .entry((sighash.sighash, sighash.chain_tip))
+                .or_insert_with(|| sighash.clone());
         });
         Ok(())
     }

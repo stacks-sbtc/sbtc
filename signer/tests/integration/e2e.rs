@@ -26,7 +26,6 @@ use lru::LruCache;
 use more_asserts::{assert_ge, assert_le};
 use rand::rngs::OsRng;
 use sbtc::{
-    WITHDRAWAL_MIN_CONFIRMATIONS,
     events::RegistryEvent,
     testing::{
         containers::TestContainersBuilder,
@@ -35,6 +34,7 @@ use sbtc::{
 };
 use secp256k1::Keypair;
 use signer::{
+    WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS, WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS,
     api::new_block,
     bitcoin::{
         BitcoinBlockHashStreamProvider as _, poller::BitcoinChainTipPoller, rpc::BitcoinCoreClient,
@@ -55,7 +55,9 @@ use signer::{
     storage::{DbRead as _, DbWrite as _, model, postgres::PgStore},
     testing::{self, context::*, wallet::InitiateWithdrawalRequest},
     transaction_coordinator::{TxCoordinatorEventLoop, coordinator_public_key},
-    transaction_signer::{STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop},
+    transaction_signer::{
+        BITCOIN_SIGN_REQUEST_LRU_SIZE, STACKS_SIGN_REQUEST_LRU_SIZE, TxSignerEventLoop,
+    },
     util::{FutureExt as _, Sleep},
 };
 use test_case::test_case;
@@ -168,6 +170,7 @@ impl TestSigner {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
         self.spawn(&start_count, async move {
             let _ = ev.run().await;
@@ -221,6 +224,36 @@ impl TestSigner {
             counter.fetch_add(1, Ordering::Relaxed);
             fut.await
         }));
+    }
+}
+
+/// Produce enough linked blocks in the current Stacks tenure for it to be
+/// eligible as a withdrawal checkpoint.
+async fn extend_current_tenure_for_withdrawal_finality(
+    stacks_client: &StacksClient,
+    recipient: &PrincipalData,
+) {
+    let recipient_address = principal_to_address(recipient);
+
+    // The tenure-start block counts as the first block. Waiting for each
+    // transfer to change the balance ensures that the transactions are
+    // confirmed in separate descendant blocks.
+    for _ in 1..WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS {
+        let previous_balance = stacks_client
+            .get_account(&recipient_address)
+            .await
+            .unwrap()
+            .balance;
+        let tx = fund_stx(stacks_client, recipient, 1).await;
+        let response = stacks_client
+            .submit_tx(&tx)
+            .await
+            .expect("failed to extend the checkpoint tenure");
+        assert_matches!(response, SubmitTxResponse::Acceptance(_));
+        wait_for_stx_balance(stacks_client, &recipient_address, |balance| {
+            balance > previous_balance
+        })
+        .await;
     }
 }
 
@@ -775,11 +808,36 @@ async fn deposit_and_withdrawal() {
     }
     assert_ne!(withdrawal_id, 0);
 
-    // Generate enough blocks to make the withdrawal valid; the minus one is
-    // because we already generated one block above to check for signers votes
-    for _ in 0..WITHDRAWAL_MIN_CONFIRMATIONS - 1 {
+    // The block above elected the first successor tenure. Elect the remaining
+    // successor tenure so that its block-commit checkpoints the withdrawal's
+    // Stacks ancestry.
+    let chain_tip = faucet.generate_block().into();
+    wait_for_tenure_completed(&signers, chain_tip).await;
+    extend_current_tenure_for_withdrawal_finality(&stacks_client, &recipient).await;
+
+    // Now build the required number of Bitcoin blocks on top of the
+    // checkpoint.
+    for _ in 0..WITHDRAWAL_FINALITY_MIN_BITCOIN_BLOCKS {
         let chain_tip = faucet.generate_block().into();
         wait_for_tenure_completed(&signers, chain_tip).await;
+    }
+
+    // Keep generating blocks until the sweep shows up in the mempool. The
+    // extra allowance is for the asynchronous coordinator loop, not finality.
+    let is_withdrawal_in_mempool = || {
+        rpc.get_raw_mempool().unwrap().iter().any(|txid| {
+            let tx = rpc.get_raw_transaction(txid, None).unwrap();
+            tx.output
+                .iter()
+                .any(|tx_out| tx_out.script_pubkey == withdrawal_recipient.script_pubkey)
+        })
+    };
+    let mut num_extra_blocks = 0;
+    while !is_withdrawal_in_mempool() {
+        assert_le!(num_extra_blocks, 2, "the withdrawal was never swept");
+        let chain_tip = faucet.generate_block().into();
+        wait_for_tenure_completed(&signers, chain_tip).await;
+        num_extra_blocks += 1;
     }
     // Now the withdrawal should be swept (in mempool)
 

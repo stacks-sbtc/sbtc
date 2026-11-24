@@ -1,7 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
+use bitcoin::OutPoint;
 use bitcoin::hashes::Hash as _;
 use bitcoincore_rpc::RpcApi as _;
 use fake::Fake as _;
@@ -21,8 +22,8 @@ use signer::stacks::wallet::SignerWallet;
 use signer::storage::DbRead as _;
 use signer::storage::DbWrite as _;
 use signer::storage::postgres::PgStore;
-use signer::testing::IterTestExt as _;
 use signer::testing::btc::get_canonical_chain_tip;
+use signer::transaction_signer::BITCOIN_SIGN_REQUEST_LRU_SIZE;
 use signer::transaction_signer::STACKS_SIGN_REQUEST_LRU_SIZE;
 use test_case::test_case;
 
@@ -52,6 +53,7 @@ use signer::storage::model::BitcoinTxId;
 use signer::storage::model::BitcoinTxSigHash;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::SigHash;
+use signer::storage::model::StacksBlockHash;
 use signer::storage::model::StacksTxId;
 use signer::testing;
 use signer::testing::context::*;
@@ -144,6 +146,7 @@ async fn signing_set_validation_check_for_stacks_transactions() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     // Let's create a proper sign request.
@@ -251,6 +254,7 @@ async fn signer_rejects_stacks_txns_with_too_high_a_fee(
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     // Setup the transaction fee to be the maximum fee configured plus one, so that it
@@ -348,6 +352,7 @@ async fn signer_rejects_multiple_attempts_in_tenure() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     // We need this so that there is a live "network". Otherwise will error when
@@ -501,6 +506,7 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
@@ -559,19 +565,27 @@ async fn assert_should_be_able_to_handle_sbtc_requests() {
     // Check that the intentions to sign the requests sighashes
     // are stored in the database
     let signing_info = db
-        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into())
+        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into(), &chain_tip.block_hash)
         .await
         .expect("query to check if signer sighash is stored failed")
         .expect("signer sighash not stored");
 
     assert!(signing_info.will_sign);
     let signing_info = db
-        .will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into())
+        .will_sign_bitcoin_tx_sighash(&deposit_digest.sighash.into(), &chain_tip.block_hash)
         .await
         .expect("query to check if deposit sighash is stored failed")
         .expect("deposit sighash not stored");
 
     assert!(signing_info.will_sign);
+
+    // The approvals only apply to the chain tip of the pre-sign request.
+    let other_chain_tip: BitcoinBlockHash = Faker.fake_with_rng(&mut rng);
+    let result = db
+        .will_sign_bitcoin_tx_sighash(&signer_digest.sighash.into(), &other_chain_tip)
+        .await
+        .expect("query to check if signer sighash is stored failed");
+    assert!(result.is_none());
 
     testing::storage::drop_db(db).await;
 }
@@ -660,6 +674,7 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
@@ -764,6 +779,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     let sbtc_requests: TxRequestIds = TxRequestIds {
@@ -809,6 +825,348 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
         .await;
 
     assert!(result.is_ok());
+
+    testing::storage::drop_db(db).await;
+}
+
+/// The number of valid and invalid requests serviced by one transaction
+/// in a pre-sign package.
+#[derive(Debug, Default)]
+struct TxRequestCounts {
+    /// Deposits with a max fee that covers their assessed fee.
+    valid_deposits: usize,
+    /// Deposits with a max fee below their assessed fee.
+    invalid_deposits: usize,
+    /// Withdrawals with a max fee that covers their assessed fee.
+    valid_withdrawals: usize,
+    /// Withdrawals with a max fee below their assessed fee.
+    invalid_withdrawals: usize,
+}
+
+impl TxRequestCounts {
+    /// Whether the transaction has at least one request and every request
+    /// passes validation.
+    fn is_valid(&self) -> bool {
+        self.invalid_deposits == 0
+            && self.invalid_withdrawals == 0
+            && (self.valid_deposits > 0 || self.valid_withdrawals > 0)
+    }
+}
+
+/// Check that a signer only writes pre-sign rows for the transactions in
+/// the package that come before the first one that fails validation.
+///
+/// Each case gives the number of valid and invalid deposits and
+/// withdrawals in each transaction of the package. A request is invalid
+/// when its max fee is less than the fee it is assessed in its
+/// transaction, and a single invalid request makes its transaction
+/// invalid. At the 2 sats per vbyte used here, each request is assessed
+/// well over 10 sats and well under 10,000 sats, so we use those as the
+/// max fees of invalid and valid requests.
+///
+/// We check both the sighash rows and the withdrawal output rows. The
+/// withdrawal output rows feed the checks for whether a withdrawal may be
+/// rejected, so rows for an invalid transaction would let a coordinator
+/// delay or confuse those checks.
+#[test_case(vec![
+    TxRequestCounts { valid_deposits: 2, valid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_withdrawals: 2, ..Default::default() },
+    TxRequestCounts { valid_deposits: 1, ..Default::default() },
+] ; "all-transactions-valid")]
+#[test_case(vec![
+    TxRequestCounts { valid_deposits: 1, invalid_deposits: 1, valid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_deposits: 1, ..Default::default() },
+] ; "first-transaction-invalid-deposit")]
+#[test_case(vec![
+    TxRequestCounts { invalid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_deposits: 1, valid_withdrawals: 1, ..Default::default() },
+] ; "first-transaction-invalid-withdrawal")]
+#[test_case(vec![
+    TxRequestCounts { valid_deposits: 1, valid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_withdrawals: 1, invalid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { valid_deposits: 1, valid_withdrawals: 1, ..Default::default() },
+] ; "middle-transaction-invalid-withdrawal")]
+#[test_case(vec![
+    TxRequestCounts { valid_withdrawals: 1, ..Default::default() },
+    TxRequestCounts { invalid_deposits: 1, ..Default::default() },
+] ; "last-transaction-invalid-deposit")]
+#[tokio::test]
+async fn presign_rows_only_written_for_valid_transactions(request_counts: Vec<TxRequestCounts>) {
+    /// The max fee of a request that passes validation, in sats.
+    const VALID_MAX_FEE: u64 = 10_000;
+    /// The max fee of a request that fails validation, in sats.
+    const INVALID_MAX_FEE: u64 = 10;
+
+    // The number of transactions at the start of the package that we
+    // expect rows for.
+    let expected_valid_txs = request_counts.iter().take_while(|tx| tx.is_valid()).count();
+    let db = testing::storage::new_test_database().await;
+
+    let mut rng = get_rng();
+
+    // The signer reads its public key from the config when validating
+    // pre-sign requests, and the deposit votes are stored under the test
+    // signer set's key, so the two need to match.
+    let signers = TestSignerSet::new(&mut rng);
+    let signer_private_key = signers.private_key();
+    let ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .modify_settings(|settings| {
+            settings.signer.bootstrap_signatures_required = 2;
+            settings.signer.private_key = signer_private_key;
+        })
+        .build();
+
+    let stack = TestContainersBuilder::start_bitcoin().await;
+    let bitcoin = stack.bitcoin().await;
+    let rpc = bitcoin.rpc();
+    let faucet = &bitcoin.get_faucet();
+
+    // The setup keeps deposits in the order that we give them, so we list
+    // them in package order, with each transaction's valid deposits before
+    // its invalid ones.
+    let deposits = request_counts
+        .iter()
+        .flat_map(|tx| {
+            let valid = std::iter::repeat_n(VALID_MAX_FEE, tx.valid_deposits);
+            let invalid = std::iter::repeat_n(INVALID_MAX_FEE, tx.invalid_deposits);
+            valid.chain(invalid)
+        })
+        .map(|max_fee| SweepAmounts {
+            amount: 100_000,
+            max_fee,
+            is_deposit: true,
+        });
+    let withdrawals = request_counts
+        .iter()
+        .flat_map(|tx| {
+            let valid = std::iter::repeat_n(VALID_MAX_FEE, tx.valid_withdrawals);
+            let invalid = std::iter::repeat_n(INVALID_MAX_FEE, tx.invalid_withdrawals);
+            valid.chain(invalid)
+        })
+        .map(|max_fee| SweepAmounts {
+            amount: 30_000,
+            max_fee,
+            is_deposit: false,
+        });
+    let sweep_amounts: Vec<SweepAmounts> = deposits.chain(withdrawals).collect();
+    let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &sweep_amounts);
+
+    let block_header = rpc
+        .get_block_header_info(&setup.deposit_block_hash)
+        .unwrap();
+    let chain_tip = BitcoinBlockRef {
+        block_hash: block_header.hash.into(),
+        block_height: block_header.height.into(),
+    };
+
+    let aggregate_key = setup.signers.aggregate_key();
+
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+
+    setup.store_stacks_genesis_block(&db).await;
+    setup.store_dkg_shares(&db).await;
+    setup.store_rotate_keys_event(&db).await;
+    setup.store_donation(&db).await;
+    setup.store_deposit_txs(&db).await;
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+    setup.store_withdrawal_requests(&db).await;
+    setup.store_withdrawal_decisions(&db).await;
+
+    set_verification_status(&db, aggregate_key, DkgSharesStatus::Verified).await;
+
+    let shares = db.get_latest_encrypted_dkg_shares().await.unwrap().unwrap();
+    let signer_set_info = SignerSetInfo::from(shares);
+    let stacks_chain_tip = db
+        .get_stacks_chain_tip(&chain_tip.block_hash)
+        .await
+        .unwrap()
+        .unwrap();
+
+    ctx.state().update_registry_signer_set_info(signer_set_info);
+    ctx.state().update_current_limits(SbtcLimits::unlimited());
+    ctx.state().set_stacks_chain_tip(stacks_chain_tip.into());
+    // The withdrawal requests are confirmed in the chain tip block, so
+    // they are final if the finality height is just above it.
+    ctx.state()
+        .set_withdrawal_finality_height(Some(chain_tip.block_height.saturating_add(1u64)));
+
+    let network = WanNetwork::default();
+
+    let net = network.connect(&ctx);
+    let mut tx_signer = TxSignerEventLoop {
+        network: net.spawn(),
+        context: ctx.clone(),
+        context_window: 10000,
+        wsts_state_machines: LruCache::new(NonZeroUsize::new(100).unwrap()),
+        // We use this private key because it needs to be associated with
+        // one of the public keys that we stored in the DKG shares table.
+        signer_private_key: setup.signers.private_key(),
+        last_presign_block: None,
+        dkg_begin_pause: None,
+        dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
+        stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
+    };
+
+    // Build the package from the requests that the setup created. The
+    // deposits are in package order. The setup sorts withdrawals by
+    // request ID, so we split them by max fee and take them as needed;
+    // withdrawals with the same max fee are interchangeable.
+    let mut deposits = setup.deposits.iter().map(|(info, _, _)| info.outpoint);
+    let (valid_withdrawals, invalid_withdrawals): (Vec<_>, Vec<_>) = setup
+        .withdrawals
+        .iter()
+        .map(|w| &w.request)
+        .partition(|req| req.max_fee == VALID_MAX_FEE);
+    let mut valid_withdrawals = valid_withdrawals.into_iter().map(|req| req.qualified_id());
+    let mut invalid_withdrawals = invalid_withdrawals
+        .into_iter()
+        .map(|req| req.qualified_id());
+
+    let request_package: Vec<TxRequestIds> = request_counts
+        .iter()
+        .map(|tx| {
+            let deposit_count = tx.valid_deposits + tx.invalid_deposits;
+            let valid = valid_withdrawals.by_ref().take(tx.valid_withdrawals);
+            let invalid = invalid_withdrawals.by_ref().take(tx.invalid_withdrawals);
+            TxRequestIds {
+                deposits: deposits.by_ref().take(deposit_count).collect(),
+                withdrawals: valid.chain(invalid).collect(),
+            }
+        })
+        .collect();
+
+    let valid_txs = request_package[..expected_valid_txs].to_vec();
+
+    let presign_request = BitcoinPreSignRequest {
+        request_package,
+        fee_rate: 2.0,
+        last_fees: None,
+    };
+
+    // Start with empty tables, so that every row we find below was
+    // written by the pre-sign request.
+    sqlx::query(
+        "TRUNCATE sbtc_signer.bitcoin_tx_sighashes, sbtc_signer.bitcoin_withdrawals_outputs",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    let mut handle = network.connect(&ctx).spawn();
+
+    tx_signer
+        .handle_bitcoin_pre_sign_request(&presign_request, &chain_tip)
+        .await
+        .unwrap();
+
+    // The signer still acknowledges the request, whatever the outcome of
+    // validation.
+    tokio::time::timeout(Duration::from_secs(2), async move {
+        handle.receive().await.unwrap();
+    })
+    .await
+    .unwrap();
+
+    #[derive(sqlx::FromRow, Debug)]
+    struct TxSighashRow {
+        txid: BitcoinTxId,
+        prevout_txid: BitcoinTxId,
+        prevout_output_index: i32,
+        prevout_type: model::TxPrevoutType,
+        is_valid_tx: bool,
+    }
+
+    let rows = sqlx::query_as::<_, TxSighashRow>(
+        r#"
+        SELECT
+            txid
+          , prevout_txid
+          , prevout_output_index
+          , prevout_type
+          , is_valid_tx
+        FROM sbtc_signer.bitcoin_tx_sighashes
+        "#,
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+
+    let expected_deposits: HashSet<OutPoint> = valid_txs
+        .iter()
+        .flat_map(|tx| tx.deposits.iter().copied())
+        .collect();
+
+    // Each recorded transaction has one row for the signers' input and
+    // one row for each of its deposits, and every recorded row is for a
+    // valid transaction.
+    assert_eq!(rows.len(), expected_valid_txs + expected_deposits.len());
+    assert!(rows.iter().all(|row| row.is_valid_tx));
+
+    let recorded_txids: HashSet<BitcoinTxId> = rows.iter().map(|row| row.txid).collect();
+    assert_eq!(recorded_txids.len(), expected_valid_txs);
+
+    let recorded_deposits: HashSet<OutPoint> = rows
+        .iter()
+        .filter(|row| row.prevout_type == model::TxPrevoutType::Deposit)
+        .map(|row| OutPoint::new(row.prevout_txid.into(), row.prevout_output_index as u32))
+        .collect();
+
+    assert_eq!(recorded_deposits, expected_deposits);
+
+    #[derive(sqlx::FromRow, Debug)]
+    struct WithdrawalOutputRow {
+        bitcoin_txid: BitcoinTxId,
+        output_index: i32,
+        request_id: i64,
+        stacks_block_hash: StacksBlockHash,
+        is_valid_tx: bool,
+    }
+
+    let withdrawal_rows = sqlx::query_as::<_, WithdrawalOutputRow>(
+        r#"
+        SELECT
+            bitcoin_txid
+          , output_index
+          , request_id
+          , stacks_block_hash
+          , is_valid_tx
+        FROM sbtc_signer.bitcoin_withdrawals_outputs
+        "#,
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+
+    let expected_withdrawals: HashSet<(u64, StacksBlockHash)> = valid_txs
+        .iter()
+        .flat_map(|tx| &tx.withdrawals)
+        .map(|id| (id.request_id, id.block_hash))
+        .collect();
+
+    // There is one withdrawal output row for each withdrawal in a
+    // recorded transaction. Each row is for an output after the signers'
+    // output and the OP_RETURN output, and for a transaction that we
+    // recorded sighashes for. No row exists for the first invalid
+    // transaction or for any transaction after it.
+    assert_eq!(withdrawal_rows.len(), expected_withdrawals.len());
+    assert!(withdrawal_rows.iter().all(|row| row.is_valid_tx));
+    assert!(withdrawal_rows.iter().all(|row| row.output_index >= 2));
+    assert!(
+        withdrawal_rows
+            .iter()
+            .all(|row| recorded_txids.contains(&row.bitcoin_txid))
+    );
+
+    let recorded_withdrawals: HashSet<(u64, StacksBlockHash)> = withdrawal_rows
+        .iter()
+        .map(|row| (row.request_id as u64, row.stacks_block_hash))
+        .collect();
+
+    assert_eq!(recorded_withdrawals, expected_withdrawals);
 
     testing::storage::drop_db(db).await;
 }
@@ -864,6 +1222,7 @@ mod serial {
             dkg_begin_pause: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
 
         // We need to convince the signer event loop that it should accept the
@@ -923,9 +1282,20 @@ mod serial {
 
         // We should have a state machine associated with the sighash nonce
         // request message that we just received.
-        let id1 = StateMachineId::BitcoinSign(sighash);
+        let id1 = StateMachineId::BitcoinSign(sighash, report.chain_tip);
         assert!(tx_signer.wsts_state_machines.contains(&id1));
         assert_eq!(tx_signer.wsts_state_machines.len(), 1);
+
+        let other_chain_tip = BitcoinBlockRef {
+            block_hash: BitcoinBlockHash::from([1; 32]),
+            block_height: 1u64.into(),
+        };
+        let id_at_other_chain_tip = StateMachineId::BitcoinSign(sighash, other_chain_tip);
+        assert!(
+            !tx_signer
+                .wsts_state_machines
+                .contains(&id_at_other_chain_tip)
+        );
 
         // Now let's see what happens when we receive a nonce request message
         // for a sighash that we do not know about. Since the nonce request is
@@ -943,7 +1313,7 @@ mod serial {
             .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
             .await;
 
-        let id2 = StateMachineId::BitcoinSign(random_sighash);
+        let id2 = StateMachineId::BitcoinSign(random_sighash, report.chain_tip);
         assert!(response.is_err());
         assert!(tx_signer.wsts_state_machines.contains(&id1));
         assert!(!tx_signer.wsts_state_machines.contains(&id2));
@@ -952,10 +1322,9 @@ mod serial {
         testing::storage::drop_db(db).await;
     }
 
-    /// Check that duplicate nonce requests are idempotent and that new signing
-    /// attempts generate unique nonces.
+    /// Check that an approved sighash can start only one signing round.
     #[test_log::test(tokio::test)]
-    async fn nonce_response_unique_nonces() {
+    async fn bitcoin_signing_round_is_one_shot_per_sighash() {
         let db = testing::storage::new_test_database().await;
 
         let mut rng = get_rng();
@@ -999,6 +1368,7 @@ mod serial {
             last_presign_block: None,
             dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
             stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+            bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
         };
 
         // We need to convince the signer event loop that it should accept the
@@ -1076,78 +1446,65 @@ mod serial {
             .unwrap();
 
         // Let's listen for the nonce response.
-        let response1 = tokio::time::timeout(Duration::from_secs(2), func(handle))
+        tokio::time::timeout(Duration::from_secs(2), func(handle))
             .await
             .unwrap();
 
-        // Send the exact same request again. This is a retransmission, so the
-        // signer should reuse its response.
-        let handle = network.connect(&ctx).spawn();
-        tx_signer
+        // Even an exact retransmission is rejected. The signer must never
+        // emit a second nonce response for this authorization.
+        let result = tx_signer
             .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
-            .await
-            .unwrap();
+            .await;
+        assert!(matches!(
+            result,
+            Err(Error::BitcoinSigningRoundAlreadyStarted(
+                error_sighash,
+                error_chain_tip,
+            )) if error_sighash == sighash && error_chain_tip == report.chain_tip.block_hash
+        ));
 
-        let response2 = tokio::time::timeout(Duration::from_secs(2), func(handle))
-            .await
-            .unwrap();
-
-        assert_eq!(response2, response1);
-
-        // Incrementing the iteration ID starts a new signing attempt. The
-        // existing state machine should reset the round and generate a fresh
-        // nonce response.
+        // A different iteration would cause WSTS to generate fresh nonces for
+        // the same approved sighash, so reject it even while the original
+        // state machine is active.
         let WstsNetMessage::NonceRequest(request) = &mut nonce_request_msg.inner else {
             panic!("expected a NonceRequest")
         };
         request.sign_iter_id += 1;
 
-        let handle = network.connect(&ctx).spawn();
-        tx_signer
+        let result = tx_signer
             .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
-            .await
-            .unwrap();
+            .await;
+        assert!(matches!(
+            result,
+            Err(Error::BitcoinSigningRoundAlreadyStarted(
+                error_sighash,
+                error_chain_tip,
+            )) if error_sighash == sighash && error_chain_tip == report.chain_tip.block_hash
+        ));
 
-        // This response comes from a new iteration in the existing state
-        // machine.
-        let response3 = tokio::time::timeout(Duration::from_secs(2), func(handle))
-            .await
-            .unwrap();
-
-        // Clear the cache and process the current request with a fresh state
-        // machine. Its nonce response should also be unique.
+        // Sweep signature-share handling removes its state machine after the
+        // signer produces a share. Simulate that completed lifecycle here;
+        // this fixture intentionally only contains enough DKG material to
+        // exercise nonce generation.
         tx_signer.wsts_state_machines.clear();
+        assert!(tx_signer.wsts_state_machines.is_empty());
 
-        let handle = network.connect(&ctx).spawn();
-        tx_signer
+        // Replaying even the exact original request after completion must not
+        // load a fresh state machine and generate another nonce response.
+        let WstsNetMessage::NonceRequest(request) = &mut nonce_request_msg.inner else {
+            panic!("expected a NonceRequest")
+        };
+        request.sign_iter_id -= 1;
+        let result = tx_signer
             .handle_wsts_message(&nonce_request_msg, msg_public_key, &report)
-            .await
-            .unwrap();
-
-        let response4 = tokio::time::timeout(Duration::from_secs(2), func(handle))
-            .await
-            .unwrap();
-
-        // The signer has only one key ID for their DKG shares, so they should
-        // only generate one nonce in their nonce response.
-        let nonces1 = response1.nonces.single();
-        let nonces3 = response3.nonces.single();
-        let nonces4 = response4.nonces.single();
-        // Nonces from distinct attempts should be unique. We compress the
-        // public nonces so that we can easily hash them in a set.
-        let nonces_list: [[u8; 33]; 6] = [
-            nonces1.D.compress().data,
-            nonces1.E.compress().data,
-            nonces3.D.compress().data,
-            nonces3.E.compress().data,
-            nonces4.D.compress().data,
-            nonces4.E.compress().data,
-        ];
-        let nonces_set = nonces_list.iter().copied().collect::<BTreeSet<[u8; 33]>>();
-
-        // If we have duplicates then we should have fewer entries in the set
-        // than in the list.
-        assert_eq!(nonces_set.len(), nonces_list.len());
+            .await;
+        assert!(matches!(
+            result,
+            Err(Error::BitcoinSigningRoundAlreadyStarted(
+                error_sighash,
+                error_chain_tip,
+            )) if error_sighash == sighash && error_chain_tip == report.chain_tip.block_hash
+        ));
 
         testing::storage::drop_db(db).await;
     }
@@ -1197,6 +1554,7 @@ async fn max_one_state_machine_per_bitcoin_block_hash_for_dkg() {
         dkg_begin_pause: None,
         dkg_verification_state_machines: LruCache::new(NonZeroUsize::new(5).unwrap()),
         stacks_sign_request: LruCache::new(STACKS_SIGN_REQUEST_LRU_SIZE),
+        bitcoin_sign_request: LruCache::new(BITCOIN_SIGN_REQUEST_LRU_SIZE),
     };
 
     // We need to convince the signer event loop that it should accept the
@@ -1612,7 +1970,7 @@ mod validate_dkg_verification_message {
 
         let result = params.execute(&db).await.unwrap_err();
 
-        assert!(matches!(result, Error::InvalidSigHash(_)));
+        std::assert_matches!(result, Error::InvalidSigHash(_, _));
 
         testing::storage::drop_db(db).await;
     }

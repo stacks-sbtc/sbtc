@@ -4,7 +4,7 @@ use bitcoin::OutPoint;
 
 use crate::{
     DEPOSIT_LOCKTIME_BLOCK_BUFFER, MAX_MEMPOOL_PACKAGE_TX_COUNT, MAX_REORG_BLOCK_COUNT,
-    WITHDRAWAL_BLOCKS_EXPIRY,
+    WITHDRAWAL_BLOCKS_EXPIRY, WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS,
     bitcoin::{
         utxo::{SignerUtxo, SignerUtxoKeySet},
         validation::{
@@ -719,6 +719,104 @@ impl PgRead {
         .fetch_one(executor)
         .await
         .map_err(Error::SqlxQuery)
+    }
+
+    /// The SQL query that returns the exclusive upper bound for final
+    /// withdrawal-request burn-view heights.
+    pub const GET_WITHDRAWAL_FINALITY_HEIGHT_QUERY: &str = r#"
+        -- get_withdrawal_finality_height
+        WITH RECURSIVE confirmed_bitcoin_block AS (
+            -- This is the newest Bitcoin block with the required number of
+            -- canonical descendants.
+            SELECT block_height
+            FROM sbtc_signer.bitcoin_blocks
+            WHERE is_canonical
+            ORDER BY block_height DESC
+            OFFSET $2
+            LIMIT 1
+        ),
+        stacks_blockchain AS (
+            SELECT
+                sb.parent_hash
+              , sb.bitcoin_anchor
+              , bitcoin_anchor.block_height AS canonical_tenure_height
+              -- We have only visited the Stacks chain tip at this point.
+              , 1::BIGINT AS tenure_block_count
+              , NULL::BIGINT AS checkpoint_tenure_height
+            FROM sbtc_signer.stacks_blocks AS sb
+            JOIN sbtc_signer.bitcoin_blocks AS bitcoin_anchor
+              ON bitcoin_anchor.block_hash = sb.bitcoin_anchor
+             AND bitcoin_anchor.is_canonical
+            CROSS JOIN confirmed_bitcoin_block
+            WHERE sb.block_hash = $1
+              AND bitcoin_anchor.block_height >= $4
+
+            UNION ALL
+
+            SELECT
+                parent.parent_hash
+              , parent.bitcoin_anchor
+              , bitcoin_anchor.block_height AS canonical_tenure_height
+              -- Only adjacent blocks on the walked chain with the same anchor
+              -- count toward the checkpoint tenure. Counting the whole table
+              -- could combine blocks from different Stacks forks.
+              , CASE
+                    WHEN parent.bitcoin_anchor = child.bitcoin_anchor
+                    THEN child.tenure_block_count + 1
+                    ELSE 1
+                END AS tenure_block_count
+              , COALESCE(
+                    child.checkpoint_tenure_height,
+                    CASE
+                        WHEN parent.bitcoin_anchor = child.bitcoin_anchor
+                         AND child.tenure_block_count + 1 >= $3
+                         AND bitcoin_anchor.block_height <= confirmed_bitcoin_block.block_height
+                        THEN bitcoin_anchor.block_height
+                        ELSE NULL
+                    END
+                ) AS checkpoint_tenure_height
+            FROM sbtc_signer.stacks_blocks AS parent
+            JOIN stacks_blockchain AS child
+              ON parent.block_hash = child.parent_hash
+            JOIN sbtc_signer.bitcoin_blocks AS bitcoin_anchor
+              ON bitcoin_anchor.block_hash = parent.bitcoin_anchor
+             AND bitcoin_anchor.is_canonical
+            CROSS JOIN confirmed_bitcoin_block
+            -- Stop as soon as the exclusive bound has been found. In the normal
+            -- case this only visits the checkpoint tenure and its parent, rather
+            -- than the entire Stacks chain.
+            WHERE (
+                    child.checkpoint_tenure_height IS NULL
+                 OR child.canonical_tenure_height >= child.checkpoint_tenure_height
+            )
+              AND bitcoin_anchor.block_height >= $4
+        )
+        SELECT canonical_tenure_height AS withdrawal_finality_height
+        FROM stacks_blockchain
+        WHERE canonical_tenure_height < checkpoint_tenure_height
+        ORDER BY canonical_tenure_height DESC
+        LIMIT 1
+    "#;
+
+    /// Return the exclusive upper bound for final withdrawal-request
+    /// burn-view heights.
+    async fn get_withdrawal_finality_height<'e, E>(
+        executor: &'e mut E,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_scalar::<_, BitcoinBlockHeight>(Self::GET_WITHDRAWAL_FINALITY_HEIGHT_QUERY)
+            .bind(stacks_chain_tip)
+            .bind(i64::try_from(min_confirmations).map_err(Error::ConversionDatabaseInt)?)
+            .bind(WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS)
+            .bind(minimum_withdrawal_height)
+            .fetch_optional(executor)
+            .await
+            .map_err(Error::SqlxQuery)
     }
 
     pub async fn get_bitcoin_block<'e, E>(
@@ -2169,7 +2267,9 @@ impl PgRead {
                 FROM sbtc_signer.bitcoin_tx_sighashes AS bts
                 WHERE bts.prevout_txid = $1
 
-                UNION ALL
+                -- A transaction may have been approved under more than one
+                -- chain tip, so we use UNION to drop the duplicate rows.
+                UNION
 
                 SELECT
                     bts.txid
@@ -2495,6 +2595,7 @@ impl PgRead {
     async fn will_sign_bitcoin_tx_sighash<'e, E>(
         executor: &'e mut E,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error>
     where
         &'e mut E: sqlx::PgExecutor<'e>,
@@ -2505,11 +2606,14 @@ impl PgRead {
                 will_sign
               , key_set_id
               , prevout_type
+              , validation_result
             FROM sbtc_signer.bitcoin_tx_sighashes
             WHERE sighash = $1
+              AND chain_tip = $2
             "#,
         )
         .bind(sighash)
+        .bind(chain_tip)
         .fetch_optional(executor)
         .await
         .map_err(Error::SqlxQuery)
@@ -2802,6 +2906,21 @@ impl DbRead for PgStore {
         .await
     }
 
+    async fn get_withdrawal_finality_height(
+        &self,
+        stacks_chain_tip: &StacksBlockHash,
+        min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        PgRead::get_withdrawal_finality_height(
+            self.get_connection().await?.as_mut(),
+            stacks_chain_tip,
+            min_confirmations,
+            minimum_withdrawal_height,
+        )
+        .await
+    }
+
     async fn get_pending_rejected_withdrawal_requests(
         &self,
         bitcoin_chain_tip: &BitcoinBlockRef,
@@ -3016,8 +3135,10 @@ impl DbRead for PgStore {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
-        PgRead::will_sign_bitcoin_tx_sighash(self.get_connection().await?.as_mut(), sighash).await
+        let mut executor = self.get_connection().await?;
+        PgRead::will_sign_bitcoin_tx_sighash(executor.as_mut(), sighash, chain_tip).await
     }
 
     async fn get_withdrawal_signer_decisions(
@@ -3241,6 +3362,21 @@ impl DbRead for PgTransaction<'_> {
             stacks_chain_tip,
             min_bitcoin_height,
             signature_threshold,
+        )
+        .await
+    }
+
+    async fn get_withdrawal_finality_height(
+        &self,
+        stacks_chain_tip: &StacksBlockHash,
+        min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        PgRead::get_withdrawal_finality_height(
+            self.tx.lock().await.as_mut(),
+            stacks_chain_tip,
+            min_confirmations,
+            minimum_withdrawal_height,
         )
         .await
     }
@@ -3485,9 +3621,10 @@ impl DbRead for PgTransaction<'_> {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
         let mut tx = self.tx.lock().await;
-        PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash).await
+        PgRead::will_sign_bitcoin_tx_sighash(tx.as_mut(), sighash, chain_tip).await
     }
 
     async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {

@@ -116,8 +116,10 @@ pub struct Store {
     /// Bitcoin transaction inputs
     pub bitcoin_prevouts: HashMap<model::BitcoinTxId, Vec<model::TxPrevout>>,
 
-    /// Bitcoin signhashes
-    pub bitcoin_sighashes: HashMap<model::SigHash, model::BitcoinTxSigHash>,
+    /// Bitcoin sighashes, keyed by the sighash and the chain tip when
+    /// they were approved.
+    pub bitcoin_sighashes:
+        HashMap<(model::SigHash, model::BitcoinBlockHash), model::BitcoinTxSigHash>,
 
     /// Bitcoin withdrawal outputs
     pub bitcoin_withdrawal_outputs:

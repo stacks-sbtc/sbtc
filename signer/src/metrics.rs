@@ -182,7 +182,7 @@ impl Metrics {
             Ok(_) => "success",
             Err(Error::SigHashConversion(_)) => "improper-sighash",
             Err(Error::UnknownSigHash(_)) => "unknown-sighash",
-            Err(Error::InvalidSigHash(_)) => "invalid-sighash",
+            Err(Error::InvalidSigHash(_, _)) => "invalid-sighash",
             Err(Error::SignatureTypeMismatch { .. }) => "signature-type-mismatch",
             Err(_) => "unexpected-failure",
         };

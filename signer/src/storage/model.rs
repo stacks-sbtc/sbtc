@@ -1653,6 +1653,8 @@ pub struct BitcoinTxSigHashSigningInfo {
     pub key_set_id: KeySetId,
     /// The kind of output being spent.
     pub prevout_type: TxPrevoutType,
+    /// The result of validation that was done on the input.
+    pub validation_result: InputValidationResult,
 }
 
 /// An output that was created due to a withdrawal request.

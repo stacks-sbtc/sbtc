@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::{
-    DEPOSIT_LOCKTIME_BLOCK_BUFFER,
+    DEPOSIT_LOCKTIME_BLOCK_BUFFER, WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS,
     bitcoin::{
         utxo::{SignerUtxo, SignerUtxoKeySet},
         validation::{DepositRequestReport, WithdrawalRequestReport},
@@ -277,6 +277,73 @@ impl DbRead for SharedStore {
         _threshold: u16,
     ) -> Result<Vec<model::WithdrawalRequest>, Error> {
         unimplemented!();
+    }
+
+    async fn get_withdrawal_finality_height(
+        &self,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        let store = self.lock().await;
+        let mut canonical_bitcoin_heights = store
+            .canonical_bitcoin_blocks
+            .values()
+            .map(|block| block.block_height)
+            .collect::<Vec<_>>();
+        canonical_bitcoin_heights.sort_unstable_by(|left, right| right.cmp(left));
+
+        let Ok(confirmation_index) = usize::try_from(min_confirmations) else {
+            return Ok(None);
+        };
+        let Some(confirmed_bitcoin_height) =
+            canonical_bitcoin_heights.get(confirmation_index).copied()
+        else {
+            return Ok(None);
+        };
+        let Some(mut stacks_block) = store.stacks_blocks.get(stacks_chain_tip) else {
+            return Ok(None);
+        };
+
+        let mut checkpoint_tenure_height = None;
+        let mut tenure_block_count = 1i64;
+        loop {
+            let Some(bitcoin_anchor) = store
+                .canonical_bitcoin_blocks
+                .get(&stacks_block.bitcoin_anchor)
+            else {
+                return Ok(None);
+            };
+            if bitcoin_anchor.block_height < minimum_withdrawal_height {
+                return Ok(None);
+            }
+
+            let has_enough_stacks_blocks =
+                tenure_block_count >= WITHDRAWAL_FINALITY_MIN_STACKS_BLOCKS;
+            let has_enough_bitcoin_blocks = bitcoin_anchor.block_height <= confirmed_bitcoin_height;
+            if checkpoint_tenure_height.is_none()
+                && has_enough_stacks_blocks
+                && has_enough_bitcoin_blocks
+            {
+                checkpoint_tenure_height = Some(bitcoin_anchor.block_height);
+            }
+
+            let is_exclusive_bound =
+                checkpoint_tenure_height.is_some_and(|height| bitcoin_anchor.block_height < height);
+            if is_exclusive_bound {
+                return Ok(Some(bitcoin_anchor.block_height));
+            }
+
+            let Some(parent) = store.stacks_blocks.get(&stacks_block.parent_hash) else {
+                return Ok(None);
+            };
+            tenure_block_count = if parent.bitcoin_anchor == stacks_block.bitcoin_anchor {
+                tenure_block_count.saturating_add(1)
+            } else {
+                1
+            };
+            stacks_block = parent;
+        }
     }
 
     async fn get_pending_rejected_withdrawal_requests(
@@ -674,12 +741,15 @@ impl DbRead for SharedStore {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
-        Ok(self.lock().await.bitcoin_sighashes.get(sighash).map(|s| {
+        let key = (*sighash, *chain_tip);
+        Ok(self.lock().await.bitcoin_sighashes.get(&key).map(|s| {
             model::BitcoinTxSigHashSigningInfo {
                 will_sign: s.will_sign,
                 key_set_id: s.key_set_id,
                 prevout_type: s.prevout_type,
+                validation_result: s.validation_result,
             }
         }))
     }
@@ -952,6 +1022,21 @@ impl DbRead for InMemoryTransaction {
             .await
     }
 
+    async fn get_withdrawal_finality_height(
+        &self,
+        stacks_chain_tip: &model::StacksBlockHash,
+        min_confirmations: u64,
+        minimum_withdrawal_height: BitcoinBlockHeight,
+    ) -> Result<Option<BitcoinBlockHeight>, Error> {
+        self.store
+            .get_withdrawal_finality_height(
+                stacks_chain_tip,
+                min_confirmations,
+                minimum_withdrawal_height,
+            )
+            .await
+    }
+
     async fn get_pending_rejected_withdrawal_requests(
         &self,
         bitcoin_chain_tip: &model::BitcoinBlockRef,
@@ -1168,8 +1253,11 @@ impl DbRead for InMemoryTransaction {
     async fn will_sign_bitcoin_tx_sighash(
         &self,
         sighash: &model::SigHash,
+        chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::BitcoinTxSigHashSigningInfo>, Error> {
-        self.store.will_sign_bitcoin_tx_sighash(sighash).await
+        self.store
+            .will_sign_bitcoin_tx_sighash(sighash, chain_tip)
+            .await
     }
 
     async fn get_p2p_peers(&self) -> Result<Vec<model::P2PPeer>, Error> {
