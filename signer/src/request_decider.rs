@@ -416,15 +416,27 @@ where
         };
 
         // We turn all the input scriptPubKeys into addresses and check
-        // those with the blocklist client.
+        // those with the blocklist client, skipping any without an
+        // address (e.g. P2PK).
         let bitcoin_network = bitcoin::Network::from(self.context.config().signer.network);
         let params = bitcoin_network.params();
-        let addresses = req
+        let outpoint = req.outpoint();
+        let addresses: Vec<bitcoin::Address> = req
             .sender_script_pub_keys
             .iter()
-            .map(|script_pubkey| bitcoin::Address::from_script(script_pubkey, params))
-            .collect::<Result<Vec<bitcoin::Address>, _>>()
-            .map_err(|err| Error::DepositBitcoinAddressFromScript(err, req.outpoint()))?;
+            .filter_map(|script_pubkey| {
+                bitcoin::Address::from_script(script_pubkey, params)
+                    .inspect_err(|error| {
+                        tracing::debug!(
+                            %error,
+                            %outpoint,
+                            script_pubkey = %script_pubkey.as_script(),
+                            "deposit input has no address form; skipping blocklist check"
+                        );
+                    })
+                    .ok()
+            })
+            .collect();
 
         let responses = futures::stream::iter(&addresses)
             .then(|address| async { client.can_accept(&address.to_string()).await })
@@ -553,10 +565,21 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    use bitcoin::ScriptBuf;
+    use fake::Fake as _;
+    use fake::Faker;
+
+    use super::*;
     use crate::bitcoin::MockBitcoinInteract;
     use crate::emily_client::MockEmilyInteract;
+    use crate::network::InMemoryNetwork;
+    use crate::network::in_memory::MpmcBroadcaster;
     use crate::stacks::api::MockStacksInteract;
     use crate::storage::memory::SharedStore;
+    use crate::storage::model::ScriptPubKey;
     use crate::testing;
     use crate::testing::context::*;
 
@@ -614,5 +637,125 @@ mod tests {
         test_environment()
             .assert_should_store_decisions_received_from_other_signers()
             .await;
+    }
+
+    /// A blocklist checker that records every address it is asked about.
+    #[derive(Clone, Default)]
+    struct RecordingChecker {
+        accept: bool,
+        fail: bool,
+        checked: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl BlocklistChecker for RecordingChecker {
+        async fn can_accept(&self, address: &str) -> Result<bool, Error> {
+            self.checked.lock().unwrap().push(address.to_string());
+            if self.fail {
+                return Err(Error::NoStacksChainTip);
+            }
+            Ok(self.accept)
+        }
+    }
+
+    type TestRequestDecider = RequestDeciderEventLoop<
+        TestContext<
+            SharedStore,
+            WrappedMock<MockBitcoinInteract>,
+            WrappedMock<MockStacksInteract>,
+            WrappedMock<MockEmilyInteract>,
+        >,
+        MpmcBroadcaster,
+        RecordingChecker,
+    >;
+
+    fn request_decider(checker: RecordingChecker) -> TestRequestDecider {
+        let context = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+
+        RequestDeciderEventLoop {
+            context,
+            network: InMemoryNetwork::new().connect(),
+            blocklist_checker: Some(checker),
+            signer_private_key: PrivateKey::new(&mut testing::get_rng()),
+            context_window: 6,
+            deposit_decisions_retry_window: 1,
+            withdrawal_decisions_retry_window: 1,
+        }
+    }
+
+    /// A P2PK scriptPubKey, which has no address form.
+    fn p2pk_script<R: rand::Rng>(rng: &mut R) -> ScriptPubKey {
+        let public_key =
+            bitcoin::PublicKey::new(PublicKey::from_private_key(&PrivateKey::new(rng)));
+        ScriptBuf::new_p2pk(&public_key).into()
+    }
+
+    /// A P2WPKH scriptPubKey and its address string for the given network.
+    fn p2wpkh_script<R: rand::Rng>(
+        rng: &mut R,
+        network: bitcoin::Network,
+    ) -> (ScriptPubKey, String) {
+        let public_key =
+            bitcoin::CompressedPublicKey(PublicKey::from_private_key(&PrivateKey::new(rng)).into());
+        let address = bitcoin::Address::p2wpkh(&public_key, network);
+        (address.script_pubkey().into(), address.to_string())
+    }
+
+    #[test_case::test_case(false; "not blocked")]
+    #[test_case::test_case(true; "blocked")]
+    #[tokio::test]
+    async fn deposit_skips_script_pub_keys_without_address(is_blocked: bool) {
+        let mut rng = testing::get_rng();
+        let checker = RecordingChecker {
+            accept: !is_blocked,
+            ..Default::default()
+        };
+        let decider = request_decider(checker.clone());
+        let network = bitcoin::Network::from(decider.context.config().signer.network);
+
+        let (p2wpkh, address) = p2wpkh_script(&mut rng, network);
+
+        let mut request: model::DepositRequest = Faker.fake_with_rng(&mut rng);
+        request.sender_script_pub_keys = vec![p2pk_script(&mut rng), p2wpkh];
+
+        let can_accept = decider.can_accept_deposit_request(&request).await.unwrap();
+
+        // The P2PK input is skipped, the P2WPKH input is still screened.
+        assert_eq!(can_accept, !is_blocked);
+        assert_eq!(*checker.checked.lock().unwrap(), vec![address]);
+    }
+
+    #[tokio::test]
+    async fn deposit_with_only_script_pub_keys_without_address_is_accepted() {
+        let mut rng = testing::get_rng();
+        let checker = RecordingChecker::default();
+        let decider = request_decider(checker.clone());
+
+        let mut request: model::DepositRequest = Faker.fake_with_rng(&mut rng);
+        request.sender_script_pub_keys = vec![p2pk_script(&mut rng), p2pk_script(&mut rng)];
+
+        let can_accept = decider.can_accept_deposit_request(&request).await.unwrap();
+
+        assert!(can_accept);
+        assert!(checker.checked.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn blocklist_client_errors_are_still_returned() {
+        let mut rng = testing::get_rng();
+        let checker = RecordingChecker {
+            fail: true,
+            ..Default::default()
+        };
+        let decider = request_decider(checker.clone());
+        let network = bitcoin::Network::from(decider.context.config().signer.network);
+
+        let mut deposit: model::DepositRequest = Faker.fake_with_rng(&mut rng);
+        let (p2wpkh, _) = p2wpkh_script(&mut rng, network);
+        deposit.sender_script_pub_keys = vec![p2pk_script(&mut rng), p2wpkh];
+
+        assert!(decider.can_accept_deposit_request(&deposit).await.is_err());
     }
 }
