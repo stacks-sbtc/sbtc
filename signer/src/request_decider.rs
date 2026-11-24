@@ -250,17 +250,15 @@ where
         Ok(())
     }
 
-    /// Check whether this signer accepts the deposit request. This
-    /// involves:
+    /// Check whether this signer accepts the deposit request and whether
+    /// it can sign for it. These are separate decisions:
     ///
-    /// 1. Reach out to the blocklist client and find out whether we can
-    ///    accept the deposit given all the input `scriptPubKey`s of the
-    ///    transaction.
-    /// 2. Check if we are a part of the signing set associated with the
-    ///    public key locking the funds.
+    /// 1. We accept the deposit if the blocklist client accepts all the
+    ///    input `scriptPubKey`s of the transaction.
+    /// 2. We can sign for the deposit if we are a part of the key set
+    ///    locking the funds.
     ///
-    /// If the block list client is not configured then the first check
-    /// always passes.
+    /// If the block list client is not configured then we always accept.
     #[tracing::instrument(skip_all)]
     pub async fn handle_pending_deposit_request(
         &mut self,
@@ -270,9 +268,8 @@ where
         let db = self.context.get_storage_mut();
 
         let signer_public_key = self.signer_public_key();
-        // Let's find out whether or not we can even sign for this deposit
-        // request. If we cannot then we do not even reach out to the
-        // blocklist client.
+        // Let's find out whether or not we can sign for this deposit
+        // request.
         //
         // We should have a record for the request because of where this
         // function is in the code path.

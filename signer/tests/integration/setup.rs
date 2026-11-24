@@ -29,6 +29,7 @@ use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::rpc::BitcoinTxInfo;
 use signer::bitcoin::utxo;
 use signer::bitcoin::utxo::Fees;
+use signer::bitcoin::utxo::InputSigners;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
@@ -221,6 +222,7 @@ impl TestSweepSetup {
             },
             accept_threshold: 4,
             num_signers: 7,
+            signer_utxo_signers: InputSigners::unconstrained(),
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };
@@ -944,6 +946,7 @@ impl TestSweepSetup2 {
             },
             accept_threshold: 4,
             num_signers: 7,
+            signer_utxo_signers: InputSigners::unconstrained(),
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };

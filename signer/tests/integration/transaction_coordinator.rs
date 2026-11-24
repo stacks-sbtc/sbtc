@@ -62,6 +62,7 @@ use signer::bitcoin::utxo::BitcoinInputsOutputs as _;
 use signer::bitcoin::utxo::BitcoinSignerSet;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
+use signer::bitcoin::utxo::InputSigners;
 use signer::bitcoin::utxo::SOLO_DEPOSIT_TX_VSIZE;
 use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::bitcoin::utxo::TxDeconstructor as _;
@@ -6413,6 +6414,7 @@ where
             outpoint: req.outpoint,
             max_fee,
             signer_bitmap: BitArray::ZERO,
+            input_signers: InputSigners::unconstrained(),
             amount: *amount,
             deposit_script: deposit_script.clone(),
             reclaim_script_hash: model::TaprootScriptHash::from(&reclaim_script),

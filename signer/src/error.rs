@@ -16,6 +16,7 @@ use crate::stacks::contracts::RotateKeysValidationError;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::BitcoinBlockHash;
+use crate::storage::model::KeySetId;
 use crate::storage::model::SigHash;
 use crate::storage::model::StacksBlockHash;
 use crate::storage::model::StacksTxId;
@@ -604,6 +605,11 @@ pub enum Error {
     /// Missing signer utxo
     #[error("missing signer utxo")]
     MissingSignerUtxo,
+
+    /// This happens when we cannot find the key set locking the signers'
+    /// UTXO.
+    #[error("missing key set for the signers' UTXO; key set ID {0}")]
+    MissingSignerKeySet(KeySetId),
 
     /// The public key indicated in the message does not match the sender
     /// public key.

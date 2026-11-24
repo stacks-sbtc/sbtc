@@ -37,6 +37,7 @@ use serde::de::DeserializeOwned;
 use serde_json::to_value;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
+use signer::bitcoin::utxo::InputSigners;
 use signer::error::Error;
 use signer::stacks::api::ClarityName;
 use signer::stacks::contracts::SmartContract;
@@ -250,6 +251,7 @@ where
         outpoint: dep.outpoint,
         max_fee: dep.max_fee,
         signer_bitmap: BitArray::ZERO,
+        input_signers: InputSigners::unconstrained(),
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script_hash,

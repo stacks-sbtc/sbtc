@@ -9,6 +9,7 @@ use test_case::test_case;
 
 use sbtc::WITHDRAWAL_MIN_CONFIRMATIONS;
 use signer::bitcoin::utxo::BitcoinSignerSet;
+use signer::bitcoin::utxo::InputSigners;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::validation::BitcoinTxContext;
@@ -779,6 +780,7 @@ async fn cannot_sign_deposit_is_ok() {
         signer_state: signer_btc_state(&ctx, &request, &btc_ctx).await,
         accept_threshold: 2,
         num_signers: 3,
+        signer_utxo_signers: InputSigners::unconstrained(),
         sbtc_limits: SbtcLimits::unlimited(),
         max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
     };
@@ -925,6 +927,7 @@ async fn sighashes_match_from_sbtc_requests_object() {
         signer_state: signer_btc_state(&ctx, &request, &btc_ctx).await,
         accept_threshold: 2,
         num_signers: 3,
+        signer_utxo_signers: InputSigners::unconstrained(),
         sbtc_limits: SbtcLimits::unlimited(),
         max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
     };

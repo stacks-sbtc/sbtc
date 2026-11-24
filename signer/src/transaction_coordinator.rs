@@ -2221,13 +2221,15 @@ where
         tracing::debug!("fetching eligible deposit requests");
         let mut eligible_deposits: Vec<utxo::DepositRequest> = Vec::new();
 
+        let signer_set = params.signer_set.signer_public_keys();
+
         // First, we fetch pending deposit requests with initial filtering
         // done by the storage layer.
         let pending_deposit_requests = storage
             .get_pending_accepted_deposit_requests(
                 params.bitcoin_chain_tip,
                 context_window,
-                params.signer_set.signatures_required(),
+                signer_set,
             )
             .await?;
 
@@ -2239,20 +2241,17 @@ where
 
         // Iterate through each deposit request and fetch its votes from storage
         // for the public keys in the active signer set.
-        for req in pending_deposit_requests {
+        for model::DepositRequestWithKeySet { request, key_set } in pending_deposit_requests {
             let votes = storage
-                .get_deposit_request_signer_votes(
-                    &req.txid,
-                    req.output_index,
-                    params.signer_set.signer_public_keys(),
-                )
+                .get_deposit_request_signer_votes(&request.txid, request.output_index, signer_set)
                 .await?;
+            let input_signers = utxo::InputSigners::new(&key_set, signer_set);
 
             // A row that we cannot convert means our database is
             // inconsistent. We skip it rather than bail, since bailing
             // would stop every sweep, including ones for withdrawals.
-            let outpoint = req.outpoint();
-            match utxo::DepositRequest::from_model(req, votes) {
+            let outpoint = request.outpoint();
+            match utxo::DepositRequest::from_model(request, votes, input_signers) {
                 Ok(deposit) => eligible_deposits.push(deposit),
                 Err(error) => {
                     tracing::error!(%error, %outpoint, "skipping deposit request we could not load");
@@ -2315,6 +2314,17 @@ where
             .get_btc_state(bitcoin_chain_tip, &signer_set.output_key_set())
             .await?;
 
+        // The signers' UTXO may be locked by an older key set, so the
+        // current signer set's threshold doesn't tell us how many votes
+        // against it can tolerate.
+        let signer_utxo_key_set_id = signer_state.utxo.key_set.id();
+        let signer_utxo_key_set = storage
+            .get_signer_key_set(&signer_utxo_key_set_id)
+            .await?
+            .ok_or(Error::MissingSignerKeySet(signer_utxo_key_set_id))?;
+        let signer_utxo_signers =
+            utxo::InputSigners::new(&signer_utxo_key_set, signer_set.signer_public_keys());
+
         // Count the number of signers in the current signer set. Note that
         // the number of signers is capped at [`sbtc::MAX_SIGNERS`], so,
         // the value here is well under the u16::MAX limit.
@@ -2329,6 +2339,7 @@ where
             signer_state,
             accept_threshold: signer_set.signatures_required(),
             num_signers,
+            signer_utxo_signers,
             sbtc_limits,
             max_deposits_per_bitcoin_tx,
         }))

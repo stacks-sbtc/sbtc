@@ -113,12 +113,10 @@ impl DbRead for SharedStore {
         &self,
         chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
-        threshold: u16,
-    ) -> Result<Vec<model::DepositRequest>, Error> {
+        signer_set: &BTreeSet<PublicKey>,
+    ) -> Result<Vec<model::DepositRequestWithKeySet>, Error> {
         let store = self.lock().await;
         let deposit_requests = store.get_deposit_requests(&chain_tip.block_hash, context_window);
-
-        let threshold = threshold as usize;
 
         // Add one to the acceptable unlock height because the chain tip is at height one less
         // than the height of the next block, which is the block for which we are assessing
@@ -155,18 +153,23 @@ impl DbRead for SharedStore {
                     .next()
                     .unwrap_or(false)
             })
-            .filter(|deposit_request| {
-                store
-                    .deposit_request_to_signers
-                    .get(&(deposit_request.txid, deposit_request.output_index))
-                    .map(|signers| {
-                        signers
-                            .iter()
-                            .filter(|signer| signer.can_accept && signer.can_sign)
-                            .count()
-                            >= threshold
-                    })
-                    .unwrap_or_default()
+            .filter_map(|deposit_request| {
+                // Like the postgres implementation, we skip deposits
+                // locked by a key set that we do not know about.
+                let (_, key_set) = store.signer_key_sets.get(&deposit_request.key_set_id)?;
+                let outpoint = (deposit_request.txid, deposit_request.output_index);
+                let signers = store.deposit_request_to_signers.get(&outpoint)?;
+                let num_accepted = signers
+                    .iter()
+                    .filter(|signer| signer.can_accept && signer.can_sign)
+                    .filter(|signer| signer_set.contains(&signer.signer_pub_key))
+                    .count();
+
+                let has_enough_votes = num_accepted >= usize::from(key_set.signatures_required);
+                has_enough_votes.then(|| model::DepositRequestWithKeySet {
+                    request: deposit_request,
+                    key_set: key_set.clone(),
+                })
             })
             .collect())
     }
@@ -496,6 +499,15 @@ impl DbRead for SharedStore {
             .collect::<BTreeSet<_>>();
 
         Ok(script_pubkeys.into_iter().collect())
+    }
+
+    async fn get_signer_key_set(
+        &self,
+        key_set_id: &model::KeySetId,
+    ) -> Result<Option<model::SignerKeySet>, Error> {
+        let store = self.lock().await;
+        let key_set = store.signer_key_sets.get(key_set_id);
+        Ok(key_set.map(|(_, key_set)| key_set.clone()))
     }
 
     async fn get_signer_utxo(
@@ -910,10 +922,10 @@ impl DbRead for InMemoryTransaction {
         &self,
         chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
-        signatures_required: u16,
-    ) -> Result<Vec<model::DepositRequest>, Error> {
+        signer_set: &BTreeSet<PublicKey>,
+    ) -> Result<Vec<model::DepositRequestWithKeySet>, Error> {
         self.store
-            .get_pending_accepted_deposit_requests(chain_tip, context_window, signatures_required)
+            .get_pending_accepted_deposit_requests(chain_tip, context_window, signer_set)
             .await
     }
 
@@ -1148,6 +1160,13 @@ impl DbRead for InMemoryTransaction {
 
     async fn get_signers_script_pubkeys(&self) -> Result<Vec<model::Bytes>, Error> {
         self.store.get_signers_script_pubkeys().await
+    }
+
+    async fn get_signer_key_set(
+        &self,
+        key_set_id: &model::KeySetId,
+    ) -> Result<Option<model::SignerKeySet>, Error> {
+        self.store.get_signer_key_set(key_set_id).await
     }
 
     async fn get_signer_utxo(
