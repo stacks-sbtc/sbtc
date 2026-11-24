@@ -32,24 +32,21 @@ use signer::context::Context as _;
 use signer::emily_client::EmilyClient;
 use signer::keys::PublicKey;
 use signer::keys::SignerScriptPubKey as _;
-use signer::network::in_memory2::SignerNetwork;
 use signer::network::in_memory2::WanNetwork;
 use signer::stacks::api::StacksClient;
 use signer::stacks::api::StacksInteract as _;
 use signer::storage::DbRead as _;
 use signer::storage::DbWrite as _;
 use signer::storage::model;
-use signer::storage::postgres::PgStore;
 use signer::testing;
 use stacks_common::types::chainstate::StacksAddress;
 
 use crate::containers::BitcoinContainerExt as _;
 use crate::containers::StacksContainerExt as _;
-use crate::e2e::start_signers;
+use crate::e2e::{TestSigner, start_signers};
 use crate::setup::clean_emily_setup;
 use crate::setup::new_emily_setup;
 use crate::stacks::wait_for_new_nonce;
-use crate::transaction_coordinator::IntegrationTestContext;
 use crate::transaction_coordinator::wait_for_tenure_completed;
 use crate::utxo_construction::make_deposit_request;
 
@@ -60,21 +57,13 @@ const DEPOSITOR_FUNDS: u64 = 50_000_000;
 const DEPOSIT_AMOUNT: u64 = 2_500_000;
 const MIN_CHANGE_OUTPUT: u64 = 546;
 
-/// A running signer and the resources owned by its integration harness.
-type TestSigner = (
-    IntegrationTestContext<StacksClient>,
-    PgStore,
-    Keypair,
-    SignerNetwork,
-);
-
 /// Deploy the sBTC contracts, rotate to the initial v1 key, and return it.
 async fn bootstrap_v1(
     signers: &[TestSigner],
     faucet: &Faucet<'_>,
     stacks_client: &StacksClient,
 ) -> (StacksAddress, PublicKey) {
-    let deployer = signers[0].0.config().signer.deployer.clone();
+    let deployer = signers[0].ctx.config().signer.deployer.clone();
 
     let old_nonce = stacks_client.get_account(&deployer).await.unwrap().nonce;
     let chain_tip = faucet.generate_block().into();
@@ -111,7 +100,7 @@ async fn activate_v2(
     stacks_client: &StacksClient,
     deployer: &StacksAddress,
 ) {
-    let config = &signers[0].0.config().signer;
+    let config = &signers[0].ctx.config().signer;
     let activation_height = *config.v2_signing_block_height();
     let registry_before = stacks_client
         .get_current_signer_set_info(deployer)
@@ -267,8 +256,8 @@ fn input_script_pubkey(
 
 /// Drop the signer databases and remove the per-test Emily tables.
 async fn clean_up(signers: Vec<TestSigner>, emily_tables: EmilyTables) {
-    for (_, database, _, _) in signers {
-        testing::storage::drop_db(database).await;
+    for signer in signers {
+        testing::storage::drop_db(signer.db).await;
     }
     clean_emily_setup(emily_tables).await;
 }
@@ -347,7 +336,7 @@ async fn signer_utxo_crosses_to_v2_at_activation_height() {
     );
     submit_deposit(rpc, &emily_client, &v1_tx, &v1_info).await;
 
-    let v2_key_set = signers[0].0.config().signer.v2_signer_key_set().unwrap();
+    let v2_key_set = signers[0].ctx.config().signer.v2_signer_key_set().unwrap();
     let v2_utxo = v2_depositor.get_utxos(rpc, None).pop().unwrap();
     let (v2_tx, v2_info) =
         make_v2_deposit(&v2_depositor, DEPOSIT_AMOUNT, v2_utxo, max_fee, &v2_key_set);
@@ -428,7 +417,7 @@ async fn v1_signer_utxo_sweeps_v1_and_v2_deposits() {
     );
     submit_deposit(rpc, &emily_client, &v1_tx, &v1_info).await;
 
-    let key_set = signers[0].0.config().signer.v2_signer_key_set().unwrap();
+    let key_set = signers[0].ctx.config().signer.v2_signer_key_set().unwrap();
     let v2_utxo = v2_depositor.get_utxos(rpc, None).pop().unwrap();
     let (v2_tx, v2_info) =
         make_v2_deposit(&v2_depositor, DEPOSIT_AMOUNT, v2_utxo, max_fee, &key_set);
@@ -488,7 +477,7 @@ async fn v2_signer_utxo_sweeps_v1_and_v2_deposits() {
     let (deployer, aggregate_key) = bootstrap_v1(&signers, &faucet, &stacks_client).await;
     activate_v2(&signers, &faucet, &stacks_client, &deployer).await;
 
-    let key_set = signers[0].0.config().signer.v2_signer_key_set().unwrap();
+    let key_set = signers[0].ctx.config().signer.v2_signer_key_set().unwrap();
     faucet.send_to(
         SIGNER_UTXO_AMOUNT,
         &Address::from_script(&key_set.script_pubkey(), bitcoin::Network::Regtest).unwrap(),
@@ -570,7 +559,7 @@ async fn v2_deposit_for_a_different_signer_set_is_swept() {
     let (deployer, _) = bootstrap_v1(&signers, &faucet, &stacks_client).await;
     activate_v2(&signers, &faucet, &stacks_client, &deployer).await;
 
-    let current_key_set = signers[0].0.config().signer.v2_signer_key_set().unwrap();
+    let current_key_set = signers[0].ctx.config().signer.v2_signer_key_set().unwrap();
     faucet.send_to(
         SIGNER_UTXO_AMOUNT,
         &Address::from_script(&current_key_set.script_pubkey(), bitcoin::Network::Regtest).unwrap(),
@@ -583,14 +572,15 @@ async fn v2_deposit_for_a_different_signer_set_is_swept() {
     let mut alternate_keys: BTreeSet<_> = signers
         .iter()
         .take(2)
-        .map(|(_, _, keypair, _)| sbtc::derive_signing_public_key(keypair.public_key()))
+        .map(|signer| sbtc::derive_signing_public_key(signer.keypair.public_key()))
         .collect();
     let outsider = Keypair::new_global(&mut rand::rngs::OsRng);
     alternate_keys.insert(sbtc::derive_signing_public_key(outsider.public_key()));
     let alternate_key_set = sbtc::SignerKeySet::new(alternate_keys, SIGNATURES_REQUIRED).unwrap();
     let stored_alternate_key_set = model::SignerKeySet::from(alternate_key_set.clone());
-    for (_, database, _, _) in &signers {
-        database
+    for signer in &signers {
+        signer
+            .db
             .write_signer_key_set(&stored_alternate_key_set)
             .await
             .unwrap();
@@ -632,8 +622,8 @@ async fn v2_deposit_for_a_different_signer_set_is_swept() {
     );
 
     let alternate_script = alternate_key_set.script_pubkey().into_bytes();
-    for (_, database, _, _) in signers.iter().take(2) {
-        let known_scripts = database.get_signers_script_pubkeys().await.unwrap();
+    for signer in signers.iter().take(2) {
+        let known_scripts = signer.db.get_signers_script_pubkeys().await.unwrap();
         assert!(known_scripts.contains(&alternate_script));
     }
 
