@@ -394,23 +394,11 @@ where
             return Ok(true);
         };
 
-        // Some scriptPubKeys (e.g. P2PK) have no address, so there is
-        // nothing to screen; accept instead of retrying forever.
         let network = bitcoin::Network::from(self.context.config().signer.network);
-        let address_result = bitcoin::Address::from_script(&req.recipient, network.params());
-        let receiver_address = match address_result {
-            Ok(address) => address,
-            Err(error) => {
-                tracing::debug!(
-                    %error,
-                    request_id = req.request_id,
-                    block_hash = %req.block_hash,
-                    recipient = %req.recipient.as_script(),
-                    "withdrawal recipient has no address form; skipping blocklist check"
-                );
-                return Ok(true);
-            }
-        };
+        let receiver_address = bitcoin::Address::from_script(&req.recipient, network.params())
+            .map_err(|err| {
+                Error::WithdrawalBitcoinAddressFromScript(err, req.request_id, req.block_hash)
+            })?;
 
         let can_accept = client
             .can_accept(&receiver_address.to_string())
@@ -755,24 +743,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn withdrawal_recipient_without_address_is_accepted() {
-        let mut rng = testing::get_rng();
-        let checker = RecordingChecker::default();
-        let decider = request_decider(checker.clone());
-
-        let mut request: model::WithdrawalRequest = Faker.fake_with_rng(&mut rng);
-        request.recipient = p2pk_script(&mut rng);
-
-        let can_accept = decider
-            .can_accept_withdrawal_request(&request)
-            .await
-            .unwrap();
-
-        assert!(can_accept);
-        assert!(checker.checked.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
     async fn blocklist_client_errors_are_still_returned() {
         let mut rng = testing::get_rng();
         let checker = RecordingChecker {
@@ -785,15 +755,7 @@ mod tests {
         let mut deposit: model::DepositRequest = Faker.fake_with_rng(&mut rng);
         let (p2wpkh, _) = p2wpkh_script(&mut rng, network);
         deposit.sender_script_pub_keys = vec![p2pk_script(&mut rng), p2wpkh];
-        let mut withdrawal: model::WithdrawalRequest = Faker.fake_with_rng(&mut rng);
-        withdrawal.recipient = p2wpkh_script(&mut rng, network).0;
 
         assert!(decider.can_accept_deposit_request(&deposit).await.is_err());
-        assert!(
-            decider
-                .can_accept_withdrawal_request(&withdrawal)
-                .await
-                .is_err()
-        );
     }
 }

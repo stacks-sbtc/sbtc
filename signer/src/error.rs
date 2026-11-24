@@ -747,6 +747,15 @@ pub enum Error {
     #[error("no stacks chain tip")]
     NoStacksChainTip,
 
+    /// Bitcoin error when attempting to construct an address from a
+    /// scriptPubKey.
+    #[error("bitcoin address parse error: {0}; Request id: {1}, BlockHash: {2}")]
+    WithdrawalBitcoinAddressFromScript(
+        #[source] bitcoin::address::FromScriptError,
+        u64,
+        StacksBlockHash,
+    ),
+
     /// Could not parse hex script.
     #[error("could not parse hex script: {0}")]
     DecodeHexScript(#[source] bitcoin::hex::HexToBytesError),
