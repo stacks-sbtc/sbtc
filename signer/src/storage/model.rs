@@ -510,6 +510,15 @@ impl From<sbtc::deposits::DepositScriptVersion> for KeySetVersion {
     }
 }
 
+/// A deposit request along with the key set locking it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DepositRequestWithKeySet {
+    /// The deposit request.
+    pub request: DepositRequest,
+    /// The key set locking the deposit.
+    pub key_set: SignerKeySet,
+}
+
 /// A persisted signer key set.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct SignerKeySet {

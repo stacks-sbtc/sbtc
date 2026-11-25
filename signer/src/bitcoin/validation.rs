@@ -8,6 +8,7 @@ use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
 use bitcoin::XOnlyPublicKey;
 use bitcoin::relative::LockTime;
+use bitvec::array::BitArray;
 
 use crate::BITCOIN_FEE_RATE_RANGE;
 use crate::DEPOSIT_DUST_LIMIT;
@@ -40,6 +41,7 @@ use crate::storage::model::TaprootScriptHash;
 use sbtc::SignerKeySet;
 
 use super::utxo::DepositRequest;
+use super::utxo::InputSigners;
 use super::utxo::RequestRef;
 use super::utxo::Requests;
 use super::utxo::SignatureHash;
@@ -1009,6 +1011,12 @@ impl DepositRequestReport {
             reclaim_script_hash: self.reclaim_script_hash.clone(),
             signers_public_key,
             signer_bitmap: votes.into(),
+            // Unused, since the transaction signer doesn't package
+            // requests. Saying that no one can sign fails closed.
+            input_signers: InputSigners {
+                signer_bitmap: BitArray::ZERO,
+                signatures_required: 1,
+            },
         }
     }
 }

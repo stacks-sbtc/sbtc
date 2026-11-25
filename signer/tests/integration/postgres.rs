@@ -20,6 +20,7 @@ use more_asserts::assert_le;
 use rand::Rng as _;
 use rand::seq::IteratorRandom as _;
 use rand::seq::SliceRandom as _;
+use sbtc::derive_signing_public_key;
 use sbtc::testing::containers::TestContainersBuilder;
 use signer::WITHDRAWAL_BLOCKS_EXPIRY;
 use signer::bitcoin::validation::WithdrawalRequestStatus;
@@ -30,6 +31,7 @@ use signer::stacks::api::TenureBlockHeaders;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::KeyRotationEvent;
+use signer::storage::model::KeySetVersion;
 use signer::storage::model::SweptWithdrawalRequest;
 use signer::storage::model::WithdrawalRequest;
 use signer::storage::postgres::PGSQL_MIGRATIONS;
@@ -45,6 +47,7 @@ use signer::context::Context;
 use signer::emily_client::MockEmilyInteract;
 use signer::error::Error;
 use signer::keys::PublicKey;
+use signer::keys::PublicKeyXOnly;
 use signer::keys::SignerScriptPubKey as _;
 use signer::network;
 use signer::stacks::api::MockStacksInteract;
@@ -622,6 +625,25 @@ async fn should_return_the_same_pending_withdraw_requests_as_in_memory_store() {
     signer::testing::storage::drop_db(pg_store).await;
 }
 
+/// Return the v1 key set locking the deposits that [`TestData::generate`]
+/// creates for the given signer set, with the given threshold.
+fn test_data_deposit_key_set(
+    signer_set: &[PublicKey],
+    signatures_required: u16,
+) -> model::SignerKeySet {
+    let aggregate_key = PublicKey::combine_keys(signer_set).unwrap();
+    model::SignerKeySet {
+        key_set_id: PublicKeyXOnly::from(aggregate_key).into(),
+        version: KeySetVersion::V1,
+        script_pubkey: aggregate_key.signers_script_pubkey().into(),
+        public_keys: signer_set
+            .iter()
+            .map(|key| KeySetVersion::V1.member_key(key))
+            .collect(),
+        signatures_required,
+    }
+}
+
 /// This ensures that the postgres store and the in memory stores returns equivalent results
 /// when fetching pending accepted deposit requests
 #[tokio::test]
@@ -645,9 +667,15 @@ async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_s
 
     let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, num_signers);
     let test_data = TestData::generate(&mut rng, &signer_set, &test_model_params);
+    let key_set = test_data_deposit_key_set(&signer_set, threshold);
 
     test_data.write_to(&in_memory_store).await;
     test_data.write_to(&pg_store).await;
+    in_memory_store
+        .write_signer_key_set(&key_set)
+        .await
+        .unwrap();
+    pg_store.write_signer_key_set(&key_set).await.unwrap();
 
     let chain_tip = in_memory_store
         .get_bitcoin_canonical_chain_tip_ref()
@@ -664,26 +692,364 @@ async fn should_return_the_same_pending_accepted_deposit_requests_as_in_memory_s
         chain_tip.block_hash
     );
 
-    let mut pending_accepted_deposit_requests = in_memory_store
-        .get_pending_accepted_deposit_requests(&chain_tip, context_window, threshold)
-        .await
-        .expect("failed to get pending deposit requests");
+    let current_signer_set: BTreeSet<PublicKey> = signer_set.iter().copied().collect();
 
-    pending_accepted_deposit_requests.sort();
+    let pending_accepted_deposit_requests = in_memory_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .map(sorted_requests)
+        .expect("failed to get pending deposit requests");
 
     assert!(!pending_accepted_deposit_requests.is_empty());
 
-    let mut pg_pending_accepted_deposit_requests = pg_store
-        .get_pending_accepted_deposit_requests(&chain_tip, context_window, threshold)
+    let pg_pending_accepted_deposit_requests = pg_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
         .await
+        .map(sorted_requests)
         .expect("failed to get pending deposit requests");
-
-    pg_pending_accepted_deposit_requests.sort();
 
     assert_eq!(
         pending_accepted_deposit_requests,
         pg_pending_accepted_deposit_requests
     );
+    signer::testing::storage::drop_db(pg_store).await;
+}
+
+/// Return the deposit requests without their key sets, sorted.
+fn sorted_requests(rows: Vec<model::DepositRequestWithKeySet>) -> Vec<model::DepositRequest> {
+    let mut requests: Vec<_> = rows.into_iter().map(|row| row.request).collect();
+    requests.sort();
+    requests
+}
+
+/// Return test data with deposits that every signer accepted and can
+/// sign for, all within the reclaim bounds.
+fn accepted_deposit_test_data(rng: &mut impl rand::Rng, signer_set: &[PublicKey]) -> TestData {
+    let test_model_params = testing::storage::model::Params {
+        num_bitcoin_blocks: 10,
+        num_stacks_blocks_per_bitcoin_block: 1,
+        num_deposit_requests_per_block: 4,
+        num_withdraw_requests_per_block: 0,
+        num_signers_per_request: signer_set.len(),
+        consecutive_blocks: false,
+    };
+    let mut test_data = TestData::generate(rng, signer_set, &test_model_params);
+    for deposit in test_data.deposit_requests.iter_mut() {
+        deposit.lock_time = u16::MAX as u32;
+    }
+    for decision in test_data.deposit_signers.iter_mut() {
+        decision.can_accept = true;
+        decision.can_sign = true;
+    }
+    test_data
+}
+
+/// Check that each pending accepted deposit is held to the threshold of
+/// its own key set, and is returned with that key set.
+#[test_case(3, true; "second key set threshold met")]
+#[test_case(4, false; "second key set threshold not met")]
+#[tokio::test]
+async fn pending_accepted_deposits_use_their_key_set_threshold(
+    second_signatures_required: u16,
+    expect_second_key_set_deposits: bool,
+) {
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::memory::Store::new_shared();
+    let mut rng = get_rng();
+
+    let num_accepting_signers = 3;
+    let context_window = 20;
+
+    let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 7);
+    let current_signer_set: BTreeSet<PublicKey> = signer_set.iter().copied().collect();
+    let mut test_data = accepted_deposit_test_data(&mut rng, &signer_set);
+
+    // Half of the deposits are locked by a v2 key set of the same
+    // signers, which only differs in its threshold.
+    let first_key_set = test_data_deposit_key_set(&signer_set, num_accepting_signers);
+    let second_key_set = model::SignerKeySet::from(
+        sbtc::SignerKeySet::new(
+            signer_set
+                .iter()
+                .map(|key| derive_signing_public_key((*key).into())),
+            second_signatures_required,
+        )
+        .unwrap(),
+    );
+    for (index, deposit) in test_data.deposit_requests.iter_mut().enumerate() {
+        if index % 2 == 1 {
+            deposit.key_set_id = second_key_set.key_set_id;
+        }
+    }
+    // Only the first few signers accept the deposits.
+    let accepting_signers: HashSet<PublicKey> = signer_set
+        .iter()
+        .copied()
+        .take(num_accepting_signers as usize)
+        .collect();
+    for decision in test_data.deposit_signers.iter_mut() {
+        decision.can_accept = accepting_signers.contains(&decision.signer_pub_key);
+    }
+
+    for key_set in [&first_key_set, &second_key_set] {
+        pg_store.write_signer_key_set(key_set).await.unwrap();
+        in_memory_store.write_signer_key_set(key_set).await.unwrap();
+    }
+    test_data.write_to(&pg_store).await;
+    test_data.write_to(&in_memory_store).await;
+
+    let chain_tip = pg_store
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+
+    let pg_rows = pg_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .unwrap();
+    let in_memory_rows = in_memory_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .unwrap();
+
+    // Each deposit comes back with the key set locking it.
+    for row in pg_rows.iter().chain(&in_memory_rows) {
+        assert_eq!(row.key_set.key_set_id, row.request.key_set_id);
+        let expected_key_set = if row.key_set.key_set_id == first_key_set.key_set_id {
+            &first_key_set
+        } else {
+            &second_key_set
+        };
+        assert_eq!(&row.key_set, expected_key_set);
+    }
+
+    let pg_requests = sorted_requests(pg_rows);
+    assert_eq!(pg_requests, sorted_requests(in_memory_rows));
+
+    // Deposits locked by the first key set always have enough votes.
+    let num_first_key_set = pg_requests
+        .iter()
+        .filter(|req| req.key_set_id == first_key_set.key_set_id)
+        .count();
+    let num_second_key_set = pg_requests
+        .iter()
+        .filter(|req| req.key_set_id == second_key_set.key_set_id)
+        .count();
+    assert_gt!(num_first_key_set, 0);
+    assert_eq!(num_second_key_set > 0, expect_second_key_set_deposits);
+    assert_eq!(pg_requests.len(), num_first_key_set + num_second_key_set);
+
+    signer::testing::storage::drop_db(pg_store).await;
+}
+
+/// Check that we only count the votes of signers in the given signer
+/// set. All seven signers accept, and the key set needs five signatures.
+#[test_case(5, true; "enough current signers")]
+#[test_case(4, false; "too few current signers")]
+#[tokio::test]
+async fn pending_accepted_deposits_only_count_current_signers(
+    num_current_signers: usize,
+    expect_deposits: bool,
+) {
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::memory::Store::new_shared();
+    let mut rng = get_rng();
+
+    let context_window = 20;
+
+    let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 7);
+    let test_data = accepted_deposit_test_data(&mut rng, &signer_set);
+    let key_set = test_data_deposit_key_set(&signer_set, 5);
+    let current_signer_set: BTreeSet<PublicKey> = signer_set
+        .iter()
+        .copied()
+        .take(num_current_signers)
+        .collect();
+
+    pg_store.write_signer_key_set(&key_set).await.unwrap();
+    in_memory_store
+        .write_signer_key_set(&key_set)
+        .await
+        .unwrap();
+    test_data.write_to(&pg_store).await;
+    test_data.write_to(&in_memory_store).await;
+
+    let chain_tip = pg_store
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+
+    let pg_requests = pg_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .map(sorted_requests)
+        .unwrap();
+    let in_memory_requests = in_memory_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .map(sorted_requests)
+        .unwrap();
+
+    assert_eq!(pg_requests, in_memory_requests);
+    assert_eq!(!pg_requests.is_empty(), expect_deposits);
+
+    signer::testing::storage::drop_db(pg_store).await;
+}
+
+/// Check that we only count signers that can sign for the deposit. All
+/// seven signers accept, but the first signer cannot sign for any
+/// deposit.
+#[test_case(6, true; "enough signers that can sign")]
+#[test_case(7, false; "too few signers that can sign")]
+#[tokio::test]
+async fn pending_accepted_deposits_only_count_signers_that_can_sign(
+    signatures_required: u16,
+    expect_deposits: bool,
+) {
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::memory::Store::new_shared();
+    let mut rng = get_rng();
+
+    let context_window = 20;
+
+    let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 7);
+    let current_signer_set: BTreeSet<PublicKey> = signer_set.iter().copied().collect();
+    let mut test_data = accepted_deposit_test_data(&mut rng, &signer_set);
+    for decision in test_data.deposit_signers.iter_mut() {
+        decision.can_sign = decision.signer_pub_key != signer_set[0];
+    }
+    let key_set = test_data_deposit_key_set(&signer_set, signatures_required);
+
+    pg_store.write_signer_key_set(&key_set).await.unwrap();
+    in_memory_store
+        .write_signer_key_set(&key_set)
+        .await
+        .unwrap();
+    test_data.write_to(&pg_store).await;
+    test_data.write_to(&in_memory_store).await;
+
+    let chain_tip = pg_store
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+
+    let pg_requests = pg_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .map(sorted_requests)
+        .unwrap();
+    let in_memory_requests = in_memory_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .map(sorted_requests)
+        .unwrap();
+
+    assert_eq!(pg_requests, in_memory_requests);
+    assert_eq!(!pg_requests.is_empty(), expect_deposits);
+
+    signer::testing::storage::drop_db(pg_store).await;
+}
+
+/// Check that we get a key set by its ID, for both v1 and v2 key sets,
+/// and nothing for a key set we do not know about.
+#[tokio::test]
+async fn get_signer_key_set_returns_stored_key_sets() {
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::memory::Store::new_shared();
+    let mut rng = get_rng();
+
+    let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 7);
+    let v1_key_set = test_data_deposit_key_set(&signer_set, 5);
+    let v2_key_set = model::SignerKeySet::from(
+        sbtc::SignerKeySet::new(
+            signer_set
+                .iter()
+                .map(|key| derive_signing_public_key((*key).into())),
+            5,
+        )
+        .unwrap(),
+    );
+
+    for key_set in [&v1_key_set, &v2_key_set] {
+        let pg_key_set = pg_store.get_signer_key_set(&key_set.key_set_id).await;
+        let in_memory_key_set = in_memory_store
+            .get_signer_key_set(&key_set.key_set_id)
+            .await;
+        assert_eq!(pg_key_set.unwrap(), None);
+        assert_eq!(in_memory_key_set.unwrap(), None);
+
+        pg_store.write_signer_key_set(key_set).await.unwrap();
+        in_memory_store.write_signer_key_set(key_set).await.unwrap();
+    }
+
+    for key_set in [&v1_key_set, &v2_key_set] {
+        let pg_key_set = pg_store.get_signer_key_set(&key_set.key_set_id).await;
+        let in_memory_key_set = in_memory_store
+            .get_signer_key_set(&key_set.key_set_id)
+            .await;
+        assert_eq!(pg_key_set.unwrap().as_ref(), Some(key_set));
+        assert_eq!(in_memory_key_set.unwrap().as_ref(), Some(key_set));
+    }
+
+    signer::testing::storage::drop_db(pg_store).await;
+}
+
+/// Check that we skip deposits locked by a key set we do not know about.
+#[tokio::test]
+async fn pending_accepted_deposits_skip_unknown_key_sets() {
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::memory::Store::new_shared();
+    let mut rng = get_rng();
+
+    let context_window = 20;
+
+    let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 7);
+    let current_signer_set: BTreeSet<PublicKey> = signer_set.iter().copied().collect();
+    let test_data = accepted_deposit_test_data(&mut rng, &signer_set);
+    test_data.write_to(&pg_store).await;
+    test_data.write_to(&in_memory_store).await;
+
+    let chain_tip = pg_store
+        .get_bitcoin_canonical_chain_tip_ref()
+        .await
+        .unwrap()
+        .unwrap();
+
+    let pg_requests = pg_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .unwrap();
+    let in_memory_requests = in_memory_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .unwrap();
+    assert!(pg_requests.is_empty());
+    assert!(in_memory_requests.is_empty());
+
+    // Once we know about the key set, they are returned.
+    let key_set = test_data_deposit_key_set(&signer_set, 7);
+    pg_store.write_signer_key_set(&key_set).await.unwrap();
+    in_memory_store
+        .write_signer_key_set(&key_set)
+        .await
+        .unwrap();
+
+    let pg_requests = pg_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .map(sorted_requests)
+        .unwrap();
+    let in_memory_requests = in_memory_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .map(sorted_requests)
+        .unwrap();
+    assert!(!pg_requests.is_empty());
+    assert_eq!(pg_requests, in_memory_requests);
+
     signer::testing::storage::drop_db(pg_store).await;
 }
 
@@ -711,12 +1077,13 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     };
 
     let context_window = 20;
-    let threshold = 4;
 
     // We need to manually update the database with new bitcoin block
     // headers.
     crate::setup::backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash).await;
     setup.store_stacks_genesis_block(&db).await;
+    // Storing the DKG shares stores the deposit's key set.
+    setup.store_dkg_shares(&db).await;
 
     // This isn't technically required right now, but the deposit
     // transaction is supposed to be there, so future versions of our query
@@ -730,8 +1097,9 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     // Store decisions to make it "accepted"
     setup.store_deposit_decisions(&db).await;
 
+    let signer_set: BTreeSet<PublicKey> = setup.signer_keys.iter().copied().collect();
     let requests = db
-        .get_pending_accepted_deposit_requests(&chain_tip, context_window, threshold)
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &signer_set)
         .await
         .unwrap();
 
@@ -742,7 +1110,7 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
     setup.store_sweep_tx(&db).await;
 
     let requests = db
-        .get_pending_accepted_deposit_requests(&chain_tip, context_window, threshold)
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &signer_set)
         .await
         .unwrap();
 
@@ -760,7 +1128,7 @@ async fn should_not_return_swept_deposits_as_pending_accepted() {
             // this excludes the sweep tx block
             &deposit_block_ref,
             context_window,
-            threshold,
+            &signer_set,
         )
         .await
         .unwrap();
@@ -805,9 +1173,17 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
         deposit.lock_time = u16::MAX as u32;
     }
 
+    let key_set = test_data_deposit_key_set(&signer_set, threshold);
+    let current_signer_set: BTreeSet<PublicKey> = signer_set.iter().copied().collect();
+
     // Take 1 ------------------------------------------------------------------
     test_data.write_to(&pg_store).await;
     test_data.write_to(&in_memory_store).await;
+    pg_store.write_signer_key_set(&key_set).await.unwrap();
+    in_memory_store
+        .write_signer_key_set(&key_set)
+        .await
+        .unwrap();
 
     let chain_tip = in_memory_store
         .get_bitcoin_canonical_chain_tip_ref()
@@ -827,17 +1203,17 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     // First ensure that we didn't break the main pending accepted deposit requests functionality
     // since all the lock times are the maximum possible value and thus should be accepted.
     let mut pending_accepted_deposit_requests = pg_store
-        .get_pending_accepted_deposit_requests(&chain_tip, context_window, threshold)
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
         .await
+        .map(sorted_requests)
         .expect("failed to get pending deposit requests from pg store.");
 
-    let mut in_memory_pending_accepted_deposit_requests = in_memory_store
-        .get_pending_accepted_deposit_requests(&chain_tip, context_window, threshold)
+    let in_memory_pending_accepted_deposit_requests = in_memory_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
         .await
+        .map(sorted_requests)
         .expect("failed to get pending deposit requests from in memory store.");
 
-    pending_accepted_deposit_requests.sort();
-    in_memory_pending_accepted_deposit_requests.sort();
     assert_eq!(
         pending_accepted_deposit_requests, in_memory_pending_accepted_deposit_requests,
         "Basic pending accepted deposit requests functionality is broken."
@@ -933,20 +1309,25 @@ async fn should_return_only_accepted_pending_deposits_that_are_within_reclaim_bo
     // Initialize the data.
     test_data.write_to(&pg_store).await;
     test_data.write_to(&in_memory_store).await;
-
-    let mut pending_accepted_deposit_requests_in_memory = in_memory_store
-        .get_pending_accepted_deposit_requests(&chain_tip, context_window, threshold)
+    pg_store.write_signer_key_set(&key_set).await.unwrap();
+    in_memory_store
+        .write_signer_key_set(&key_set)
         .await
+        .unwrap();
+
+    let pending_accepted_deposit_requests_in_memory = in_memory_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
+        .await
+        .map(sorted_requests)
         .expect("failed to get pending deposit requests");
 
-    let mut pending_accepted_deposit_requests_pg_store = pg_store
-        .get_pending_accepted_deposit_requests(&chain_tip, context_window, threshold)
+    let pending_accepted_deposit_requests_pg_store = pg_store
+        .get_pending_accepted_deposit_requests(&chain_tip, context_window, &current_signer_set)
         .await
+        .map(sorted_requests)
         .expect("failed to get pending deposit requests");
 
-    // Sort the deposit requests so that we can compare them.
-    pending_accepted_deposit_requests_pg_store.sort();
-    pending_accepted_deposit_requests_in_memory.sort();
+    // Sort the expected deposit requests so that we can compare them.
     expected_pending_deposit_requests.sort();
 
     assert_eq!(
@@ -1390,6 +1771,71 @@ async fn fetching_deposit_request_votes() {
     assert!(actual_signer_vote_map.values().all(Option::is_none));
 
     signer::testing::storage::drop_db(store).await;
+}
+
+/// Check that a deposit vote records whether the signer accepted the
+/// deposit, whatever they said about being able to sign for it, and that
+/// both stores agree.
+#[tokio::test]
+async fn deposit_votes_only_record_acceptance() {
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::memory::Store::new_shared();
+    let mut rng = get_rng();
+
+    let signer_set = testing::wsts::generate_signer_set_public_keys(&mut rng, 5);
+    let current_signer_set: BTreeSet<PublicKey> = signer_set.iter().copied().collect();
+
+    let txid: BitcoinTxId = fake::Faker.fake_with_rng(&mut rng);
+    let output_index = 2;
+    let random_req: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
+    let req = model::DepositRequest {
+        txid,
+        output_index,
+        ..random_req
+    };
+    pg_store.write_deposit_request(&req).await.unwrap();
+    in_memory_store.write_deposit_request(&req).await.unwrap();
+
+    // Each pair is (can_accept, can_sign). The last signer doesn't vote.
+    let decisions = [(true, true), (true, false), (false, true), (false, false)];
+    for (signer_pub_key, (can_accept, can_sign)) in signer_set.iter().zip(decisions) {
+        let decision = model::DepositSigner {
+            txid,
+            output_index,
+            signer_pub_key: *signer_pub_key,
+            can_accept,
+            can_sign,
+        };
+        pg_store
+            .write_deposit_signer_decision(&decision)
+            .await
+            .unwrap();
+        in_memory_store
+            .write_deposit_signer_decision(&decision)
+            .await
+            .unwrap();
+    }
+
+    let pg_votes = pg_store
+        .get_deposit_request_signer_votes(&txid, output_index, &current_signer_set)
+        .await
+        .unwrap();
+    let in_memory_votes = in_memory_store
+        .get_deposit_request_signer_votes(&txid, output_index, &current_signer_set)
+        .await
+        .unwrap();
+    assert_eq!(pg_votes, in_memory_votes);
+
+    let votes: BTreeMap<PublicKey, Option<bool>> = pg_votes
+        .iter()
+        .map(|vote| (vote.signer_public_key, vote.is_accepted))
+        .collect();
+    let expected = [Some(true), Some(true), Some(false), Some(false), None];
+    let expected_votes: BTreeMap<PublicKey, Option<bool>> =
+        signer_set.iter().copied().zip(expected).collect();
+    assert_eq!(votes, expected_votes);
+
+    signer::testing::storage::drop_db(pg_store).await;
 }
 
 #[tokio::test]
@@ -1942,12 +2388,11 @@ async fn get_signers_script_pubkeys_returns_all_old_key_sets() {
 
     for _ in 0..2 {
         let shares: model::EncryptedDkgShares = fake::Faker.fake_with_rng(&mut rng);
-        let key_set_id =
-            model::KeySetId::from(signer::keys::PublicKeyXOnly::from(shares.aggregate_key));
-        let signer_public_keys: Vec<signer::keys::PublicKeyXOnly> = shares
+        let key_set_id = model::KeySetId::from(PublicKeyXOnly::from(shares.aggregate_key));
+        let signer_public_keys: Vec<PublicKeyXOnly> = shares
             .signer_set_public_keys
             .iter()
-            .map(|key| model::KeySetVersion::V1.member_key(key))
+            .map(|key| KeySetVersion::V1.member_key(key))
             .collect();
 
         sqlx::query(
@@ -3036,7 +3481,7 @@ async fn can_sign_deposit_tx_rejects_not_in_signer_set() {
 
     // Now for a deposit request where we use the above aggregate key.
     let mut req: model::DepositRequest = fake::Faker.fake_with_rng(&mut rng);
-    req.key_set_id = signer::keys::PublicKeyXOnly::from(aggregate_key).into();
+    req.key_set_id = PublicKeyXOnly::from(aggregate_key).into();
     db.write_deposit_request(&req).await.unwrap();
 
     // Now we need a row where the aggregate key matches the one we created
@@ -3104,7 +3549,7 @@ async fn can_sign_deposit_tx_ignores_key_sets_of_another_version() {
             2,
         )
         .unwrap();
-        if let Ok(key) = signer::keys::PublicKeyXOnly::from_slice(&key_set.id().to_bytes()) {
+        if let Ok(key) = PublicKeyXOnly::from_slice(&key_set.id().to_bytes()) {
             break (signer_set_public_keys, key_set, key);
         }
     };
@@ -6492,7 +6937,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_with_rows_in_table() {
         prevout_txid: setup.donation.txid.into(),
         prevout_output_index: setup.donation.vout,
         validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-        key_set_id: signer::keys::PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
+        key_set_id: PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
         is_valid_tx: false,
         will_sign: false,
         chain_tip,
@@ -6572,7 +7017,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         prevout_txid: bitcoin_txid2,
         prevout_output_index: 0,
         validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-        key_set_id: signer::keys::PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
+        key_set_id: PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
         is_valid_tx: false,
         will_sign: false,
         chain_tip,
@@ -6588,7 +7033,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         prevout_txid: bitcoin_txid1,
         prevout_output_index: 0,
         validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-        key_set_id: signer::keys::PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
+        key_set_id: PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
         is_valid_tx: false,
         will_sign: false,
         chain_tip,
@@ -6606,7 +7051,7 @@ async fn is_withdrawal_inflight_catches_withdrawals_in_package() {
         prevout_txid: setup.donation.txid.into(),
         prevout_output_index: setup.donation.vout,
         validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
-        key_set_id: signer::keys::PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
+        key_set_id: PublicKeyXOnly::from(setup.signers.aggregate_key()).into(),
         is_valid_tx: false,
         will_sign: false,
         chain_tip,

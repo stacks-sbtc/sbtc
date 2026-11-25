@@ -15,6 +15,7 @@ mod serial {
     use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
     use signer::bitcoin::utxo::DepositRequest;
     use signer::bitcoin::utxo::Fees;
+    use signer::bitcoin::utxo::InputSigners;
     use signer::bitcoin::utxo::RequestRef;
     use signer::bitcoin::utxo::SbtcRequests;
     use signer::bitcoin::utxo::SignerBtcState;
@@ -231,6 +232,7 @@ mod serial {
             },
             accept_threshold: failure_threshold,
             num_signers: 2 * failure_threshold,
+            signer_utxo_signers: InputSigners::unconstrained(),
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };

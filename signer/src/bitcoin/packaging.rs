@@ -7,6 +7,7 @@ use crate::GOSSIPSUB_MAX_TRANSMIT_SIZE;
 use crate::MAX_MEMPOOL_PACKAGE_SIZE;
 use crate::MAX_MEMPOOL_PACKAGE_TX_COUNT;
 
+use super::utxo::InputSigners;
 use super::utxo::MAX_BASE_TX_VSIZE;
 use super::utxo::OP_RETURN_AVAILABLE_SIZE;
 
@@ -123,7 +124,8 @@ const PACKAGE_MAX_VSIZE: u64 = ((MAX_MEMPOOL_PACKAGE_SIZE as f64
 /// ## Constraints
 ///
 /// Each bag is subject to the following constraints:
-/// 1. The combined votes against cannot exceed `max_votes_against`
+/// 1. The combined votes against cannot exceed `max_votes_against`, and
+///    every input must still have enough signers
 /// 2. The number of items requiring signatures cannot exceed
 ///    `max_needs_signature`
 /// 3. Withdrawal IDs must fit within the OP_RETURN size limit (~77 bytes)
@@ -175,6 +177,7 @@ where
 /// 3. The virtual size of the request when included in a sweep transaction.
 /// 4. Whether the withdrawal IDs can fit within an OP_RETURN output's
 ///    size limits.
+/// 5. Which signers can sign for the request's input, if it has one.
 ///
 /// This trait has methods that capture all of these factors.
 pub trait Weighted {
@@ -199,6 +202,10 @@ pub trait Weighted {
     /// ## Returns
     /// A bitmap representing votes against this item.
     fn votes(&self) -> u128;
+
+    /// The signers that can sign for this item, or `None` for items that
+    /// are not inputs, like withdrawals.
+    fn input_signers(&self) -> Option<&InputSigners>;
 
     /// The virtual size of the item in vbytes. This is supposed to be the
     /// total bitcoin weight of the request once signed on the bitcoin
@@ -300,6 +307,8 @@ struct Bag<T> {
     items: Vec<T>,
     /// Combined votes bitmap (using bitwise OR)
     votes_bitmap: u128,
+    /// The distinct input signers of the items in this bag
+    input_signers: Vec<InputSigners>,
     /// Count of items requiring signatures
     items_needing_signatures: u16,
     /// Total virtual size of items in this bag
@@ -323,6 +332,7 @@ where
         Bag {
             config,
             votes_bitmap: 0,
+            input_signers: Vec::new(),
             items_needing_signatures: 0,
             vsize: 0,
             items: Vec::new(),
@@ -353,6 +363,11 @@ where
     /// - `item`: Item to add to the bag
     fn add_item(&mut self, item: T) {
         self.votes_bitmap |= item.votes();
+        if let Some(input_signers) = item.input_signers()
+            && !self.input_signers.contains(input_signers)
+        {
+            self.input_signers.push(*input_signers);
+        }
         self.items_needing_signatures += item.needs_signature() as u16;
         self.vsize += item.vsize();
 
@@ -370,7 +385,8 @@ where
     /// constraints.
     ///
     /// An item is compatible when:
-    /// 1. Combined votes against ≤ max_votes_against
+    /// 1. Combined votes against ≤ max_votes_against, and every input
+    ///    still has enough signers
     /// 2. Combined signature requirements ≤ max_signatures
     /// 3. Withdrawal ID (if any) fits within remaining OP_RETURN space
     ///
@@ -391,10 +407,20 @@ where
     /// - `item`: Item to check for vote compatibility
     ///
     /// ## Returns
-    /// `true` if the combined votes don't exceed the maximum allowed.
+    /// `true` if the combined votes don't exceed the maximum allowed and
+    /// every input still has enough signers.
     fn votes_compatible(&self, item: &T) -> bool {
         let combined_votes = self.votes_bitmap | item.votes();
-        combined_votes.count_ones() <= self.config.max_votes_against
+        let within_max_votes = combined_votes.count_ones() <= self.config.max_votes_against;
+
+        // A signer that votes against any item won't sign any input.
+        let inputs_have_enough_signers = self
+            .input_signers
+            .iter()
+            .chain(item.input_signers())
+            .all(|input_signers| input_signers.has_enough_signers(combined_votes));
+
+        within_max_votes && inputs_have_enough_signers
     }
 
     /// Check if an item's signature requirement is compatible with this bag.
@@ -571,9 +597,13 @@ impl<T: Weighted> BestFitPackager<T> {
         let mut total_presign_size = self
             .total_presign_size
             .saturating_add(item.presign_weight());
+        let lacks_signers = item
+            .input_signers()
+            .is_some_and(|input_signers| !input_signers.has_enough_signers(item.votes()));
 
         // Early exits for items exceeding our bag-independent limits.
         if votes_against > self.config.max_votes_against
+            || lacks_signers
             || total_package_vsize > self.config.max_total_vsize
             || total_presign_size > self.config.max_total_presign_size
         {
@@ -695,6 +725,7 @@ mod tests {
                 config,
                 items: Vec::new(),
                 votes_bitmap: 0,
+                input_signers: Vec::new(),
                 items_needing_signatures: 0,
                 vsize: 0,
                 withdrawal_ids: Vec::new(),
@@ -811,6 +842,10 @@ mod tests {
                 votes.set(index, value);
             }
             votes.load()
+        }
+
+        fn input_signers(&self) -> Option<&InputSigners> {
+            None
         }
 
         fn vsize(&self) -> u64 {
@@ -1405,6 +1440,7 @@ mod tests {
                 outpoint: Unit.fake_with_rng::<bitcoin::OutPoint, _>(&mut rng),
                 max_fee: 10_000,
                 signer_bitmap: BitArray::ZERO,
+                input_signers: InputSigners::unconstrained(),
                 amount: 100_000,
                 deposit_script: bitcoin::ScriptBuf::new(),
                 reclaim_script_hash: TaprootScriptHash::zeros(),
@@ -1557,6 +1593,7 @@ mod tests {
                 outpoint: Unit.fake_with_rng::<bitcoin::OutPoint, _>(&mut rng),
                 max_fee: 10_000,
                 signer_bitmap: BitArray::ZERO,
+                input_signers: InputSigners::unconstrained(),
                 amount: 100_000,
                 deposit_script: bitcoin::ScriptBuf::new(),
                 reclaim_script_hash: TaprootScriptHash::zeros(),

@@ -100,18 +100,19 @@ pub trait DbRead {
         signer_public_key: &PublicKey,
     ) -> impl Future<Output = Result<Vec<model::DepositRequest>, Error>> + Send;
 
-    /// Get pending deposit requests that have been accepted by at least
-    /// `signatures_required` signers and has no responses.
+    /// Get pending deposit requests, with the key set locking each one,
+    /// that have been accepted by at least as many signers in
+    /// `signer_set` as their key set requires and that have no responses.
     ///
     /// For an individual signer, 'accepted' means their blocklist client
-    /// hasn't blocked the request and they are part of the signing set
-    /// that generated the aggregate key locking the deposit.
+    /// hasn't blocked the request and they are part of the key set
+    /// locking the deposit.
     fn get_pending_accepted_deposit_requests(
         &self,
         chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
-        signatures_required: u16,
-    ) -> impl Future<Output = Result<Vec<model::DepositRequest>, Error>> + Send;
+        signer_set: &BTreeSet<PublicKey>,
+    ) -> impl Future<Output = Result<Vec<model::DepositRequestWithKeySet>, Error>> + Send;
 
     /// Check whether we have a record of the deposit request in our
     /// database.
@@ -373,6 +374,12 @@ pub trait DbRead {
         &self,
     ) -> impl Future<Output = Result<Vec<model::Bytes>, Error>> + Send;
 
+    /// Get the signer key set with the given ID.
+    fn get_signer_key_set(
+        &self,
+        key_set_id: &model::KeySetId,
+    ) -> impl Future<Output = Result<Option<model::SignerKeySet>, Error>> + Send;
+
     /// Get the outstanding signer UTXO.
     ///
     /// Under normal conditions, the signer will have only one UTXO they
@@ -391,6 +398,9 @@ pub trait DbRead {
 
     /// For the given outpoint, get the votes for every member of the supplied
     /// signer set.
+    ///
+    /// A vote records whether the signer accepted the deposit, not whether
+    /// they can sign for it.
     fn get_deposit_request_signer_votes(
         &self,
         txid: &model::BitcoinTxId,

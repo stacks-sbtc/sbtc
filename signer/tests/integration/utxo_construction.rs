@@ -29,6 +29,7 @@ use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::DepositSigningKey;
+use signer::bitcoin::utxo::InputSigners;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
@@ -155,6 +156,7 @@ where
         outpoint: dep.outpoint,
         max_fee: dep.max_fee,
         signer_bitmap: BitArray::ZERO,
+        input_signers: InputSigners::unconstrained(),
         amount: dep.amount,
         deposit_script: dep.deposit_script.clone(),
         reclaim_script_hash: TaprootScriptHash::from(&dep.reclaim_script),
@@ -273,6 +275,7 @@ mod serial {
             },
             accept_threshold: 4,
             num_signers: 7,
+            signer_utxo_signers: InputSigners::unconstrained(),
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };
@@ -338,6 +341,7 @@ mod serial {
             },
             accept_threshold: 4,
             num_signers: 7,
+            signer_utxo_signers: InputSigners::unconstrained(),
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };
@@ -483,6 +487,7 @@ mod serial {
             },
             accept_threshold: 4,
             num_signers: 7,
+            signer_utxo_signers: InputSigners::unconstrained(),
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };

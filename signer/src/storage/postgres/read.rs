@@ -122,6 +122,58 @@ impl From<PgSignerUtxo> for SignerUtxo {
         }
     }
 }
+
+/// A convenience struct for retrieving a signer key set.
+#[derive(sqlx::FromRow)]
+struct PgSignerKeySet {
+    /// The ID of the key set.
+    key_set_id: model::KeySetId,
+    /// The version of the script that locks funds to this key set.
+    script_version: model::KeySetVersion,
+    /// The scriptPubKey that locks funds to this key set.
+    script_pubkey: model::ScriptPubKey,
+    /// The public keys of the key set's members. These are identity keys
+    /// for v1 key sets and derived keys for v2 key sets.
+    signer_public_keys: Vec<PublicKeyXOnly>,
+    /// The number of signatures needed to spend funds locked to this key
+    /// set.
+    #[sqlx(try_from = "i32")]
+    signatures_required: u16,
+}
+
+/// A convenience struct for retrieving a deposit request along with the
+/// key set locking it.
+#[derive(sqlx::FromRow)]
+struct PgDepositRequestWithKeySet {
+    /// The deposit request.
+    #[sqlx(flatten)]
+    request: model::DepositRequest,
+    /// The key set locking the deposit.
+    #[sqlx(flatten)]
+    key_set: PgSignerKeySet,
+}
+
+impl From<PgDepositRequestWithKeySet> for model::DepositRequestWithKeySet {
+    fn from(row: PgDepositRequestWithKeySet) -> Self {
+        model::DepositRequestWithKeySet {
+            request: row.request,
+            key_set: row.key_set.into(),
+        }
+    }
+}
+
+impl From<PgSignerKeySet> for model::SignerKeySet {
+    fn from(row: PgSignerKeySet) -> Self {
+        model::SignerKeySet {
+            key_set_id: row.key_set_id,
+            version: row.script_version,
+            script_pubkey: row.script_pubkey,
+            public_keys: row.signer_public_keys.into_iter().collect(),
+            signatures_required: row.signatures_required,
+        }
+    }
+}
+
 /// Read-accessors to the Postgres database.
 pub struct PgRead;
 
@@ -1017,8 +1069,8 @@ impl PgRead {
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
-        threshold: u16,
-    ) -> Result<Vec<model::DepositRequest>, Error>
+        signer_set: &BTreeSet<PublicKey>,
+    ) -> Result<Vec<model::DepositRequestWithKeySet>, Error>
     where
         E: 'static,
         for<'c> &'c mut E: sqlx::PgExecutor<'c>,
@@ -1031,7 +1083,7 @@ impl PgRead {
         let minimum_acceptable_unlock_height =
             *chain_tip.block_height as i32 + DEPOSIT_LOCKTIME_BLOCK_BUFFER as i32 + 1;
 
-        sqlx::query_as::<_, model::DepositRequest>(
+        let rows = sqlx::query_as::<_, PgDepositRequestWithKeySet>(
             r#"
             WITH transactions_in_window AS (
                 SELECT
@@ -1041,7 +1093,9 @@ impl PgRead {
                 JOIN sbtc_signer.bitcoin_transactions transactions ON
                     transactions.block_hash = blocks_in_window.block_hash
             ),
-            -- First we get all the deposits that are accepted by enough signers
+            -- First we get the deposits accepted by enough signers in the
+            -- current signer set, where enough is the threshold of the
+            -- key set locking the deposit.
             accepted_deposits AS (
                 SELECT
                     deposit_requests.txid
@@ -1054,46 +1108,46 @@ impl PgRead {
                   , deposit_requests.lock_time
                   , deposit_requests.key_set_id
                   , deposit_requests.sender_script_pub_keys
+                  , sks.script_version
+                  , sks.script_pubkey
+                  , sks.signer_public_keys
+                  , sks.signatures_required
                 FROM transactions_in_window transactions
                 JOIN sbtc_signer.deposit_requests deposit_requests USING(txid)
+                JOIN sbtc_signer.signer_key_sets AS sks USING(key_set_id)
                 JOIN sbtc_signer.deposit_signers signers USING(txid, output_index)
                 WHERE
                     signers.can_accept
                     AND signers.can_sign
-                    AND (transactions.block_height + deposit_requests.lock_time) >= $4
-                GROUP BY deposit_requests.txid, deposit_requests.output_index
-                HAVING COUNT(signers.txid) >= $3
+                    AND signers.signer_pub_key = ANY($4::BYTEA[])
+                    AND (transactions.block_height + deposit_requests.lock_time) >= $3
+                GROUP BY
+                    deposit_requests.txid
+                  , deposit_requests.output_index
+                  , sks.key_set_id
+                HAVING COUNT(signers.txid) >= sks.signatures_required
             )
             -- Then we only consider the ones not swept yet (in the canonical chain)
             SELECT accepted_deposits.*
             FROM accepted_deposits
-            LEFT JOIN sbtc_signer.bitcoin_tx_inputs AS bti
-              ON bti.prevout_txid = accepted_deposits.txid
-             AND bti.prevout_output_index = accepted_deposits.output_index
-            LEFT JOIN transactions_in_window
-              ON bti.txid = transactions_in_window.txid
-            GROUP BY
-                accepted_deposits.txid
-              , accepted_deposits.output_index
-              , accepted_deposits.spend_script
-              , accepted_deposits.reclaim_script_hash
-              , accepted_deposits.recipient
-              , accepted_deposits.amount
-              , accepted_deposits.max_fee
-              , accepted_deposits.lock_time
-              , accepted_deposits.key_set_id
-              , accepted_deposits.sender_script_pub_keys
-            HAVING
-                COUNT(transactions_in_window.txid) = 0
+            WHERE NOT EXISTS (
+                SELECT TRUE
+                FROM sbtc_signer.bitcoin_tx_inputs AS bti
+                JOIN transactions_in_window AS tiw USING (txid)
+                WHERE bti.prevout_txid = accepted_deposits.txid
+                  AND bti.prevout_output_index = accepted_deposits.output_index
+            )
             "#,
         )
         .bind(chain_tip.block_hash)
         .bind(i32::from(context_window))
-        .bind(i32::from(threshold))
         .bind(minimum_acceptable_unlock_height)
+        .bind(signer_set.iter().collect::<Vec<_>>())
         .fetch_all(&mut *executor)
         .await
-        .map_err(Error::SqlxQuery)
+        .map_err(Error::SqlxQuery)?;
+
+        Ok(rows.into_iter().map(Into::into).collect())
     }
 
     pub async fn get_deposit_request_signer_votes<'e, E>(
@@ -1113,7 +1167,7 @@ impl PgRead {
             deposit_votes AS (
                 SELECT
                     signer_pub_key AS signer_public_key
-                  , can_accept AND can_sign AS is_accepted
+                  , can_accept AS is_accepted
                 FROM sbtc_signer.deposit_signers AS ds
                 WHERE TRUE
                   AND ds.txid = $2
@@ -2104,6 +2158,32 @@ impl PgRead {
         .map_err(Error::SqlxQuery)
     }
 
+    async fn get_signer_key_set<'e, E>(
+        executor: &'e mut E,
+        key_set_id: &model::KeySetId,
+    ) -> Result<Option<model::SignerKeySet>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_as::<_, PgSignerKeySet>(
+            r#"
+            SELECT
+                key_set_id
+              , script_version
+              , script_pubkey
+              , signer_public_keys
+              , signatures_required
+            FROM sbtc_signer.signer_key_sets
+            WHERE key_set_id = $1
+            "#,
+        )
+        .bind(key_set_id)
+        .fetch_optional(executor)
+        .await
+        .map(|row| row.map(model::SignerKeySet::from))
+        .map_err(Error::SqlxQuery)
+    }
+
     async fn get_signer_utxo<'e, E>(
         executor: &'e mut E,
         chain_tip: &model::BitcoinBlockHash,
@@ -2771,13 +2851,13 @@ impl DbRead for PgStore {
         &self,
         chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
-        threshold: u16,
-    ) -> Result<Vec<model::DepositRequest>, Error> {
+        signer_set: &BTreeSet<PublicKey>,
+    ) -> Result<Vec<model::DepositRequestWithKeySet>, Error> {
         PgRead::get_pending_accepted_deposit_requests(
             self.get_connection().await?.as_mut(),
             chain_tip,
             context_window,
-            threshold,
+            signer_set,
         )
         .await
     }
@@ -3039,6 +3119,13 @@ impl DbRead for PgStore {
         PgRead::get_signers_script_pubkeys(self.get_connection().await?.as_mut()).await
     }
 
+    async fn get_signer_key_set(
+        &self,
+        key_set_id: &model::KeySetId,
+    ) -> Result<Option<model::SignerKeySet>, Error> {
+        PgRead::get_signer_key_set(self.get_connection().await?.as_mut(), key_set_id).await
+    }
+
     async fn get_signer_utxo(
         &self,
         chain_tip: &model::BitcoinBlockHash,
@@ -3237,13 +3324,13 @@ impl DbRead for PgTransaction<'_> {
         &self,
         chain_tip: &model::BitcoinBlockRef,
         context_window: u16,
-        signatures_required: u16,
-    ) -> Result<Vec<model::DepositRequest>, Error> {
+        signer_set: &BTreeSet<PublicKey>,
+    ) -> Result<Vec<model::DepositRequestWithKeySet>, Error> {
         PgRead::get_pending_accepted_deposit_requests(
             self.tx.lock().await.as_mut(),
             chain_tip,
             context_window,
-            signatures_required,
+            signer_set,
         )
         .await
     }
@@ -3501,6 +3588,13 @@ impl DbRead for PgTransaction<'_> {
     async fn get_signers_script_pubkeys(&self) -> Result<Vec<model::Bytes>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_signers_script_pubkeys(tx.as_mut()).await
+    }
+
+    async fn get_signer_key_set(
+        &self,
+        key_set_id: &model::KeySetId,
+    ) -> Result<Option<model::SignerKeySet>, Error> {
+        PgRead::get_signer_key_set(self.tx.lock().await.as_mut(), key_set_id).await
     }
 
     async fn get_signer_utxo(

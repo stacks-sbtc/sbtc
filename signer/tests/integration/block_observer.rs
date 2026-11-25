@@ -30,6 +30,7 @@ use sbtc::testing::regtest::Recipient;
 use signer::bitcoin::BitcoinInteract;
 use signer::bitcoin::poller::BitcoinChainTipPoller;
 use signer::bitcoin::utxo::DepositRequest;
+use signer::bitcoin::utxo::InputSigners;
 use signer::bitcoin::utxo::SbtcRequests;
 use signer::bitcoin::utxo::SignerBtcState;
 use signer::bitcoin::utxo::SignerUtxo;
@@ -603,6 +604,7 @@ async fn block_observer_stores_donation_and_sbtc_utxos() {
         },
         accept_threshold: 4,
         num_signers: 7,
+        signer_utxo_signers: InputSigners::unconstrained(),
         sbtc_limits: SbtcLimits::unlimited(),
         max_deposits_per_bitcoin_tx: ctx.config().signer.max_deposits_per_bitcoin_tx.get(),
     };
@@ -780,6 +782,7 @@ async fn block_observer_picks_up_chained_unordered_sweeps() {
         },
         accept_threshold: 2,
         num_signers: 3,
+        signer_utxo_signers: InputSigners::unconstrained(),
         sbtc_limits: SbtcLimits::unlimited(),
         max_deposits_per_bitcoin_tx: 25,
     };
@@ -1835,6 +1838,7 @@ fn make_coinbase_deposit_request(
         outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
         max_fee,
         signer_bitmap: bitvec::array::BitArray::ZERO,
+        input_signers: InputSigners::unconstrained(),
         amount: deposit_tx.output[0].value.to_sat(),
         deposit_script: deposit_script.clone(),
         reclaim_script_hash,
