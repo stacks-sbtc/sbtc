@@ -4416,8 +4416,11 @@ fn create_test_setup(
         .unwrap();
     let test_signers = TestSignerSet {
         keys: dkg_shares.signer_set_public_keys.clone(),
-        // We don't use `signer`
+        // We don't use `signer`, and we don't sign for v2 inputs with
+        // this signer set, so we don't need the signers' keypairs.
         signer: Recipient::new(AddressType::P2tr),
+        keypairs: Vec::new(),
+        signatures_required,
     };
     let (request, recipient) = generate_withdrawal();
     let stacks_block = model::StacksBlock {
@@ -4443,6 +4446,8 @@ fn create_test_setup(
         withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
         signatures_required,
         client: bitcoin_client.clone(),
+        signer_utxo_version: model::KeySetVersion::V1,
+        signer_output_version: model::KeySetVersion::V1,
     }
 }
 
@@ -5692,6 +5697,8 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let signers = TestSignerSet {
         signer,
         keys: vec![signer_kp.public_key().into()],
+        keypairs: vec![signer_kp],
+        signatures_required: 1,
     };
     let aggregate_key = signers.aggregate_key();
 

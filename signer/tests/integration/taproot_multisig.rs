@@ -4,23 +4,12 @@ use std::collections::BTreeSet;
 
 use bitcoin::Address;
 use bitcoin::AddressType;
-use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::ScriptBuf;
-use bitcoin::Sequence;
 use bitcoin::Transaction;
-use bitcoin::TxIn;
-use bitcoin::TxOut;
-use bitcoin::Witness;
-use bitcoin::absolute::LockTime;
-use bitcoin::transaction::Version;
 use bitcoincore_rpc::RpcApi as _;
-use clarity::vm::types::PrincipalData;
 use emily_client::apis::deposit_api;
-use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
-use sbtc::deposits::DepositScriptInputsV2;
-use sbtc::deposits::ReclaimScriptInputs;
 use sbtc::testing::containers::TestContainersBuilder;
 use sbtc::testing::emily::EmilyTables;
 use sbtc::testing::regtest::Faucet;
@@ -52,13 +41,13 @@ use crate::stacks::wait_for_new_nonce;
 use crate::transaction_coordinator::IntegrationTestContext;
 use crate::transaction_coordinator::wait_for_tenure_completed;
 use crate::utxo_construction::make_deposit_request;
+use crate::utxo_construction::make_v2_deposit_request;
 
 const NUM_SIGNERS: usize = 3;
 const SIGNATURES_REQUIRED: u16 = 2;
 const SIGNER_UTXO_AMOUNT: u64 = 100_000;
 const DEPOSITOR_FUNDS: u64 = 50_000_000;
 const DEPOSIT_AMOUNT: u64 = 2_500_000;
-const MIN_CHANGE_OUTPUT: u64 = 546;
 
 /// A running signer and the resources owned by its integration harness.
 type TestSigner = (
@@ -133,69 +122,6 @@ async fn activate_v2(
         registry_after, registry_before,
         "crossing the v2 activation height rotated the registry keys"
     );
-}
-
-/// Construct a signed deposit transaction locked by a v2 signer key set.
-fn make_v2_deposit<U>(
-    depositor: &Recipient,
-    amount: u64,
-    utxo: U,
-    max_fee: u64,
-    key_set: &sbtc::SignerKeySet,
-) -> (Transaction, DepositInfo)
-where
-    U: sbtc::testing::regtest::AsUtxo,
-{
-    let recipient = PrincipalData::from(StacksAddress::burn_address(false));
-    let deposit_inputs = DepositScriptInputsV2::new(
-        key_set.public_keys().clone(),
-        key_set.signatures_required(),
-        recipient.clone(),
-        max_fee,
-    )
-    .unwrap();
-    let reclaim_inputs = ReclaimScriptInputs::try_new(50, ScriptBuf::new()).unwrap();
-    let deposit_script = deposit_inputs.deposit_script();
-    let reclaim_script = reclaim_inputs.reclaim_script();
-    let fee = sbtc::testing::regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
-
-    let mut outputs = vec![TxOut {
-        value: Amount::from_sat(amount),
-        script_pubkey: sbtc::deposits::to_v2_script_pubkey(
-            deposit_script.clone(),
-            reclaim_script.clone(),
-        ),
-    }];
-    let change = utxo.amount() - Amount::from_sat(amount + fee);
-    if change.to_sat() > MIN_CHANGE_OUTPUT {
-        outputs.push(TxOut {
-            value: change,
-            script_pubkey: depositor.address.script_pubkey(),
-        });
-    }
-
-    let mut transaction = Transaction {
-        version: Version::ONE,
-        lock_time: LockTime::ZERO,
-        input: vec![TxIn {
-            previous_output: OutPoint::new(utxo.txid(), utxo.vout()),
-            script_sig: ScriptBuf::new(),
-            sequence: Sequence::ZERO,
-            witness: Witness::new(),
-        }],
-        output: outputs,
-    };
-    sbtc::testing::regtest::p2tr_sign_transaction(&mut transaction, 0, &[utxo], &depositor.keypair);
-
-    let request = CreateDepositRequest {
-        outpoint: OutPoint::new(transaction.compute_txid(), 0),
-        deposit_script,
-        reclaim_script,
-        recipient: Some(recipient),
-        max_fee: Some(max_fee),
-    };
-    let info = request.validate_tx(&transaction, false).unwrap();
-    (transaction, info)
 }
 
 /// Submit a deposit transaction to Bitcoin and register it with Emily.
@@ -349,8 +275,8 @@ async fn signer_utxo_crosses_to_v2_at_activation_height() {
 
     let v2_key_set = signers[0].0.config().signer.v2_signer_key_set().unwrap();
     let v2_utxo = v2_depositor.get_utxos(rpc, None).pop().unwrap();
-    let (v2_tx, v2_info) =
-        make_v2_deposit(&v2_depositor, DEPOSIT_AMOUNT, v2_utxo, max_fee, &v2_key_set);
+    let (v2_tx, _, v2_info) =
+        make_v2_deposit_request(&v2_depositor, DEPOSIT_AMOUNT, v2_utxo, max_fee, &v2_key_set);
     submit_deposit(rpc, &emily_client, &v2_tx, &v2_info).await;
 
     let sweep = wait_for_sweep(
@@ -430,8 +356,8 @@ async fn v1_signer_utxo_sweeps_v1_and_v2_deposits() {
 
     let key_set = signers[0].0.config().signer.v2_signer_key_set().unwrap();
     let v2_utxo = v2_depositor.get_utxos(rpc, None).pop().unwrap();
-    let (v2_tx, v2_info) =
-        make_v2_deposit(&v2_depositor, DEPOSIT_AMOUNT, v2_utxo, max_fee, &key_set);
+    let (v2_tx, _, v2_info) =
+        make_v2_deposit_request(&v2_depositor, DEPOSIT_AMOUNT, v2_utxo, max_fee, &key_set);
     submit_deposit(rpc, &emily_client, &v2_tx, &v2_info).await;
 
     let sweep = wait_for_sweep(
@@ -512,8 +438,8 @@ async fn v2_signer_utxo_sweeps_v1_and_v2_deposits() {
     submit_deposit(rpc, &emily_client, &v1_tx, &v1_info).await;
 
     let v2_utxo = v2_depositor.get_utxos(rpc, None).pop().unwrap();
-    let (v2_tx, v2_info) =
-        make_v2_deposit(&v2_depositor, DEPOSIT_AMOUNT, v2_utxo, max_fee, &key_set);
+    let (v2_tx, _, v2_info) =
+        make_v2_deposit_request(&v2_depositor, DEPOSIT_AMOUNT, v2_utxo, max_fee, &key_set);
     submit_deposit(rpc, &emily_client, &v2_tx, &v2_info).await;
 
     let sweep = wait_for_sweep(
@@ -598,7 +524,7 @@ async fn v2_deposit_for_a_different_signer_set_is_swept() {
 
     let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
     let max_fee = DEPOSIT_AMOUNT / 2;
-    let (deposit_tx, deposit_info) = make_v2_deposit(
+    let (deposit_tx, _, deposit_info) = make_v2_deposit_request(
         &depositor,
         DEPOSIT_AMOUNT,
         utxo,

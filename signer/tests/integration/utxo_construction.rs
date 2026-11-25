@@ -24,6 +24,7 @@ use rand::rngs::OsRng;
 use sbtc::deposits::CreateDepositRequest;
 use sbtc::deposits::DepositInfo;
 use sbtc::deposits::DepositScriptInputs;
+use sbtc::deposits::DepositScriptInputsV2;
 use sbtc::deposits::ReclaimScriptInputs;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::rpc::BitcoinCoreClient;
@@ -162,6 +163,90 @@ where
             DepositSigningInfo::V1 { public_key } => *public_key,
             DepositSigningInfo::V2 { .. } => unreachable!("v1 test deposit"),
         }),
+    };
+
+    (deposit_tx, req, dep)
+}
+
+/// Construct a signed deposit transaction locked by a v2 signer key set,
+/// along with the deposit request that the signers use to sweep it, with
+/// a burn address on stacks as the recipient.
+pub fn make_v2_deposit_request<U>(
+    depositor: &Recipient,
+    amount: u64,
+    utxo: U,
+    max_fee: u64,
+    key_set: &sbtc::SignerKeySet,
+) -> (Transaction, DepositRequest, DepositInfo)
+where
+    U: AsUtxo,
+{
+    let recipient = PrincipalData::from(StacksAddress::burn_address(false));
+    let deposit_inputs = DepositScriptInputsV2::new(
+        key_set.public_keys().clone(),
+        key_set.signatures_required(),
+        recipient.clone(),
+        max_fee,
+    )
+    .unwrap();
+    let reclaim_inputs = ReclaimScriptInputs::try_new(50, ScriptBuf::new()).unwrap();
+    let deposit_script = deposit_inputs.deposit_script();
+    let reclaim_script = reclaim_inputs.reclaim_script();
+    let fee = regtest::BITCOIN_CORE_FALLBACK_FEE.to_sat();
+
+    let mut tx_outs = vec![TxOut {
+        value: Amount::from_sat(amount),
+        script_pubkey: sbtc::deposits::to_v2_script_pubkey(
+            deposit_script.clone(),
+            reclaim_script.clone(),
+        ),
+    }];
+    let change = utxo.amount() - Amount::from_sat(amount + fee);
+    if change.to_sat() > MIN_CHANGE_OUTPUT {
+        tx_outs.push(TxOut {
+            value: change,
+            script_pubkey: depositor.address.script_pubkey(),
+        });
+    }
+
+    let mut deposit_tx = Transaction {
+        version: Version::ONE,
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::new(utxo.txid(), utxo.vout()),
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::ZERO,
+            witness: Witness::new(),
+        }],
+        output: tx_outs,
+    };
+    regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &[utxo], &depositor.keypair);
+
+    // The v2 deposit script commits to a hash of the recipient and max
+    // fee, so we need to supply them in order to validate the deposit.
+    let create_req = CreateDepositRequest {
+        outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
+        deposit_script,
+        reclaim_script,
+        recipient: Some(recipient.clone()),
+        max_fee: Some(max_fee),
+    };
+    let dep = create_req.validate_tx(&deposit_tx, false).unwrap();
+
+    let req = DepositRequest {
+        outpoint: dep.outpoint,
+        max_fee: dep.max_fee,
+        signer_bitmap: BitArray::ZERO,
+        amount: dep.amount,
+        deposit_script: dep.deposit_script.clone(),
+        reclaim_script_hash: TaprootScriptHash::from(&dep.reclaim_script),
+        signers_public_key: match &dep.signing_info {
+            DepositSigningInfo::V2 { key_set } => DepositSigningKey::V2 {
+                key_set: key_set.clone(),
+                recipient: recipient.into(),
+            },
+            DepositSigningInfo::V1 { .. } => unreachable!("v2 test deposit"),
+        },
     };
 
     (deposit_tx, req, dep)

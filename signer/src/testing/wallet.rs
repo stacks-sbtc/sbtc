@@ -14,7 +14,6 @@ use stacks_common::types::chainstate::StacksAddress;
 use crate::config::NetworkKind;
 use crate::context::Context;
 use crate::error::Error;
-use crate::keys::PrivateKey;
 use crate::keys::PublicKey;
 use crate::stacks::contracts::AsContractCall;
 use crate::stacks::contracts::AsTxPayload;
@@ -51,26 +50,44 @@ pub fn create_signers_keys<R>(rng: &mut R, signer: &Recipient, num_signers: usiz
 where
     R: rand::Rng,
 {
+    create_signers_keypairs(rng, signer, num_signers)
+        .iter()
+        .map(|keypair| PublicKey::from(keypair.public_key()))
+        .collect()
+}
+
+/// This function creates a signing set where the aggregate key is the
+/// given controller's public key, and returns the keypair of each signer
+/// in the set, sorted by public key.
+///
+/// The public keys of the returned keypairs are the keys that
+/// [`create_signers_keys`] returns.
+pub fn create_signers_keypairs<R>(
+    rng: &mut R,
+    signer: &Recipient,
+    num_signers: usize,
+) -> Vec<Keypair>
+where
+    R: rand::Rng,
+{
     // We only take an odd number of signers so that the math works out.
     assert_eq!(num_signers % 2, 1);
 
-    let private_key = PrivateKey::from(signer.keypair.secret_key());
-    let aggregate_key = PublicKey::from_private_key(&private_key);
     // The private keys of half of the other signers
     let pks: Vec<secp256k1::SecretKey> = std::iter::repeat_with(|| secp256k1::SecretKey::new(rng))
         .take(num_signers / 2)
         .collect();
 
-    let mut keys: Vec<PublicKey> = pks
+    let mut keypairs: Vec<Keypair> = pks
         .clone()
         .into_iter()
         .chain(pks.into_iter().map(secp256k1::SecretKey::negate))
-        .map(|sk| PublicKey::from_private_key(&PrivateKey::from(sk)))
-        .chain([aggregate_key])
+        .map(|sk| Keypair::from_secret_key(SECP256K1, &sk))
+        .chain([signer.keypair])
         .collect();
 
-    keys.sort();
-    keys
+    keypairs.sort_by_key(|keypair| PublicKey::from(keypair.public_key()));
+    keypairs
 }
 
 /// A generic new-type that implements [`AsTxPayload`] for all types that

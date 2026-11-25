@@ -2541,46 +2541,7 @@ mod tests {
         v1_keypair: &Keypair,
         v2_keypairs: &BTreeMap<XOnlyPublicKey, Keypair>,
     ) {
-        let sign_v2 = |input: V2Input, sighash: TapSighash| -> Witness {
-            let key_set = input.key_set().clone();
-            let mut collector = SignatureCollector::new(input, sighash);
-            key_set
-                .public_keys()
-                .iter()
-                .rev()
-                .find_map(|key| {
-                    let signature = sign_sighash(&v2_keypairs[key], sighash);
-                    collector.add_signature(*key, signature).unwrap()
-                })
-                .expect("the key set's threshold is reached")
-        };
-        let sign_v1 = |keypair: &Keypair, sighash: TapSighash| Signature {
-            signature: sign_sighash(keypair, sighash),
-            sighash_type: TapSighashType::All,
-        };
-
-        let sighashes = unsigned.construct_digests().unwrap();
-        let signer_witness = match sighashes.signers_key_set {
-            SignerUtxoKeySet::V1(_) => {
-                let tweaked = v1_keypair.tap_tweak(SECP256K1, None).to_inner();
-                Witness::p2tr_key_spend(&sign_v1(&tweaked, sighashes.signers))
-            }
-            SignerUtxoKeySet::V2(key_set) => {
-                sign_v2(V2Input::SignerUtxo(key_set), sighashes.signers)
-            }
-        };
-        let deposit_witnesses = sighashes
-            .deposits
-            .iter()
-            .map(|(deposit, sighash)| match &deposit.signers_public_key {
-                DepositSigningKey::V1(_) => {
-                    deposit.construct_v1_witness_data(sign_v1(v1_keypair, *sighash))
-                }
-                DepositSigningKey::V2 { .. } => sign_v2(deposit_input(deposit), *sighash),
-            });
-        let witnesses: Vec<Witness> = std::iter::once(signer_witness)
-            .chain(deposit_witnesses)
-            .collect();
+        crate::testing::set_witness_data_for_key_sets(unsigned, v1_keypair, v2_keypairs);
 
         let prevouts: Vec<TxOut> = std::iter::once(unsigned.signer_utxo.utxo.as_tx_output())
             .chain(
@@ -2592,9 +2553,6 @@ mod tests {
             )
             .collect();
 
-        for (tx_in, witness) in unsigned.tx.input.iter_mut().zip(witnesses) {
-            tx_in.witness = witness;
-        }
         // The fee was computed from the stub witnesses, so the signed
         // transaction must be exactly as large.
         assert_eq!(unsigned.tx.vsize(), unsigned.tx_vsize as usize);
