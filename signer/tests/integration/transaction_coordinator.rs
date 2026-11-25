@@ -63,6 +63,7 @@ use signer::bitcoin::utxo::BitcoinSignerSet;
 use signer::bitcoin::utxo::DepositRequest;
 use signer::bitcoin::utxo::Fees;
 use signer::bitcoin::utxo::InputSigners;
+use signer::bitcoin::utxo::RequestRef;
 use signer::bitcoin::utxo::SOLO_DEPOSIT_TX_VSIZE;
 use signer::bitcoin::utxo::SignerUtxoKeySet;
 use signer::bitcoin::utxo::TxDeconstructor as _;
@@ -81,6 +82,7 @@ use signer::stacks::api::StacksInteract;
 use signer::stacks::wallet::SignerWallet;
 use signer::storage::model::BitcoinBlockHeight;
 use signer::storage::model::KeyRotationEvent;
+use signer::storage::model::KeySetVersion;
 use signer::storage::model::StacksBlockRef;
 use signer::storage::model::WithdrawalTxOutput;
 use signer::testing::btc::build_emily_request;
@@ -144,6 +146,7 @@ use signer::emily_client::EmilyClient;
 use signer::error::Error;
 use signer::keys;
 use signer::keys::PublicKey;
+use signer::keys::PublicKeyXOnly;
 use signer::keys::SignerScriptPubKey as _;
 use signer::network;
 use signer::network::in_memory::InMemoryNetwork;
@@ -7109,6 +7112,173 @@ async fn construct_and_sign_bitcoin_sbtc_transactions_fee_logic(
     } else {
         assert_eq!(expected_deposits.len() + expected_withdrawals.len(), 0);
     }
+
+    testing::storage::drop_db(db).await;
+}
+
+/// Check that the coordinator limits the votes against a transaction by
+/// the key set locking the signers' UTXO, rather than by the current
+/// signer set's threshold, when the two differ.
+///
+/// Both key sets have the same three signers. The deposits are locked by
+/// a 2-of-3 key set, so one vote against leaves each deposit with enough
+/// signers. Whether the deposit with a vote against gets swept depends on
+/// whether the signers' UTXO can tolerate that vote.
+#[test_case(3, false; "signers' UTXO needs every signer")]
+#[test_case(2, true; "signers' UTXO tolerates one vote against")]
+#[tokio::test]
+async fn pending_requests_use_the_signer_utxo_key_set(
+    utxo_signatures_required: u16,
+    expect_rejected_deposit_swept: bool,
+) {
+    let mut rng = get_rng();
+    let db = testing::storage::new_test_database().await;
+
+    let context = TestContext::builder()
+        .with_storage(db.clone())
+        .with_mocked_clients()
+        .build();
+    context
+        .with_bitcoin_client(|client| {
+            client
+                .expect_estimate_fee_rate()
+                .returning(|_| Box::pin(std::future::ready(Ok(10.0))));
+        })
+        .await;
+    context
+        .state()
+        .update_current_limits(SbtcLimits::unlimited());
+
+    let signer_keys = testing::wsts::generate_signer_set_public_keys(&mut rng, 3);
+    let signer_set: BTreeSet<PublicKey> = signer_keys.iter().copied().collect();
+    let current_key_set =
+        sbtc::SignerKeySet::derive(signer_keys.iter().copied().map(Into::into), 2).unwrap();
+    let current_signer_set = BitcoinSignerSet::V2 {
+        signer_public_keys: signer_set.clone(),
+        key_set: current_key_set,
+    };
+
+    // The signers' UTXO is locked by an older v2 key set of the same
+    // signers, which only differs in its threshold.
+    let utxo_key_set = model::SignerKeySet::from(
+        sbtc::SignerKeySet::derive(
+            signer_keys.iter().copied().map(Into::into),
+            utxo_signatures_required,
+        )
+        .unwrap(),
+    );
+    // The deposits are locked by a 2-of-3 v1 key set.
+    let aggregate_key = PublicKey::combine_keys(&signer_keys).unwrap();
+    let deposit_key_set = model::SignerKeySet {
+        key_set_id: PublicKeyXOnly::from(aggregate_key).into(),
+        version: KeySetVersion::V1,
+        script_pubkey: aggregate_key.signers_script_pubkey().into(),
+        public_keys: signer_keys
+            .iter()
+            .map(|key| KeySetVersion::V1.member_key(key))
+            .collect(),
+        signatures_required: 2,
+    };
+    db.write_signer_key_set(&utxo_key_set).await.unwrap();
+    db.write_signer_key_set(&deposit_key_set).await.unwrap();
+
+    let bitcoin_block: model::BitcoinBlock = Faker.fake_with_rng(&mut rng);
+    db.write_bitcoin_block(&bitcoin_block).await.unwrap();
+
+    let utxo_txid: model::BitcoinTxId = Faker.fake_with_rng(&mut rng);
+    db.write_bitcoin_transaction(&model::BitcoinTxRef {
+        block_hash: bitcoin_block.block_hash,
+        txid: utxo_txid,
+    })
+    .await
+    .unwrap();
+    db.write_tx_output(&model::TxOutput {
+        txid: utxo_txid,
+        output_index: 0,
+        script_pubkey: utxo_key_set.script_pubkey.clone(),
+        amount: 500_000_000,
+        output_type: model::TxOutputType::Donation,
+    })
+    .await
+    .unwrap();
+
+    // Every signer accepts the first deposit, while the first signer
+    // votes against the second one.
+    let mut deposit_outpoints = Vec::new();
+    for num_votes_against in [0, 1] {
+        let deposit_request = model::DepositRequest {
+            amount: 1_000_000,
+            max_fee: 100_000,
+            lock_time: 150,
+            key_set_id: deposit_key_set.key_set_id,
+            ..Faker.fake_with_rng(&mut rng)
+        };
+        db.write_deposit_request(&deposit_request).await.unwrap();
+        db.write_bitcoin_transaction(&model::BitcoinTxRef {
+            block_hash: bitcoin_block.block_hash,
+            txid: deposit_request.txid,
+        })
+        .await
+        .unwrap();
+
+        for (index, signer_public_key) in signer_set.iter().enumerate() {
+            let decision = model::DepositSigner {
+                txid: deposit_request.txid,
+                output_index: deposit_request.output_index,
+                signer_pub_key: *signer_public_key,
+                can_accept: index >= num_votes_against,
+                can_sign: true,
+            };
+            db.write_deposit_signer_decision(&decision).await.unwrap();
+        }
+        deposit_outpoints.push(deposit_request.outpoint());
+    }
+
+    let network = InMemoryNetwork::new();
+    let coordinator = TxCoordinatorEventLoop {
+        context: context.clone(),
+        network: network.connect(),
+        private_key: context.config().signer.private_key,
+        context_window: 100,
+        signing_round_max_duration: Duration::from_millis(100),
+        bitcoin_presign_request_max_duration: Duration::from_millis(100),
+        dkg_max_duration: Duration::from_secs(10),
+        is_epoch3: true,
+    };
+
+    let bitcoin_chain_tip = model::BitcoinBlockRef::from(bitcoin_block);
+    let stacks_chain_tip: model::StacksBlockHash = Faker.fake_with_rng(&mut rng);
+    let requests = coordinator
+        .get_pending_requests(&bitcoin_chain_tip, &stacks_chain_tip, &current_signer_set)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Both deposits pass the storage layer's filtering, so any difference
+    // comes from packaging.
+    assert_eq!(requests.deposits.len(), 2);
+
+    // Bit `i` is set when the `i`-th signer in the sorted current signer
+    // set can sign for the signers' UTXO. All three current signers are
+    // in the UTXO's key set, so the low three bits are set.
+    let expected_utxo_signers = InputSigners {
+        signer_bitmap: BitArray::new(0b111u128.to_le_bytes()),
+        signatures_required: utxo_signatures_required,
+    };
+    assert_eq!(requests.signer_utxo_signers, expected_utxo_signers);
+
+    let transactions = requests.construct_transactions().unwrap();
+    let swept_deposits: HashSet<_> = transactions
+        .iter()
+        .flat_map(|tx| tx.requests.iter().filter_map(RequestRef::as_deposit))
+        .map(|deposit| deposit.outpoint)
+        .collect();
+
+    let expected_swept_deposits: HashSet<_> = deposit_outpoints
+        .into_iter()
+        .take(if expect_rejected_deposit_swept { 2 } else { 1 })
+        .collect();
+    assert_eq!(swept_deposits, expected_swept_deposits);
 
     testing::storage::drop_db(db).await;
 }

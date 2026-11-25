@@ -122,13 +122,21 @@ impl From<PgSignerUtxo> for SignerUtxo {
         }
     }
 }
+
 /// A convenience struct for retrieving a signer key set.
 #[derive(sqlx::FromRow)]
 struct PgSignerKeySet {
+    /// The ID of the key set.
     key_set_id: model::KeySetId,
+    /// The version of the script that locks funds to this key set.
     script_version: model::KeySetVersion,
+    /// The scriptPubKey that locks funds to this key set.
     script_pubkey: model::ScriptPubKey,
+    /// The public keys of the key set's members. These are identity keys
+    /// for v1 key sets and derived keys for v2 key sets.
     signer_public_keys: Vec<PublicKeyXOnly>,
+    /// The number of signatures needed to spend funds locked to this key
+    /// set.
     #[sqlx(try_from = "i32")]
     signatures_required: u16,
 }
@@ -137,8 +145,10 @@ struct PgSignerKeySet {
 /// key set locking it.
 #[derive(sqlx::FromRow)]
 struct PgDepositRequestWithKeySet {
+    /// The deposit request.
     #[sqlx(flatten)]
     request: model::DepositRequest,
+    /// The key set locking the deposit.
     #[sqlx(flatten)]
     key_set: PgSignerKeySet,
 }
