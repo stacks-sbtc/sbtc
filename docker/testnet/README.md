@@ -78,6 +78,8 @@ endpoint = "<your_signer_hostname>:8801"
 events_keys = [
     "SNGWPN3XDAQE673MXYXF81016M50NHF5X5PWWM70.sbtc-registry::print",
 ]
+timeout_ms = 10_000
+disable_contract_interface = true
 ```
 
 Note that the Stacks address above MUST be the one specified in the `deployer`
@@ -98,6 +100,8 @@ endpoint = "<your_signer_hostname>:8801"
 events_keys = [
     "SNGWPN3XDAQE673MXYXF81016M50NHF5X5PWWM70.sbtc-registry::print",
 ]
+timeout_ms = 10_000
+disable_contract_interface = true
 ```
 
 ## Environment Configuration

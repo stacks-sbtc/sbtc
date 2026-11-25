@@ -42,6 +42,7 @@ events_keys = [
     "SNGWPN3XDAQE673MXYXF81016M50NHF5X5PWWM70.sbtc-registry::print",
 ]
 timeout_ms = 10_000
+disable_contract_interface = true
 
 [[ustx_balance]]
 address = "ST2QKZ4FKHAH1NQKYKYAYZPY440FEPK7GZ1R5HBP2"
