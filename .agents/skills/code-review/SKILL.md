@@ -10,8 +10,10 @@ This is a read-only workflow. Do not edit files unless separately asked to.
 ## 1. Establish the review scope
 
 1. If the user names a PR, commit, range or set of files, review exactly that.
-2. Otherwise, find the base branch from the PR metadata or the branch's
-   upstream. If neither is available, use `main` and say so.
+2. Otherwise, take the base branch from the PR metadata (for example
+   `gh pr view --json baseRefName`). If there is none, use `origin/main`
+   and say so. Never use the branch's own upstream (`origin/<branch>`):
+   once pushed, its merge base is `HEAD` and the review would be empty.
 3. The scope is every change from the merge base with the base branch
    through `HEAD`. For a local review, also include staged, unstaged and
    relevant untracked files.
