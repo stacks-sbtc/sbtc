@@ -821,8 +821,9 @@ impl TestSweepSetup2 {
     /// 3. Someone on the stacks network creates a withdrawal request to
     ///    sweep out funds.
     /// 4. Generate a set of "signer keys" that kinda represent the
-    ///    signers. Transactions can be signed using only the private keys
-    ///    of the "signer" from (1).
+    ///    signers. v1 inputs can be signed using only the private keys of
+    ///    the "signer" from (1), while v2 inputs are signed with the signer
+    ///    set's `keypairs`.
     ///
     /// The signers' UTXOs are locked by the v1 aggregate key. Use
     /// [`Self::new_setup_with_key_sets`] to lock them with the v2 key set.
@@ -978,8 +979,9 @@ impl TestSweepSetup2 {
                 outpoint: info.outpoint,
                 reclaim_script: info.reclaim_script.clone(),
                 deposit_script: info.deposit_script.clone(),
-                recipient: None,
-                max_fee: None,
+                // v1 deposits ignore these, but v2 deposits need them.
+                recipient: Some(info.recipient.clone()),
+                max_fee: Some(info.max_fee),
             })
             .collect()
     }
@@ -1014,9 +1016,8 @@ impl TestSweepSetup2 {
     ///
     /// This function uses [`BlockObserver::extract_sbtc_transactions`] to
     /// properly extract and store the donation into the database. It only
-    /// picks up outputs locked by key sets in the database, so this stores
-    /// the v2 key set first when needed. For a v1 donation, call
-    /// [`Self::store_dkg_shares`] first.
+    /// picks up outputs locked by key sets in the database, so for a v1
+    /// donation, call [`Self::store_dkg_shares`] first.
     pub async fn store_donation(&self, db: &PgStore) {
         if self.signer_utxo_version == KeySetVersion::V2 {
             self.store_v2_key_set(db).await;
@@ -1262,6 +1263,11 @@ impl TestSweepSetup2 {
     pub async fn store_sweep_tx(&self, db: &PgStore) {
         let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
 
+        let versions = [self.signer_utxo_version, self.signer_output_version];
+        if versions.contains(&KeySetVersion::V2) {
+            self.store_v2_key_set(db).await;
+        }
+
         let bitcoin_tx_ref = BitcoinTxRef {
             txid: sweep.tx_info.compute_txid().into(),
             block_hash: sweep.block_hash,
@@ -1288,6 +1294,16 @@ impl TestSweepSetup2 {
 
     /// Store the deposit request in the database.
     pub async fn store_deposit_request(&self, db: &PgStore) {
+        let has_v2_deposits = self.deposits.iter().any(|(_, request, _)| {
+            matches!(
+                request.signers_public_key,
+                utxo::DepositSigningKey::V2 { .. }
+            )
+        });
+        if has_v2_deposits {
+            self.store_v2_key_set(db).await;
+        }
+
         for (info, _, tx_info) in self.deposits.iter() {
             let deposit = Deposit {
                 tx_info: tx_info.clone(),
@@ -1422,8 +1438,9 @@ impl TestSweepSetup2 {
     }
 
     /// Store the signer set's v2 key set in the database. This is the v2
-    /// counterpart of [`Self::store_dkg_shares`].
-    pub async fn store_v2_key_set(&self, db: &PgStore) {
+    /// counterpart of [`Self::store_dkg_shares`], but the store functions
+    /// that write v2 data call it, so tests don't need to.
+    async fn store_v2_key_set(&self, db: &PgStore) {
         let key_set = model::SignerKeySet::from(self.signers.v2_key_set());
         db.write_signer_key_set(&key_set).await.unwrap();
     }

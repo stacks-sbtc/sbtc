@@ -265,11 +265,6 @@ async fn complete_deposit_validation_v2_happy_path() {
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash().unwrap()).await;
     setup.store_sweep_tx(&db).await;
 
-    // Normal (kinda): there are no DKG shares for a v2 key set, but the
-    // signers still need a record of the key set to know the scriptPubKey
-    // that they control.
-    setup.store_v2_key_set(&db).await;
-
     // Normal: the request and how the signers voted needs to be added to
     // the database. Here the bitmap in the deposit request object
     // corresponds to how the signers voted.

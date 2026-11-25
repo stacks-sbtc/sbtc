@@ -1191,19 +1191,17 @@ mod serial {
 
         let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
-        let mut signers = TestSignerSet::new(&mut rng);
         // This test drives one transaction signer, so store a one-party WSTS
         // fixture whose key ownership matches the production one-key-per-signer
         // mapping. TestSignerSet normally models its one private key as owning
         // every synthetic signer key, which is intentionally rejected by the
         // nonce-response ownership check.
-        signers.keys = vec![signers.aggregate_key()];
+        let signers = TestSignerSet::new_with_threshold(&mut rng, 1, 1);
         // Create a test setup object so that we can easily create proper DKG
         // shares in the database. Note that calling TestSweepSetup2::new_setup
         // creates two bitcoin blocks.
-        let mut setup =
+        let setup =
             TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
-        setup.signatures_required = 1;
 
         setup.store_dkg_shares(&db).await;
 
@@ -1337,19 +1335,17 @@ mod serial {
 
         let (_, faucet) = sbtc::testing::regtest::initialize_blockchain();
 
-        let mut signers = TestSignerSet::new(&mut rng);
         // This test drives one transaction signer, so store a one-party WSTS
         // fixture whose key ownership matches the production one-key-per-signer
         // mapping. TestSignerSet normally models its one private key as owning
         // every synthetic signer key, which is intentionally rejected by the
         // nonce-response ownership check.
-        signers.keys = vec![signers.aggregate_key()];
+        let signers = TestSignerSet::new_with_threshold(&mut rng, 1, 1);
         // Create a test setup object so that we can simply create proper DKG
         // shares in the database. Note that calling TestSweepSetup2::new_setup
         // creates two bitcoin blocks.
-        let mut setup =
+        let setup =
             TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &[]);
-        setup.signatures_required = 1;
 
         setup.store_dkg_shares(&db).await;
 
