@@ -269,7 +269,9 @@ pub const MAINNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeig
 pub const TESTNET_V2_SIGNING_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(245);
 
 /// The default mainnet Bitcoin height at which DKG is disabled.
-pub const MAINNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(u64::MAX);
+///
+/// This is the mainnet activation height of Stacks epoch 4.1.
+pub const MAINNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(979_500);
 
 /// The default testnet Bitcoin height at which DKG is disabled.
 pub const TESTNET_DKG_DISABLE_BLOCK_HEIGHT: BitcoinBlockHeight = BitcoinBlockHeight::new(u64::MAX);

@@ -21,3 +21,4 @@ events_keys = [
     "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-registry::print",
 ]
 timeout_ms = 10_000
+disable_contract_interface = true

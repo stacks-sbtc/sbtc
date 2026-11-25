@@ -1,5 +1,4 @@
 [node]
-name = "krypton-node"
 rpc_bind = "0.0.0.0:20443"
 p2p_bind = "0.0.0.0:20444"
 data_url = "http://127.0.0.1:20443"
@@ -85,7 +84,6 @@ burn_fee_cap = 20_000
 peer_host = "$BITCOIN_PEER_HOST"
 peer_port = $BITCOIN_PEER_PORT
 rpc_port = $BITCOIN_RPC_PORT
-rpc_ssl = false
 username = "$BITCOIN_RPC_USER"
 password = "$BITCOIN_RPC_PASS"
 timeout = 30
@@ -142,6 +140,17 @@ start_height = $STACKS_33_HEIGHT
 [[burnchain.epochs]]
 epoch_name = "3.4"
 start_height = $STACKS_34_HEIGHT
+
+# stacks-core 4.1 requires these epochs in the list. Their heights default
+# to values the devenv never reaches, so the chain stays in epoch 3.4.
+# Epoch 4.0 must start in a reward phase, not a prepare phase.
+[[burnchain.epochs]]
+epoch_name = "4.0"
+start_height = $STACKS_40_HEIGHT
+
+[[burnchain.epochs]]
+epoch_name = "4.1"
+start_height = $STACKS_41_HEIGHT
 
 [[ustx_balance]]
 address = "ST24VB7FBXCBV6P0SRDSPSW0Y2J9XHDXNHW9Q8S7H" # sBTC signer/Stacker 1

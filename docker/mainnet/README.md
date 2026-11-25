@@ -5,7 +5,7 @@ This `README` details how to set up a sBTC signer through Docker Compose for a
 
 ## Requirements
 
-[This documentation page](https://docs.stacks.co/guides-and-tutorials/sbtc/how-to-run-sbtc-signer)
+[This documentation page](https://docs.stacks.co/operate/run-a-sbtc-signer)
 details how to setup Bitcoin and Stacks full nodes.
 
 The [`./nodes` folder](./nodes/) contains a Docker Compose override which shows
@@ -68,7 +68,7 @@ AWS_SECRET_ACCESS_KEY=
 ## Best practices
 
 Please refer to [this documentation
-page](https://docs.stacks.co/guides-and-tutorials/sbtc/best-practices-for-running-an-sbtc-signer)
+page](https://docs.stacks.co/operate/run-a-sbtc-signer/best-practices-for-running-an-sbtc-signer)
 for best practices.
 
 ## Run the stack
@@ -107,3 +107,7 @@ respectively, at `/mnt/bitcoin` and `/mnt/stacks`.
 
 Always run the latest version of the docker images.
 You can find the sBTC images [here](https://github.com/stacks-sbtc/sbtc/pkgs/container/sbtc) and the Stacks Core images [here](https://github.com/stacks-network/stacks-core/pkgs/container/stacks-core).
+
+The `disable_contract_interface` setting in the Stacks node's
+[event observer configuration](./nodes/stacks/Config.toml.in) requires Stacks
+node version 4.0.2 or later.
