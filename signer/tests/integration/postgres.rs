@@ -1034,6 +1034,37 @@ async fn should_return_the_same_last_key_rotation_as_in_memory_store() {
     signer::testing::storage::drop_db(pg_store).await;
 }
 
+/// Postgres and in-memory stores return all rotations, reorged ones too,
+/// in the same order.
+#[tokio::test]
+async fn get_key_rotation_events_returns_all_rotations() {
+    let pg_store = testing::storage::new_test_database().await;
+    let in_memory_store = storage::memory::Store::new_shared();
+    let mut rng = get_rng();
+
+    let mut events: Vec<KeyRotationEvent> = (0..5).map(|_| Faker.fake_with_rng(&mut rng)).collect();
+    let mut reorged = events[0].clone();
+    reorged.block_hash = Faker.fake_with_rng(&mut rng);
+    events.push(reorged);
+
+    for event in &events {
+        pg_store.write_rotate_keys_transaction(event).await.unwrap();
+        in_memory_store
+            .write_rotate_keys_transaction(event)
+            .await
+            .unwrap();
+    }
+
+    let pg_events = pg_store.get_key_rotation_events().await.unwrap();
+    let in_memory_events = in_memory_store.get_key_rotation_events().await.unwrap();
+
+    events.sort_by_key(|event| (event.txid, event.block_hash));
+    assert_eq!(pg_events, events);
+    assert_eq!(in_memory_events, events);
+
+    signer::testing::storage::drop_db(pg_store).await;
+}
+
 /// Here we test that we can store deposit request model objects. We also
 /// test that if we attempt to write another deposit request then we do not
 /// write it and that we do not error.

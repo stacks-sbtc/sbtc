@@ -469,6 +469,18 @@ impl DbRead for SharedStore {
         Ok(event)
     }
 
+    async fn get_key_rotation_events(&self) -> Result<Vec<model::KeyRotationEvent>, Error> {
+        let store = self.lock().await;
+        let mut events: Vec<_> = store
+            .rotate_keys_transactions
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
+        events.sort_by_key(|event| (event.txid, event.block_hash));
+        Ok(events)
+    }
+
     async fn key_rotation_exists(
         &self,
         _stacks_chain_tip: &model::StacksBlockHash,
@@ -1127,6 +1139,10 @@ impl DbRead for InMemoryTransaction {
         chain_tip: &model::BitcoinBlockHash,
     ) -> Result<Option<model::KeyRotationEvent>, Error> {
         self.store.get_last_key_rotation(chain_tip).await
+    }
+
+    async fn get_key_rotation_events(&self) -> Result<Vec<model::KeyRotationEvent>, Error> {
+        self.store.get_key_rotation_events().await
     }
 
     async fn key_rotation_exists(

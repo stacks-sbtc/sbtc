@@ -2029,6 +2029,30 @@ impl PgRead {
         .map_err(Error::SqlxQuery)
     }
 
+    async fn get_key_rotation_events<'e, E>(
+        executor: &'e mut E,
+    ) -> Result<Vec<model::KeyRotationEvent>, Error>
+    where
+        &'e mut E: sqlx::PgExecutor<'e>,
+    {
+        sqlx::query_as::<_, model::KeyRotationEvent>(
+            r#"
+            SELECT
+                txid
+              , block_hash
+              , address
+              , aggregate_key
+              , signer_set
+              , signatures_required
+            FROM sbtc_signer.rotate_keys_transactions
+            ORDER BY txid, block_hash
+            "#,
+        )
+        .fetch_all(executor)
+        .await
+        .map_err(Error::SqlxQuery)
+    }
+
     async fn key_rotation_exists<'e, E>(
         executor: &'e mut E,
         stacks_chain_tip: &model::StacksBlockHash,
@@ -3018,6 +3042,10 @@ impl DbRead for PgStore {
         PgRead::get_last_key_rotation(self.get_connection().await?.as_mut(), chain_tip).await
     }
 
+    async fn get_key_rotation_events(&self) -> Result<Vec<model::KeyRotationEvent>, Error> {
+        PgRead::get_key_rotation_events(self.get_connection().await?.as_mut()).await
+    }
+
     async fn key_rotation_exists(
         &self,
         stacks_chain_tip: &StacksBlockHash,
@@ -3479,6 +3507,11 @@ impl DbRead for PgTransaction<'_> {
     ) -> Result<Option<model::KeyRotationEvent>, Error> {
         let mut tx = self.tx.lock().await;
         PgRead::get_last_key_rotation(tx.as_mut(), chain_tip).await
+    }
+
+    async fn get_key_rotation_events(&self) -> Result<Vec<model::KeyRotationEvent>, Error> {
+        let mut tx = self.tx.lock().await;
+        PgRead::get_key_rotation_events(tx.as_mut()).await
     }
 
     async fn key_rotation_exists(
