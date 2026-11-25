@@ -10,6 +10,8 @@ use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
+use blockstack_lib::types::chainstate::StacksAddress;
+
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::bitcoin::validation::BitcoinTxContext;
@@ -205,6 +207,17 @@ where
     })
 }
 
+/// The wallet that sends the given Stacks transaction.
+async fn stacks_signing_wallet<C>(context: &C, tx: &StacksTx) -> Result<SignerWallet, Error>
+where
+    C: Context,
+{
+    match tx {
+        StacksTx::StxTransfer(transfer) => transfer.origin_wallet(context.config().signer.network),
+        _ => SignerWallet::load(context).await,
+    }
+}
+
 /// An enum identifying requests for which we can sign for on stacks only once
 /// per tenure.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -218,6 +231,8 @@ pub enum StacksSignRequestId {
     RotateKeys(RegistryKey),
     /// A new contract deployment
     SmartContract(SmartContract),
+    /// An STX transfer from a previous signer principal
+    StxTransfer(StacksAddress),
 }
 
 impl StacksSignRequestId {
@@ -236,6 +251,9 @@ impl StacksSignRequestId {
                 StacksSignRequestId::RotateKeys(contract.aggregate_key)
             }
             StacksTx::SmartContract(contract) => StacksSignRequestId::SmartContract(*contract),
+            StacksTx::StxTransfer(transfer) => {
+                StacksSignRequestId::StxTransfer(transfer.origin.clone())
+            }
         }
     }
 }
@@ -253,6 +271,7 @@ impl std::fmt::Display for StacksSignRequestId {
             StacksSignRequestId::SmartContract(smart_contract) => {
                 write!(f, "SmartContract({smart_contract})")
             }
+            StacksSignRequestId::StxTransfer(origin) => write!(f, "StxTransfer({origin})"),
         }
     }
 }
@@ -605,7 +624,7 @@ where
 
         // We need to set the nonce in order to get the exact transaction
         // that we need to sign.
-        let wallet = SignerWallet::load(&self.context).await?;
+        let wallet = stacks_signing_wallet(&self.context, &request.contract_tx).await?;
         wallet.set_nonce(request.nonce);
 
         let multi_sig = MultisigTx::new_tx(&request.contract_tx, &wallet, request.tx_fee);
@@ -731,6 +750,7 @@ where
             StacksTx::SmartContract(smart_contract) => {
                 smart_contract.validate(ctx, &req_ctx).await?
             }
+            StacksTx::StxTransfer(transfer) => transfer.validate(ctx, request.tx_fee).await?,
         };
 
         tracing::info!("stacks validation finished successfully");
@@ -2753,5 +2773,44 @@ mod tests {
             // Verify consistency: is_coordinator should match sender_is_coordinator
             assert_eq!(is_coordinator_result, report.sender_is_coordinator);
         }
+    }
+
+    #[tokio::test]
+    async fn stacks_signing_wallet_uses_the_origin_for_stx_transfers() {
+        let mut rng = get_rng();
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+        let network = ctx.config().signer.network;
+        let mut random_keys = |count| -> BTreeSet<PublicKey> {
+            std::iter::repeat_with(|| Faker.fake_with_rng(&mut rng))
+                .take(count)
+                .collect()
+        };
+
+        ctx.state().update_registry_signer_set_info(SignerSetInfo {
+            aggregate_key: Faker.fake_with_rng(&mut get_rng()),
+            signer_set: random_keys(3),
+            signatures_required: 2,
+        });
+        let current = SignerWallet::load(&ctx).await.unwrap();
+
+        let origin_signer_set = random_keys(3);
+        let origin = SignerWallet::new(&origin_signer_set, 2, network, 0).unwrap();
+        let transfer = crate::stacks::contracts::StxTransferV1 {
+            origin: origin.address().clone(),
+            origin_signer_set,
+            origin_signatures_required: 2,
+            recipient: current.address().clone(),
+            amount: 1_000,
+        };
+
+        let wallet = stacks_signing_wallet(&ctx, &transfer.into()).await.unwrap();
+        assert_eq!(wallet.address(), origin.address());
+
+        let deploy = StacksTx::SmartContract(SmartContract::SbtcRegistry);
+        let wallet = stacks_signing_wallet(&ctx, &deploy).await.unwrap();
+        assert_eq!(wallet.address(), current.address());
     }
 }

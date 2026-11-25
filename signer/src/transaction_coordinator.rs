@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use blockstack_lib::chainstate::stacks::StacksTransaction;
+use blockstack_lib::types::chainstate::StacksAddress;
 use futures::Stream;
 use futures::StreamExt as _;
 use sha2::Digest as _;
@@ -31,6 +32,7 @@ use crate::bitcoin::utxo::SignatureCollector;
 use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::bitcoin::utxo::V2Input;
+use crate::config::NetworkKind;
 use crate::context::Context;
 use crate::context::P2PEvent;
 use crate::context::RequestDeciderEvent;
@@ -58,6 +60,7 @@ use crate::metrics::Metrics;
 use crate::metrics::STACKS_BLOCKCHAIN;
 use crate::network;
 use crate::signature::TaprootSignature;
+use crate::stacks::api::AccountInfo;
 use crate::stacks::api::FeePriority;
 use crate::stacks::api::StacksEpochStatus;
 use crate::stacks::api::StacksInteract as _;
@@ -71,6 +74,7 @@ use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::RotateKeysV1;
 use crate::stacks::contracts::SMART_CONTRACTS;
 use crate::stacks::contracts::SmartContract;
+use crate::stacks::contracts::StxTransferV1;
 use crate::stacks::wallet::MultisigTx;
 use crate::stacks::wallet::SignerWallet;
 use crate::storage::DbRead;
@@ -419,6 +423,11 @@ where
 
         self.construct_and_sign_stacks_response_transactions(&bitcoin_chain_tip, &wallet)
             .await?;
+
+        let recover_stx_fut = self.recover_stx_from_old_principals(&bitcoin_chain_tip, &wallet);
+        if let Err(error) = recover_stx_fut.await {
+            tracing::warn!(%error, "failed to recover STX from old signer principals");
+        }
         tracing::debug!("coordinator tenure completed successfully");
 
         Ok(())
@@ -1264,6 +1273,96 @@ where
                 Err(error)
             }
         }
+    }
+
+    /// Move STX from old signer principals to the current one.
+    #[tracing::instrument(skip_all)]
+    async fn recover_stx_from_old_principals(
+        &mut self,
+        chain_tip: &model::BitcoinBlockRef,
+        wallet: &SignerWallet,
+    ) -> Result<(), Error> {
+        // Don't fund a principal that a pending rotation will replace.
+        if self
+            .context
+            .config()
+            .signer
+            .is_dkg_disabled(chain_tip.block_height)
+        {
+            let target = RotateKeysV1::load(&self.context, chain_tip).await?;
+            let registry = self.context.state().registry_signer_set_info();
+            if !target.matches_registry(registry.as_ref()) {
+                return Ok(());
+            }
+        }
+
+        let config = &self.context.config().signer;
+        let configured = config
+            .stx_recovery_accounts
+            .iter()
+            .map(|account| (account.public_keys.clone(), account.signatures_required));
+        let rotations = self.context.get_storage().get_key_rotation_events().await?;
+        let stored = rotations.into_iter().map(|rotation| {
+            (
+                rotation.signer_set.into_iter().collect(),
+                rotation.signatures_required,
+            )
+        });
+
+        let state = self.context.state();
+        let candidates = stx_recovery_candidates(
+            configured.chain(stored),
+            wallet.address(),
+            self.context.config().signer.network,
+            |key| state.current_signer_set().is_signer(key),
+        );
+
+        for transfer in candidates {
+            let origin = transfer.origin.clone();
+            if let Err(error) = self.recover_stx(chain_tip, transfer).await {
+                tracing::warn!(%error, %origin, "failed to recover STX from an old signer principal");
+            }
+        }
+        Ok(())
+    }
+
+    /// Transfer the recoverable STX in the transfer's origin, if any.
+    async fn recover_stx(
+        &mut self,
+        chain_tip: &model::BitcoinBlockRef,
+        mut transfer: StxTransferV1,
+    ) -> Result<(), Error> {
+        let stacks = self.context.get_stacks_client();
+        let account = stacks.get_account(&transfer.origin).await?;
+        let Some(amount) = stx_recovery_amount(&account) else {
+            return Ok(());
+        };
+        transfer.amount = amount;
+
+        let origin_wallet = transfer.origin_wallet(self.context.config().signer.network)?;
+        origin_wallet.set_nonce(account.nonce);
+        let tx_fee = self
+            .estimate_stacks_tx_fee(&origin_wallet, &transfer, FeePriority::Low)
+            .await?;
+
+        let multi_tx = MultisigTx::new_tx(&transfer, &origin_wallet, tx_fee);
+        let tx = multi_tx.tx();
+        let sign_request = StacksTransactionSignRequest {
+            contract_tx: transfer.into(),
+            nonce: tx.get_origin_nonce(),
+            tx_fee: tx.get_tx_fee(),
+            txid: tx.txid().into(),
+        };
+
+        let process_request_fut = self.process_sign_request(
+            sign_request,
+            &chain_tip.block_hash,
+            multi_tx,
+            &origin_wallet,
+        );
+        let txid = process_request_fut.await?;
+        tracing::info!(%txid, "submitted an STX transfer from an old signer principal");
+        Ok(())
     }
 
     /// Sign and broadcast the stacks transaction
@@ -2680,6 +2779,54 @@ where
     Ok((needs_verification, needs_rotate_key))
 }
 
+/// STX left in an old signer principal to pay the transfer fee.
+const STX_RECOVERY_RESERVE_USTX: u128 = 5_000_000;
+/// Old signer principals with this much spendable STX or less are skipped.
+const STX_RECOVERY_MIN_BALANCE_USTX: u128 = 10_000_000;
+
+/// The microSTX to move out of an old signer principal, if any.
+fn stx_recovery_amount(account: &AccountInfo) -> Option<u64> {
+    let spendable = account.balance.saturating_sub(account.locked);
+    if spendable <= STX_RECOVERY_MIN_BALANCE_USTX {
+        return None;
+    }
+    u64::try_from(spendable - STX_RECOVERY_RESERVE_USTX).ok()
+}
+
+/// One zero-amount transfer per old signer principal whose threshold of
+/// keys is reachable.
+fn stx_recovery_candidates(
+    signer_sets: impl IntoIterator<Item = (BTreeSet<PublicKey>, u16)>,
+    recipient: &StacksAddress,
+    network: NetworkKind,
+    is_reachable: impl Fn(&PublicKey) -> bool,
+) -> Vec<StxTransferV1> {
+    let mut seen = HashSet::new();
+    signer_sets
+        .into_iter()
+        .filter_map(|(signer_set, signatures_required)| {
+            let mut transfer = StxTransferV1 {
+                origin: recipient.clone(),
+                origin_signer_set: signer_set,
+                origin_signatures_required: signatures_required,
+                recipient: recipient.clone(),
+                amount: 0,
+            };
+            transfer.origin = transfer.origin_wallet(network).ok()?.address().clone();
+
+            let reachable = transfer
+                .origin_signer_set
+                .iter()
+                .filter(|key| is_reachable(key))
+                .count();
+            let is_candidate = &transfer.origin != recipient
+                && reachable >= usize::from(transfer.origin_signatures_required)
+                && seen.insert(transfer.origin.clone());
+            is_candidate.then_some(transfer)
+        })
+        .collect()
+}
+
 /// Adjust the wallet nonce based on the error
 pub fn adjust_nonce(wallet: &SignerWallet, error: &Error) {
     match error {
@@ -3477,5 +3624,72 @@ mod tests {
                 panic!("expected success but got error: {e:?}")
             }
         }
+    }
+
+    #[test_case(0, 0, None; "empty")]
+    #[test_case(10_000_000, 0, None; "at-minimum")]
+    #[test_case(10_000_001, 0, Some(5_000_001); "just-above-minimum")]
+    #[test_case(20_000_000, 10_000_000, None; "locked-stx-not-spendable")]
+    #[test_case(11_684_940_000, 0, Some(11_679_940_000); "mainnet-sized")]
+    fn stx_recovery_amount_keeps_a_reserve(balance: u128, locked: u128, expected: Option<u64>) {
+        let account = AccountInfo {
+            balance,
+            locked,
+            unlock_height: 0u64.into(),
+            nonce: 0,
+        };
+        assert_eq!(stx_recovery_amount(&account), expected);
+    }
+
+    #[test]
+    fn stx_recovery_candidates_are_reachable_old_principals() {
+        let mut rng = get_rng();
+        let network = NetworkKind::Regtest;
+        let mut keys = |count| -> Vec<PublicKey> {
+            std::iter::repeat_with(|| Faker.fake_with_rng(&mut rng))
+                .take(count)
+                .collect()
+        };
+        let signer_set = |keys: Vec<PublicKey>, signatures_required: u16| {
+            (
+                keys.into_iter().collect::<BTreeSet<_>>(),
+                signatures_required,
+            )
+        };
+
+        let current = keys(3);
+        let reachable_old = keys(3);
+        let unreachable_old = keys(3);
+        let recipient = SignerWallet::new(&current, 2, network, 0).unwrap();
+        let reachable: HashSet<PublicKey> = current
+            .iter()
+            .chain(&reachable_old)
+            .chain(&unreachable_old[..1])
+            .copied()
+            .collect();
+
+        let signer_sets = vec![
+            signer_set(current.clone(), 2),
+            signer_set(reachable_old.clone(), 2),
+            // The same principal again, e.g. from config and a rotation.
+            signer_set(reachable_old.clone(), 2),
+            signer_set(unreachable_old.clone(), 2),
+            // Not a valid multi-sig wallet.
+            signer_set(keys(2), 3),
+        ];
+        let candidates =
+            stx_recovery_candidates(signer_sets, recipient.address(), network, |key| {
+                reachable.contains(key)
+            });
+
+        let origin = SignerWallet::new(&reachable_old, 2, network, 0).unwrap();
+        let expected = StxTransferV1 {
+            origin: origin.address().clone(),
+            origin_signer_set: reachable_old.into_iter().collect(),
+            origin_signatures_required: 2,
+            recipient: recipient.address().clone(),
+            amount: 0,
+        };
+        assert_eq!(candidates, vec![expected]);
     }
 }

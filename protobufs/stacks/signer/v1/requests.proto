@@ -28,7 +28,23 @@ message StacksTransactionSignRequest {
     RotateKeys rotate_keys = 8;
     // Ssmart contract deployment
     SmartContract smart_contract = 9;
+    // An STX transfer from a previous signer principal
+    StxTransfer stx_transfer = 10;
   }
+}
+
+// An STX transfer from a previous signer principal to the current one.
+message StxTransfer {
+  // The previous signer principal sending the STX.
+  stacks.StacksAddress origin = 1;
+  // The public keys of the origin multi-sig wallet.
+  repeated crypto.PublicKey origin_signer_set = 2;
+  // The signature threshold of the origin multi-sig wallet.
+  uint32 origin_signatures_required = 3;
+  // The current signer principal receiving the STX.
+  stacks.StacksAddress recipient = 4;
+  // The amount of microSTX to transfer.
+  uint64 amount = 5;
 }
 
 enum SmartContract {

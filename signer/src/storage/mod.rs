@@ -358,6 +358,12 @@ pub trait DbRead {
         chain_tip: &model::BitcoinBlockHash,
     ) -> impl Future<Output = Result<Option<model::KeyRotationEvent>, Error>> + Send;
 
+    /// Return all rotate-keys transactions, including non-canonical ones,
+    /// ordered by txid and block hash.
+    fn get_key_rotation_events(
+        &self,
+    ) -> impl Future<Output = Result<Vec<model::KeyRotationEvent>, Error>> + Send;
+
     /// Checks if a key rotation exists on the canonical chain
     fn key_rotation_exists(
         &self,

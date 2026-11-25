@@ -75,6 +75,7 @@ use crate::stacks::contracts::AcceptWithdrawalV1;
 use crate::stacks::contracts::CompleteDepositV1;
 use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::RotateKeysV1;
+use crate::stacks::contracts::StxTransferV1;
 use crate::storage::model;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinBlockHeight;
@@ -759,6 +760,26 @@ impl fake::Dummy<fake::Faker> for RotateKeysV1 {
             aggregate_key: config.fake_with_rng(rng),
             deployer: address,
             signatures_required: config.fake_with_rng(rng),
+        }
+    }
+}
+
+impl fake::Dummy<fake::Faker> for StxTransferV1 {
+    fn dummy_with_rng<R: rand::RngCore + ?Sized>(config: &fake::Faker, rng: &mut R) -> Self {
+        let mut address = || {
+            let public_key: PublicKey = config.fake_with_rng(rng);
+            let pubkey = stacks_common::util::secp256k1::Secp256k1PublicKey::from(&public_key);
+            StacksAddress::p2pkh(false, &pubkey)
+        };
+        let origin = address();
+        let recipient = address();
+
+        StxTransferV1 {
+            origin,
+            origin_signer_set: config.fake_with_rng(rng),
+            origin_signatures_required: config.fake_with_rng(rng),
+            recipient,
+            amount: config.fake_with_rng(rng),
         }
     }
 }

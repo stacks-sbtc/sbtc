@@ -88,7 +88,7 @@ pub struct StacksTransactionSignRequest {
     /// The contract transaction to sign.
     #[prost(
         oneof = "stacks_transaction_sign_request::ContractTx",
-        tags = "5, 6, 7, 8, 9"
+        tags = "5, 6, 7, 8, 9, 10"
     )]
     pub contract_tx: ::core::option::Option<stacks_transaction_sign_request::ContractTx>,
 }
@@ -112,7 +112,31 @@ pub mod stacks_transaction_sign_request {
         /// Ssmart contract deployment
         #[prost(enumeration = "super::SmartContract", tag = "9")]
         SmartContract(i32),
+        /// An STX transfer from a previous signer principal
+        #[prost(message, tag = "10")]
+        StxTransfer(super::StxTransfer),
     }
+}
+/// An STX transfer from a previous signer principal to the current one.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StxTransfer {
+    /// The previous signer principal sending the STX.
+    #[prost(message, optional, tag = "1")]
+    pub origin: ::core::option::Option<super::super::StacksAddress>,
+    /// The public keys of the origin multi-sig wallet.
+    #[prost(message, repeated, tag = "2")]
+    pub origin_signer_set: ::prost::alloc::vec::Vec<
+        super::super::super::crypto::PublicKey,
+    >,
+    /// The signature threshold of the origin multi-sig wallet.
+    #[prost(uint32, tag = "3")]
+    pub origin_signatures_required: u32,
+    /// The current signer principal receiving the STX.
+    #[prost(message, optional, tag = "4")]
+    pub recipient: ::core::option::Option<super::super::StacksAddress>,
+    /// The amount of microSTX to transfer.
+    #[prost(uint64, tag = "5")]
+    pub amount: u64,
 }
 /// For making a `complete-deposit` contract call in the sbtc-deposit
 /// smart contract.

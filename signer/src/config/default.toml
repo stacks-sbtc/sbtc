@@ -173,6 +173,16 @@ bootstrap_signing_set = [
 # Required: true Environment: SIGNER_SIGNER__BOOTSTRAP_SIGNATURES_REQUIRED
 bootstrap_signatures_required = 2
 
+# Old signer principals to recover STX from, for signers whose database
+# lacks the key rotation that created them. The address must match the
+# public keys and threshold.
+#
+# Required: false
+# [[signer.stx_recovery_accounts]]
+# address = "SN..."
+# public_keys = ["02...", "03..."]
+# signatures_required = 2
+
 # Seconds to wait before processing a new Bitcoin block.
 # Required: true
 # Environment: SIGNER_SIGNER__BITCOIN_PROCESSING_DELAY

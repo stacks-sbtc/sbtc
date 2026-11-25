@@ -2,6 +2,7 @@
 use std::borrow::Cow;
 
 use bitcoin::script::PushBytesError;
+use blockstack_lib::types::chainstate::StacksAddress;
 
 use crate::bitcoin::validation::InputValidationResult;
 use crate::bitcoin::validation::WithdrawalCapContext;
@@ -13,6 +14,7 @@ use crate::keys::PublicKey;
 use crate::keys::PublicKeyXOnly;
 use crate::stacks::contracts::DepositValidationError;
 use crate::stacks::contracts::RotateKeysValidationError;
+use crate::stacks::contracts::StxTransferErrorMsg;
 use crate::stacks::contracts::WithdrawalAcceptValidationError;
 use crate::stacks::contracts::WithdrawalRejectValidationError;
 use crate::storage::model::BitcoinBlockHash;
@@ -700,6 +702,10 @@ pub enum Error {
     /// transaction fails at the validation step.
     #[error("rotate keys validation error: {0}")]
     RotateKeysValidation(#[source] Box<RotateKeysValidationError>),
+
+    /// An STX transfer from a previous signer principal failed validation.
+    #[error("STX transfer from {1} failed validation: {0}")]
+    StxTransferValidation(#[source] StxTransferErrorMsg, StacksAddress),
 
     /// Thrown when the recoverable signature has a public key that is
     /// unexpected.

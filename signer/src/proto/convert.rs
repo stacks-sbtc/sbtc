@@ -66,6 +66,7 @@ use crate::stacks::contracts::RejectWithdrawalV1;
 use crate::stacks::contracts::RotateKeysV1;
 use crate::stacks::contracts::SmartContract;
 use crate::stacks::contracts::StacksTx;
+use crate::stacks::contracts::StxTransferV1;
 use crate::storage::model::BitcoinBlockHash;
 use crate::storage::model::BitcoinTxId;
 use crate::storage::model::QualifiedRequestId;
@@ -502,6 +503,42 @@ impl TryFrom<proto::RotateKeys> for RotateKeysV1 {
     }
 }
 
+impl From<StxTransferV1> for proto::StxTransfer {
+    fn from(value: StxTransferV1) -> Self {
+        proto::StxTransfer {
+            origin: Some(value.origin.into()),
+            origin_signer_set: value
+                .origin_signer_set
+                .into_iter()
+                .map(|v| v.into())
+                .collect(),
+            origin_signatures_required: value.origin_signatures_required.into(),
+            recipient: Some(value.recipient.into()),
+            amount: value.amount,
+        }
+    }
+}
+
+impl TryFrom<proto::StxTransfer> for StxTransferV1 {
+    type Error = Error;
+    fn try_from(value: proto::StxTransfer) -> Result<Self, Self::Error> {
+        Ok(StxTransferV1 {
+            origin: value.origin.required()?.try_into()?,
+            origin_signer_set: value
+                .origin_signer_set
+                .into_iter()
+                .map(|v| v.try_into())
+                .collect::<Result<BTreeSet<_>, Error>>()?,
+            origin_signatures_required: value
+                .origin_signatures_required
+                .try_into()
+                .map_err(|_| Error::TypeConversion)?,
+            recipient: value.recipient.required()?.try_into()?,
+            amount: value.amount,
+        })
+    }
+}
+
 impl From<SmartContract> for proto::SmartContract {
     fn from(value: SmartContract) -> Self {
         match value {
@@ -556,6 +593,9 @@ impl From<StacksTransactionSignRequest> for proto::StacksTransactionSignRequest 
                     proto::SmartContract::from(inner).into(),
                 )
             }
+            StacksTx::StxTransfer(inner) => {
+                proto::stacks_transaction_sign_request::ContractTx::StxTransfer(inner.into())
+            }
         };
         proto::StacksTransactionSignRequest {
             nonce: value.nonce,
@@ -587,6 +627,7 @@ impl TryFrom<proto::StacksTransactionSignRequest> for StacksTransactionSignReque
                     .map_err(|_| Error::TypeConversion)?
                     .try_into()?,
             ),
+            proto::ContractTx::StxTransfer(inner) => StacksTx::StxTransfer(inner.try_into()?),
         };
         Ok(StacksTransactionSignRequest {
             nonce: value.nonce,
@@ -1816,6 +1857,17 @@ mod tests {
         std::assert_matches!(legacy.aggregate_key, None);
     }
 
+    #[test]
+    fn stx_transfer_sign_request_round_trips() {
+        let request = StacksTransactionSignRequest {
+            contract_tx: Faker.fake_with_rng::<StxTransferV1, _>(&mut OsRng).into(),
+            ..Faker.fake_with_rng(&mut OsRng)
+        };
+        let proto = proto::StacksTransactionSignRequest::from(request.clone());
+        let round_trip = StacksTransactionSignRequest::try_from(proto).unwrap();
+        assert_eq!(round_trip, request);
+    }
+
     #[test_case(PhantomData::<([u8; 32], proto::Uint256)>; "Uint256")]
     #[test_case(PhantomData::<(PublicKey, proto::PublicKey)>; "PublicKey")]
     #[test_case(PhantomData::<(BitcoinTxId, proto::BitcoinTxid)>; "BitcoinTxId")]
@@ -1831,6 +1883,7 @@ mod tests {
     #[test_case(PhantomData::<(RejectWithdrawalV1, proto::RejectWithdrawal)>; "RejectWithdrawal")]
     #[test_case(PhantomData::<(RotateKeysV1, proto::RotateKeys)>; "RotateKeys")]
     #[test_case(PhantomData::<(SmartContract, proto::SmartContract)>; "SmartContract")]
+    #[test_case(PhantomData::<(StxTransferV1, proto::StxTransfer)>; "StxTransfer")]
     #[test_case(PhantomData::<(Payload, proto::Payload)>; "Payload")]
     #[test_case(PhantomData::<(StacksTransactionSignRequest, proto::StacksTransactionSignRequest)>; "StacksTransactionSignRequest")]
     #[test_case(PhantomData::<(WstsMessage, proto::WstsMessage)>; "WstsMessage")]

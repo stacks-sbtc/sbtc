@@ -464,6 +464,22 @@ pub struct SignerConfig {
     /// The aggregate key constructed during the signers' first DKG. It was
     /// used to lock the first UTXO created by the signers.
     pub bootstrap_aggregate_key: Option<PublicKey>,
+    /// Old signer principals to recover STX from, in addition to those in
+    /// the stored key rotations.
+    #[serde(default)]
+    pub stx_recovery_accounts: Vec<StxRecoveryAccount>,
+}
+
+/// An old signer principal to recover STX from.
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct StxRecoveryAccount {
+    /// The principal's address.
+    #[serde(deserialize_with = "parse_stacks_address")]
+    pub address: StacksAddress,
+    /// The principal's public keys.
+    pub public_keys: BTreeSet<PublicKey>,
+    /// The principal's signature threshold.
+    pub signatures_required: u16,
 }
 
 impl Validatable for SignerConfig {
@@ -509,6 +525,21 @@ impl Validatable for SignerConfig {
         // `SignerWallet::load_boostrap_wallet` function.
         if let Err(err) = SignerWallet::load_boostrap_wallet(self) {
             return Err(ConfigError::Message(err.to_string()));
+        }
+
+        for account in &self.stx_recovery_accounts {
+            let wallet = SignerWallet::new(
+                &account.public_keys,
+                account.signatures_required,
+                self.network,
+                0,
+            )
+            .map_err(|err| ConfigError::Message(err.to_string()))?;
+            if wallet.address() != &account.address {
+                let err =
+                    SignerConfigError::StxRecoveryAddressMismatch(account.address.to_string());
+                return Err(ConfigError::Message(err.to_string()));
+            }
         }
 
         let delay_secs = cfg.signer.bitcoin_processing_delay.as_secs();
@@ -1895,5 +1926,41 @@ mod tests {
             settings.unwrap_err(),
             ConfigError::Message(msg) if msg == SignerConfigError::UnsupportedDatabaseDriver(driver.to_string()).to_string()
         ));
+    }
+
+    #[test_case(2, true; "address-matches")]
+    #[test_case(3, false; "address-mismatch")]
+    fn stx_recovery_account_address_must_match(signatures_required: u16, is_ok: bool) {
+        clear_env();
+
+        let defaults = Settings::new_from_default_config().unwrap();
+        let wallet = SignerWallet::load_boostrap_wallet(&defaults.signer).unwrap();
+        let public_keys: Vec<String> = defaults
+            .signer
+            .bootstrap_signing_set
+            .iter()
+            .map(|key| format!("\"{key}\""))
+            .collect();
+
+        let config_file = format!("{}.toml", crate::testing::DEFAULT_CONFIG_PATH.unwrap());
+        let mut config_str = std::fs::read_to_string(config_file).unwrap();
+        config_str.push_str(&format!(
+            "\n[[signer.stx_recovery_accounts]]\naddress = \"{}\"\npublic_keys = [{}]\nsignatures_required = {signatures_required}\n",
+            wallet.address(),
+            public_keys.join(", "),
+        ));
+        let config = tempfile::Builder::new().suffix(".toml").tempfile().unwrap();
+        std::fs::write(config.path(), config_str).unwrap();
+
+        let settings = Settings::new(Some(config.path()));
+        if is_ok {
+            let accounts = settings.unwrap().signer.stx_recovery_accounts;
+            assert_eq!(accounts.len(), 1);
+            assert_eq!(&accounts[0].address, wallet.address());
+        } else {
+            let expected =
+                SignerConfigError::StxRecoveryAddressMismatch(wallet.address().to_string());
+            assert_matches!(settings, Err(ConfigError::Message(msg)) if msg == expected.to_string());
+        }
     }
 }

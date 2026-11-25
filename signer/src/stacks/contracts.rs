@@ -24,6 +24,7 @@ use std::sync::OnceLock;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::TxOut;
+use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionContractCall;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::chainstate::stacks::TransactionPostCondition;
@@ -46,6 +47,7 @@ use crate::DEPOSIT_DUST_LIMIT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::validation::WithdrawalRequestStatus;
+use crate::config::NetworkKind;
 use crate::context::Context;
 use crate::error::Error;
 use crate::keys::PublicKey;
@@ -207,6 +209,8 @@ pub enum StacksTx {
     ContractCall(ContractCall),
     /// A smart contract transaction used for deploying smart contract.
     SmartContract(SmartContract),
+    /// An STX transfer from a previous signer principal.
+    StxTransfer(StxTransferV1),
 }
 
 impl AsTxPayload for StacksTx {
@@ -214,12 +218,134 @@ impl AsTxPayload for StacksTx {
         match self {
             StacksTx::ContractCall(call) => call.tx_payload(),
             StacksTx::SmartContract(deploy) => deploy.tx_payload(),
+            StacksTx::StxTransfer(transfer) => transfer.tx_payload(),
         }
     }
     fn post_conditions(&self) -> StacksTxPostConditions {
         match self {
             StacksTx::ContractCall(call) => call.post_conditions(),
             StacksTx::SmartContract(deploy) => deploy.post_conditions(),
+            StacksTx::StxTransfer(transfer) => transfer.post_conditions(),
+        }
+    }
+}
+
+impl From<StxTransferV1> for StacksTx {
+    fn from(val: StxTransferV1) -> Self {
+        StacksTx::StxTransfer(val)
+    }
+}
+
+/// An STX transfer from a previous signer principal to the current one.
+#[derive(Clone, Debug, Hash, PartialEq)]
+pub struct StxTransferV1 {
+    /// The previous signer principal sending the STX.
+    pub origin: StacksAddress,
+    /// The public keys of the origin multi-sig wallet.
+    pub origin_signer_set: BTreeSet<PublicKey>,
+    /// The signature threshold of the origin multi-sig wallet.
+    pub origin_signatures_required: u16,
+    /// The current signer principal receiving the STX.
+    pub recipient: StacksAddress,
+    /// The amount of microSTX to transfer.
+    pub amount: u64,
+}
+
+impl StxTransferV1 {
+    /// The multi-sig wallet that sends the STX and pays the fee.
+    pub fn origin_wallet(&self, network: NetworkKind) -> Result<SignerWallet, Error> {
+        SignerWallet::new(
+            &self.origin_signer_set,
+            self.origin_signatures_required,
+            network,
+            0,
+        )
+    }
+
+    /// Check that this signer may sign this transfer with the given fee.
+    pub async fn validate<C>(&self, ctx: &C, tx_fee: u64) -> Result<(), Error>
+    where
+        C: Context + Send + Sync,
+    {
+        let error = |msg| Error::StxTransferValidation(msg, self.origin.clone());
+        let config = &ctx.config().signer;
+
+        let current_wallet = SignerWallet::load(ctx).await?;
+        if &self.recipient != current_wallet.address() {
+            return Err(error(StxTransferErrorMsg::RecipientMismatch));
+        }
+        if self.origin == self.recipient {
+            return Err(error(StxTransferErrorMsg::OriginIsRecipient));
+        }
+        if self.origin_wallet(config.network)?.address() != &self.origin {
+            return Err(error(StxTransferErrorMsg::OriginAddressMismatch));
+        }
+        if !self.origin_signer_set.contains(&config.public_key()) {
+            return Err(error(StxTransferErrorMsg::NotInOriginSignerSet));
+        }
+
+        let in_config = config.stx_recovery_accounts.iter().any(|account| {
+            account.signatures_required == self.origin_signatures_required
+                && account.public_keys == self.origin_signer_set
+        });
+        let is_known_signer_set = in_config || {
+            let rotations = ctx.get_storage().get_key_rotation_events().await?;
+            rotations.iter().any(|rotation| {
+                rotation.signatures_required == self.origin_signatures_required
+                    && rotation.signer_set.iter().copied().collect::<BTreeSet<_>>()
+                        == self.origin_signer_set
+            })
+        };
+        if !is_known_signer_set {
+            return Err(error(StxTransferErrorMsg::UnknownOriginSignerSet));
+        }
+
+        let account = ctx.get_stacks_client().get_account(&self.origin).await?;
+        let spendable = account.balance.saturating_sub(account.locked);
+        if u128::from(self.amount) + u128::from(tx_fee) > spendable {
+            return Err(error(StxTransferErrorMsg::InsufficientBalance));
+        }
+
+        Ok(())
+    }
+}
+
+/// Why a signer refuses to sign an STX transfer.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum StxTransferErrorMsg {
+    /// The recipient is not the current signer principal.
+    #[error("the recipient is not the current signer principal")]
+    RecipientMismatch,
+    /// The origin is the recipient.
+    #[error("the origin is the current signer principal")]
+    OriginIsRecipient,
+    /// The origin address does not match its signer set and threshold.
+    #[error("the origin address does not match its signer set and threshold")]
+    OriginAddressMismatch,
+    /// This signer's key is not in the origin signer set.
+    #[error("this signer is not in the origin signer set")]
+    NotInOriginSignerSet,
+    /// No stored key rotation has the origin signer set and threshold.
+    #[error("the origin signer set is not from a known key rotation")]
+    UnknownOriginSignerSet,
+    /// The origin cannot cover the amount plus the fee.
+    #[error("the amount plus fee exceeds the origin's spendable balance")]
+    InsufficientBalance,
+}
+
+impl AsTxPayload for StxTransferV1 {
+    fn tx_payload(&self) -> TransactionPayload {
+        TransactionPayload::TokenTransfer(
+            PrincipalData::from(self.recipient.clone()),
+            self.amount,
+            TokenTransferMemo([0; 34]),
+        )
+    }
+    /// Stacks rejects token transfers that have post-conditions.
+    fn post_conditions(&self) -> StacksTxPostConditions {
+        StacksTxPostConditions {
+            post_condition_mode: TransactionPostConditionMode::Allow,
+            post_conditions: Vec::new(),
         }
     }
 }
@@ -1654,6 +1780,7 @@ mod tests {
     use secp256k1::SecretKey;
 
     use crate::config::NetworkKind;
+    use crate::stacks::wallet::MultisigTx;
     use crate::storage::DbWrite as _;
     use crate::storage::model::StacksBlockHash;
     use crate::storage::model::StacksTxId;
@@ -1933,5 +2060,164 @@ mod tests {
         // This is to check that this function doesn't implicitly panic. If
         // it doesn't panic now, it can never panic at runtime.
         let _ = smart_contract.tx_payload();
+    }
+
+    #[test]
+    fn stx_transfer_is_sent_from_the_origin_wallet() {
+        let mut rng = get_rng();
+        let origin_signer_set: BTreeSet<PublicKey> =
+            std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
+                .take(3)
+                .collect();
+        let network = NetworkKind::Testnet;
+        let wallet = SignerWallet::new(&origin_signer_set, 2, network, 0).unwrap();
+        let transfer = StxTransferV1 {
+            origin: wallet.address().clone(),
+            origin_signer_set,
+            origin_signatures_required: 2,
+            recipient: StacksAddress::burn_address(false),
+            amount: 1_000,
+        };
+
+        let origin_wallet = transfer.origin_wallet(network).unwrap();
+        let tx = MultisigTx::new_tx(&transfer, &origin_wallet, 100);
+        let tx = tx.tx();
+
+        assert_eq!(tx.origin_address(), transfer.origin);
+        assert!(tx.post_conditions.is_empty());
+        let TransactionPayload::TokenTransfer(recipient, amount, _) = &tx.payload else {
+            panic!("expected a token transfer payload");
+        };
+        assert_eq!(*recipient, PrincipalData::from(transfer.recipient.clone()));
+        assert_eq!(*amount, transfer.amount);
+    }
+
+    fn random_keys(count: usize) -> BTreeSet<PublicKey> {
+        let mut rng = get_rng();
+        std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
+            .take(count)
+            .collect()
+    }
+
+    fn reset_origin(transfer: &mut StxTransferV1, network: NetworkKind) {
+        transfer.origin = transfer.origin_wallet(network).unwrap().address().clone();
+    }
+
+    /// A transfer of 1,000 microSTX that this signer may sign, and the
+    /// context for it.
+    async fn stx_transfer_setup(
+        balance: u128,
+        locked: u128,
+        origin_in_config: bool,
+    ) -> (impl Context, StxTransferV1) {
+        let mut rng = get_rng();
+        let defaults = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .build();
+        let network = defaults.config().signer.network;
+
+        let mut origin_signer_set = random_keys(2);
+        origin_signer_set.insert(defaults.config().signer.public_key());
+        let account = crate::config::StxRecoveryAccount {
+            address: SignerWallet::new(&origin_signer_set, 2, network, 0)
+                .unwrap()
+                .address()
+                .clone(),
+            public_keys: origin_signer_set.clone(),
+            signatures_required: 2,
+        };
+
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                if origin_in_config {
+                    settings.signer.stx_recovery_accounts.push(account);
+                }
+            })
+            .build();
+
+        ctx.state().update_registry_signer_set_info(SignerSetInfo {
+            aggregate_key: fake::Faker.fake_with_rng(&mut rng),
+            signer_set: random_keys(3),
+            signatures_required: 2,
+        });
+        let recipient = SignerWallet::load(&ctx).await.unwrap().address().clone();
+
+        if !origin_in_config {
+            let rotation = crate::storage::model::KeyRotationEvent {
+                signer_set: origin_signer_set.iter().copied().collect(),
+                signatures_required: 2,
+                ..fake::Faker.fake_with_rng(&mut rng)
+            };
+            ctx.get_storage_mut()
+                .write_rotate_keys_transaction(&rotation)
+                .await
+                .unwrap();
+        }
+
+        ctx.with_stacks_client(|client| {
+            client.expect_get_account().returning(move |_| {
+                Box::pin(std::future::ready(Ok(crate::stacks::api::AccountInfo {
+                    balance,
+                    locked,
+                    unlock_height: 0u64.into(),
+                    nonce: 0,
+                })))
+            });
+        })
+        .await;
+
+        let mut transfer = StxTransferV1 {
+            origin: StacksAddress::burn_address(false),
+            origin_signer_set,
+            origin_signatures_required: 2,
+            recipient,
+            amount: 1_000,
+        };
+        reset_origin(&mut transfer, network);
+        (ctx, transfer)
+    }
+
+    #[test_case::test_case(|_, _| {}, 1_100, 0, None; "valid")]
+    #[test_case::test_case(|t, _| t.recipient = StacksAddress::burn_address(false), 1_100, 0,
+        Some(StxTransferErrorMsg::RecipientMismatch); "recipient-not-current-principal")]
+    #[test_case::test_case(|t, _| t.origin = t.recipient.clone(), 1_100, 0,
+        Some(StxTransferErrorMsg::OriginIsRecipient); "origin-is-recipient")]
+    #[test_case::test_case(|t, _| t.origin = StacksAddress::burn_address(false), 1_100, 0,
+        Some(StxTransferErrorMsg::OriginAddressMismatch); "origin-address-mismatch")]
+    #[test_case::test_case(|t, n| { t.origin_signer_set = random_keys(3); reset_origin(t, n) }, 1_100, 0,
+        Some(StxTransferErrorMsg::NotInOriginSignerSet); "signer-not-in-origin-set")]
+    #[test_case::test_case(|t, n| { t.origin_signatures_required = 3; reset_origin(t, n) }, 1_100, 0,
+        Some(StxTransferErrorMsg::UnknownOriginSignerSet); "unknown-origin-signer-set")]
+    #[test_case::test_case(|_, _| {}, 1_099, 0,
+        Some(StxTransferErrorMsg::InsufficientBalance); "balance-one-short")]
+    #[test_case::test_case(|_, _| {}, 2_100, 1_001,
+        Some(StxTransferErrorMsg::InsufficientBalance); "locked-stx-not-spendable")]
+    #[tokio::test]
+    async fn stx_transfer_validation(
+        mutate: fn(&mut StxTransferV1, NetworkKind),
+        balance: u128,
+        locked: u128,
+        expected: Option<StxTransferErrorMsg>,
+    ) {
+        let (ctx, mut transfer) = stx_transfer_setup(balance, locked, false).await;
+        mutate(&mut transfer, ctx.config().signer.network);
+
+        let result = transfer.validate(&ctx, 100).await;
+        match expected {
+            None => result.unwrap(),
+            Some(expected) => match result.unwrap_err() {
+                Error::StxTransferValidation(error, _) => assert_eq!(error, expected),
+                error => panic!("unexpected error: {error}"),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn stx_transfer_validation_accepts_a_configured_origin() {
+        let (ctx, transfer) = stx_transfer_setup(1_100, 0, true).await;
+        transfer.validate(&ctx, 100).await.unwrap();
     }
 }
