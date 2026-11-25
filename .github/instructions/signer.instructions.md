@@ -45,6 +45,10 @@ applyTo: "signer/src/**/*.rs,sbtc/src/**/*.rs,wsts/src/**/*.rs"
 
 - When a change stops writing rows, writes fewer rows, or changes what a
   column means, check every query that reads that table.
+- Inner joins on tables like `signer_key_sets` silently drop data when a
+  row is missing. Check that rows are written for every value the chain
+  can produce (e.g. the registry-derived key set), not only the
+  configured one.
 - A new or changed query in `signer/src/storage/postgres/` usually needs a
   matching change in the in-memory store (`signer/src/storage/memory/`),
   which tests use.

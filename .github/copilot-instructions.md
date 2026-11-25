@@ -70,6 +70,10 @@ signers, security and compatibility ahead of maintainability and style.
 
 - Tests should exercise the invariant the change relies on, not only the
   happy path.
+- Scripts, commitments and addresses that wallets or other tools build
+  must be pinned by fixed test vectors, not only round-tripped through our
+  own code. Ask for them even though the comment threshold otherwise
+  limits requests for tests.
 - `unwrap`, `expect` and `panic!` are fine in tests and on constants.
 - Check that each wait or signal really means the work being asserted on
   has finished, that receivers subscribe before the event can fire, and
