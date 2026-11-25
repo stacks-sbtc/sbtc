@@ -24,6 +24,7 @@ use std::sync::OnceLock;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
 use bitcoin::TxOut;
+use blockstack_lib::chainstate::stacks::TokenTransferMemo;
 use blockstack_lib::chainstate::stacks::TransactionContractCall;
 use blockstack_lib::chainstate::stacks::TransactionPayload;
 use blockstack_lib::chainstate::stacks::TransactionPostCondition;
@@ -46,6 +47,7 @@ use crate::DEPOSIT_DUST_LIMIT;
 use crate::WITHDRAWAL_BLOCKS_EXPIRY;
 use crate::bitcoin::BitcoinInteract as _;
 use crate::bitcoin::validation::WithdrawalRequestStatus;
+use crate::config::NetworkKind;
 use crate::context::Context;
 use crate::error::Error;
 use crate::keys::PublicKey;
@@ -207,6 +209,8 @@ pub enum StacksTx {
     ContractCall(ContractCall),
     /// A smart contract transaction used for deploying smart contract.
     SmartContract(SmartContract),
+    /// An STX transfer from a previous signer principal.
+    StxTransfer(StxTransferV1),
 }
 
 impl AsTxPayload for StacksTx {
@@ -214,12 +218,64 @@ impl AsTxPayload for StacksTx {
         match self {
             StacksTx::ContractCall(call) => call.tx_payload(),
             StacksTx::SmartContract(deploy) => deploy.tx_payload(),
+            StacksTx::StxTransfer(transfer) => transfer.tx_payload(),
         }
     }
     fn post_conditions(&self) -> StacksTxPostConditions {
         match self {
             StacksTx::ContractCall(call) => call.post_conditions(),
             StacksTx::SmartContract(deploy) => deploy.post_conditions(),
+            StacksTx::StxTransfer(transfer) => transfer.post_conditions(),
+        }
+    }
+}
+
+impl From<StxTransferV1> for StacksTx {
+    fn from(val: StxTransferV1) -> Self {
+        StacksTx::StxTransfer(val)
+    }
+}
+
+/// An STX transfer from a previous signer principal to the current one.
+#[derive(Clone, Debug, Hash, PartialEq)]
+pub struct StxTransferV1 {
+    /// The previous signer principal sending the STX.
+    pub origin: StacksAddress,
+    /// The public keys of the origin multi-sig wallet.
+    pub origin_signer_set: BTreeSet<PublicKey>,
+    /// The signature threshold of the origin multi-sig wallet.
+    pub origin_signatures_required: u16,
+    /// The current signer principal receiving the STX.
+    pub recipient: StacksAddress,
+    /// The amount of microSTX to transfer.
+    pub amount: u64,
+}
+
+impl StxTransferV1 {
+    /// The multi-sig wallet that sends the STX and pays the fee.
+    pub fn origin_wallet(&self, network: NetworkKind) -> Result<SignerWallet, Error> {
+        SignerWallet::new(
+            &self.origin_signer_set,
+            self.origin_signatures_required,
+            network,
+            0,
+        )
+    }
+}
+
+impl AsTxPayload for StxTransferV1 {
+    fn tx_payload(&self) -> TransactionPayload {
+        TransactionPayload::TokenTransfer(
+            PrincipalData::from(self.recipient.clone()),
+            self.amount,
+            TokenTransferMemo([0; 34]),
+        )
+    }
+    /// Stacks rejects token transfers that have post-conditions.
+    fn post_conditions(&self) -> StacksTxPostConditions {
+        StacksTxPostConditions {
+            post_condition_mode: TransactionPostConditionMode::Allow,
+            post_conditions: Vec::new(),
         }
     }
 }
@@ -1654,6 +1710,7 @@ mod tests {
     use secp256k1::SecretKey;
 
     use crate::config::NetworkKind;
+    use crate::stacks::wallet::MultisigTx;
     use crate::storage::DbWrite as _;
     use crate::storage::model::StacksBlockHash;
     use crate::storage::model::StacksTxId;
@@ -1933,5 +1990,35 @@ mod tests {
         // This is to check that this function doesn't implicitly panic. If
         // it doesn't panic now, it can never panic at runtime.
         let _ = smart_contract.tx_payload();
+    }
+
+    #[test]
+    fn stx_transfer_is_sent_from_the_origin_wallet() {
+        let mut rng = get_rng();
+        let origin_signer_set: BTreeSet<PublicKey> =
+            std::iter::repeat_with(|| fake::Faker.fake_with_rng(&mut rng))
+                .take(3)
+                .collect();
+        let network = NetworkKind::Testnet;
+        let wallet = SignerWallet::new(&origin_signer_set, 2, network, 0).unwrap();
+        let transfer = StxTransferV1 {
+            origin: wallet.address().clone(),
+            origin_signer_set,
+            origin_signatures_required: 2,
+            recipient: StacksAddress::burn_address(false),
+            amount: 1_000,
+        };
+
+        let origin_wallet = transfer.origin_wallet(network).unwrap();
+        let tx = MultisigTx::new_tx(&transfer, &origin_wallet, 100);
+        let tx = tx.tx();
+
+        assert_eq!(tx.origin_address(), transfer.origin);
+        assert!(tx.post_conditions.is_empty());
+        let TransactionPayload::TokenTransfer(recipient, amount, _) = &tx.payload else {
+            panic!("expected a token transfer payload");
+        };
+        assert_eq!(*recipient, PrincipalData::from(transfer.recipient.clone()));
+        assert_eq!(*amount, transfer.amount);
     }
 }

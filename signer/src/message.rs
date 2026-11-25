@@ -218,6 +218,7 @@ impl StacksTransactionSignRequest {
             StacksTx::ContractCall(ContractCall::RejectWithdrawalV1(_)) => "reject-withdrawal",
             StacksTx::ContractCall(ContractCall::RotateKeysV1(_)) => "rotate-keys",
             StacksTx::SmartContract(_) => "smart-contract-deployment",
+            StacksTx::StxTransfer(_) => "stx-transfer",
         }
     }
 }

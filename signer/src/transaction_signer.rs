@@ -10,6 +10,8 @@ use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
+use blockstack_lib::types::chainstate::StacksAddress;
+
 use crate::bitcoin::utxo::BitcoinSignerSet;
 use crate::bitcoin::utxo::UnsignedMockTransaction;
 use crate::bitcoin::validation::BitcoinTxContext;
@@ -218,6 +220,8 @@ pub enum StacksSignRequestId {
     RotateKeys(RegistryKey),
     /// A new contract deployment
     SmartContract(SmartContract),
+    /// An STX transfer from a previous signer principal
+    StxTransfer(StacksAddress),
 }
 
 impl StacksSignRequestId {
@@ -236,6 +240,9 @@ impl StacksSignRequestId {
                 StacksSignRequestId::RotateKeys(contract.aggregate_key)
             }
             StacksTx::SmartContract(contract) => StacksSignRequestId::SmartContract(*contract),
+            StacksTx::StxTransfer(transfer) => {
+                StacksSignRequestId::StxTransfer(transfer.origin.clone())
+            }
         }
     }
 }
@@ -253,6 +260,7 @@ impl std::fmt::Display for StacksSignRequestId {
             StacksSignRequestId::SmartContract(smart_contract) => {
                 write!(f, "SmartContract({smart_contract})")
             }
+            StacksSignRequestId::StxTransfer(origin) => write!(f, "StxTransfer({origin})"),
         }
     }
 }
@@ -731,6 +739,8 @@ where
             StacksTx::SmartContract(smart_contract) => {
                 smart_contract.validate(ctx, &req_ctx).await?
             }
+            // Not signable until STX transfer validation exists.
+            StacksTx::StxTransfer(_) => return Err(Error::InvalidSigningOperation),
         };
 
         tracing::info!("stacks validation finished successfully");
