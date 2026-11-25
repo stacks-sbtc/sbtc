@@ -1,5 +1,5 @@
 ---
-name: sbtc-pr-review
+name: code-review
 description: Review sBTC changes the way Copilot reviews pull requests in this repository. Use for requests such as "review my changes", "review this branch", "review this diff", "review PR #123" or "pre-review before I open a PR". Applies the repository's review instructions in .github/ as review criteria, not as code-generation rules.
 ---
 

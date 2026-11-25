@@ -50,7 +50,7 @@ signers, security and compatibility ahead of maintainability and style.
   must not cause a permanent decision. Errors must not be silently dropped.
 - **Review guidance.** If the PR changes behavior, names, paths or Make
   targets that this file, `.github/instructions/` or
-  `.agents/skills/sbtc-pr-review/SKILL.md` describe, flag that the
+  `.agents/skills/code-review/SKILL.md` describe, flag that the
   guidance needs updating in the same PR.
 
 ## Review comment threshold
