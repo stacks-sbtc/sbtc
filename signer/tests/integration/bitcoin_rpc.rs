@@ -2,6 +2,7 @@
 
 use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
 use bitcoin::AddressType;
@@ -603,7 +604,7 @@ async fn get_utxo_info_confirmed_unspent_mempool_only_and_spent() {
     let amounts = [SweepAmounts {
         amount: 1_000_000,
         max_fee: 500_000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     }];
     // When this object is created, it creates a deposit transaction and
     // confirms it in a block.

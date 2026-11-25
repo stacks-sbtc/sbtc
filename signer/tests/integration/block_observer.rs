@@ -77,6 +77,7 @@ use url::Url;
 
 use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
 use crate::setup::clean_emily_setup;
@@ -143,12 +144,12 @@ async fn load_latest_deposit_requests_persists_requests_from_past(blocks_ago: u6
         SweepAmounts {
             amount: 100_000,
             max_fee: 100_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
         SweepAmounts {
             amount: 200_000,
             max_fee: 200_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
     ];
     let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &amounts);

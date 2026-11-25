@@ -17,6 +17,8 @@ use fake::Fake as _;
 use signer::testing::context::*;
 
 use crate::setup::SweepAmounts;
+
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
 use crate::setup::backfill_bitcoin_blocks;
@@ -26,7 +28,7 @@ use crate::setup::set_withdrawal_incomplete;
 const WITHDRAWAL_AMOUNT: [SweepAmounts; 1] = [SweepAmounts {
     amount: 700_000,
     max_fee: 500_000,
-    is_deposit: false,
+    kind: SweepRequestKind::Withdrawal,
 }];
 
 /// Create a "proper" [`AcceptWithdrawalV1`] object and context with the

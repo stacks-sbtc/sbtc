@@ -24,6 +24,7 @@ use signer::testing::storage::DbReadTestExt as _;
 
 use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
 use crate::setup::fetch_canonical_bitcoin_blockchain;
@@ -80,7 +81,7 @@ fn new_sweep_setup(
     let withdraw_amounts = SweepAmounts {
         amount,
         max_fee: amount / 2,
-        is_deposit: false,
+        kind: SweepRequestKind::Withdrawal,
     };
 
     TestSweepSetup2::new_setup(signers.clone(), client, faucet, &[withdraw_amounts])
@@ -580,12 +581,12 @@ async fn reject_withdrawal_validation_request_still_active() {
         SweepAmounts {
             amount,
             max_fee: amount / 2,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
         SweepAmounts {
             amount,
             max_fee: amount / 2,
-            is_deposit: false,
+            kind: SweepRequestKind::Withdrawal,
         },
     ];
 

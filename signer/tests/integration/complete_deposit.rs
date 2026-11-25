@@ -1,6 +1,7 @@
 use blockstack_lib::types::chainstate::StacksAddress;
 use rand::rngs::OsRng;
 
+use sbtc::deposits::DepositSigningInfo;
 use sbtc::testing::regtest;
 use signer::bitcoin::rpc::BitcoinCoreClient;
 use signer::error::Error;
@@ -10,6 +11,7 @@ use signer::stacks::contracts::DepositErrorMsg;
 use signer::stacks::contracts::ReqContext;
 use signer::storage::model::BitcoinBlockRef;
 use signer::storage::model::BitcoinTxId;
+use signer::storage::model::KeySetVersion;
 use signer::storage::model::StacksPrincipal;
 use signer::testing;
 use signer::testing::context::*;
@@ -19,6 +21,9 @@ use fake::Fake as _;
 use signer::DEPOSIT_DUST_LIMIT;
 
 use crate::setup::SweepAmounts;
+
+use crate::setup::SignerUtxoVersions;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
@@ -191,6 +196,100 @@ async fn complete_deposit_validation_happy_path() {
     // core. This will create a bitcoin core client that connects to the
     // bitcoin-core at the [bitcoin].endpoints[0] endpoint from the default
     // toml config file.
+    let mut ctx = TestContext::builder()
+        .with_storage(db.clone())
+        .with_first_bitcoin_core_client()
+        .with_mocked_stacks_client()
+        .with_mocked_emily_client()
+        .build();
+
+    // Normal: the request is not completed in the smart contract.
+    set_deposit_incomplete(&mut ctx).await;
+
+    // Check to see if validation passes.
+    complete_deposit_tx.validate(&ctx, &req_ctx).await.unwrap();
+
+    testing::storage::drop_db(db).await;
+}
+
+/// Check that the `CompleteDepositV1::validate` function accepts a
+/// complete-deposit contract call for a v2 deposit.
+///
+/// This is `complete_deposit_validation_happy_path`, except that the
+/// signers' UTXOs and the deposit are locked by an 11-of-15 v2 key set,
+/// so there is no DKG or WSTS involved.
+#[tokio::test]
+async fn complete_deposit_validation_v2_happy_path() {
+    // Normal: this generates the blockchain as well as deposit request
+    // transactions and a transaction sweeping in the deposited funds.
+    let db = testing::storage::new_test_database().await;
+    let mut rng = get_rng();
+    let (rpc, faucet) = regtest::initialize_blockchain();
+
+    // Different: everything is locked by an 11-of-15 v2 key set, like
+    // the signer set on mainnet.
+    let signers = TestSignerSet::new_with_threshold(&mut rng, 15, 11);
+    let amounts = SweepAmounts {
+        amount: 1_000_000,
+        max_fee: 500_000,
+        kind: SweepRequestKind::DepositV2,
+    };
+    let versions = SignerUtxoVersions {
+        signer_utxo: KeySetVersion::V2,
+        signer_output: KeySetVersion::V2,
+    };
+    let mut setup = TestSweepSetup2::new_setup_with_key_sets(
+        signers,
+        BitcoinCoreClient::new_regtest(),
+        faucet,
+        &[amounts],
+        versions,
+    );
+
+    // Normal: the signers' block observer should be getting new block
+    // events from bitcoin-core. We haven't hooked up our block observer,
+    // so we need to manually update the database with new bitcoin block
+    // headers and at least one stacks block.
+    backfill_bitcoin_blocks(&db, rpc, &setup.deposit_block_hash).await;
+    setup.store_stacks_genesis_block(&db).await;
+
+    // Normal: we take the deposit transaction as is from the test setup
+    // and store it in the database. This is necessary for when we fetch
+    // outstanding unfulfilled deposit requests.
+    setup.store_deposit_txs(&db).await;
+
+    // Normal: we submit the transaction sweeping the funds. It gets
+    // confirmed; this generates a new bitcoin block behind the scene.
+    // Bitcoin Core only accepts the sweep if the v2 witnesses are valid.
+    setup.submit_sweep_tx(faucet);
+    backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash().unwrap()).await;
+    setup.store_sweep_tx(&db).await;
+
+    // Normal: the request and how the signers voted needs to be added to
+    // the database. Here the bitmap in the deposit request object
+    // corresponds to how the signers voted.
+    setup.store_deposit_request(&db).await;
+    setup.store_deposit_decisions(&db).await;
+
+    // Make sure everything in the sweep is locked by the v2 key set.
+    let key_set = setup.signers.v2_key_set();
+    let (deposit_info, _, _) = &setup.deposits[0];
+    let deposit_key_set = match &deposit_info.signing_info {
+        DepositSigningInfo::V2 { key_set } => key_set,
+        DepositSigningInfo::V1 { .. } => panic!("expected a v2 deposit"),
+    };
+    assert_eq!(deposit_key_set, &key_set);
+
+    let sweep = &setup.sweep_tx_info.as_ref().unwrap().tx_info;
+    let signer_prevout = sweep.vin[0].prevout.as_ref().unwrap();
+    assert_eq!(signer_prevout.script_pubkey.script, key_set.script_pubkey());
+    assert_eq!(sweep.tx.input[1].previous_output, deposit_info.outpoint);
+    assert_eq!(sweep.tx.output[0].script_pubkey, key_set.script_pubkey());
+
+    // Normal: create a properly formed complete-deposit transaction object
+    // and the corresponding request context.
+    let (complete_deposit_tx, req_ctx) = make_complete_deposit2(&setup);
+
     let mut ctx = TestContext::builder()
         .with_storage(db.clone())
         .with_first_bitcoin_core_client()
@@ -534,7 +633,7 @@ async fn complete_deposit_validation_fee_too_low() {
     let amounts = SweepAmounts {
         amount: 50000,
         max_fee: 80_000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     };
     let mut setup = TestSweepSetup2::new_setup(
         signers,

@@ -37,6 +37,7 @@ use testing_emily_client::apis::testing_api;
 
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::SweepAmounts;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
@@ -353,7 +354,7 @@ async fn persist_received_deposit_decision_fetches_missing_deposit_requests() {
     let amounts = [SweepAmounts {
         amount: 10000,
         max_fee: 10000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     }];
     let setup =
         TestSweepSetup2::new_setup(signers, BitcoinCoreClient::new_regtest(), faucet, &amounts);

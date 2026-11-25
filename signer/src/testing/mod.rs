@@ -18,20 +18,29 @@ pub mod transaction_signer;
 pub mod wallet;
 pub mod wsts;
 
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::ops::Deref;
 
+use bitcoin::TapSighash;
 use bitcoin::TapSighashType;
 use bitcoin::Witness;
+use bitcoin::XOnlyPublicKey;
 use bitcoin::key::TapTweak as _;
+use secp256k1::Keypair;
 use secp256k1::SECP256K1;
 
 use rand::RngCore as _;
 use rand::SeedableRng as _;
 use rand::rngs::{OsRng, StdRng};
 
+use crate::bitcoin::utxo::DepositRequest;
+use crate::bitcoin::utxo::DepositSigningKey;
+use crate::bitcoin::utxo::SignatureCollector;
+use crate::bitcoin::utxo::SignerUtxoKeySet;
 use crate::bitcoin::utxo::UnsignedTransaction;
+use crate::bitcoin::utxo::V2Input;
 use crate::config::Settings;
 
 /// The path for the configuration file that we should use during testing.
@@ -134,6 +143,71 @@ pub fn set_witness_data(unsigned: &mut UnsignedTransaction, keypair: secp256k1::
         .for_each(|(tx_in, witness)| {
             tx_in.witness = witness;
         });
+}
+
+/// Sign every input of the given transaction and set its witness data.
+///
+/// v1 inputs are signed by `v1_keypair`, as in [`set_witness_data`]. v2
+/// inputs are signed through a [`SignatureCollector`] by the last
+/// threshold-many keys of their key set that are in `v2_keypairs`.
+///
+/// # Notes
+///
+/// This panics if `v2_keypairs` does not hold enough keys of a v2 input's
+/// key set to meet its threshold.
+pub fn set_witness_data_for_key_sets(
+    unsigned: &mut UnsignedTransaction,
+    v1_keypair: &Keypair,
+    v2_keypairs: &BTreeMap<XOnlyPublicKey, Keypair>,
+) {
+    let sign_v1 = |keypair: &Keypair, sighash: TapSighash| bitcoin::taproot::Signature {
+        signature: SECP256K1.sign_schnorr(&secp256k1::Message::from(sighash), keypair),
+        sighash_type: TapSighashType::All,
+    };
+    let sign_v2 = |input: V2Input, key_set: &sbtc::SignerKeySet, sighash: TapSighash| {
+        let mut collector = SignatureCollector::new(input, sighash);
+        key_set
+            .public_keys()
+            .iter()
+            .rev()
+            .filter_map(|key| Some((key, v2_keypairs.get(key)?)))
+            .find_map(|(key, keypair)| {
+                let signature = SECP256K1.sign_schnorr(&secp256k1::Message::from(sighash), keypair);
+                collector.add_signature(*key, signature).unwrap()
+            })
+            .expect("not enough keypairs to meet the key set's threshold")
+    };
+
+    let sighashes = unsigned.construct_digests().unwrap();
+    let signer_witness = match sighashes.signers_key_set {
+        SignerUtxoKeySet::V1(_) => {
+            let tweaked = v1_keypair.tap_tweak(SECP256K1, None).to_inner();
+            Witness::p2tr_key_spend(&sign_v1(&tweaked, sighashes.signers))
+        }
+        SignerUtxoKeySet::V2(key_set) => {
+            sign_v2(V2Input::SignerUtxo(key_set), key_set, sighashes.signers)
+        }
+    };
+    let sign_deposit = |deposit: &DepositRequest, sighash: TapSighash| match &deposit
+        .signers_public_key
+    {
+        DepositSigningKey::V1(_) => deposit.construct_v1_witness_data(sign_v1(v1_keypair, sighash)),
+        DepositSigningKey::V2 { key_set, recipient } => {
+            let input = V2Input::Deposit { deposit, key_set, recipient };
+            sign_v2(input, key_set, sighash)
+        }
+    };
+    let deposit_witnesses = sighashes
+        .deposits
+        .iter()
+        .map(|(deposit, sighash)| sign_deposit(deposit, *sighash));
+    let witnesses: Vec<Witness> = std::iter::once(signer_witness)
+        .chain(deposit_witnesses)
+        .collect();
+
+    for (tx_in, witness) in unsigned.tx.input.iter_mut().zip(witnesses) {
+        tx_in.witness = witness;
+    }
 }
 
 /// Testing helpers for [`Vec`].

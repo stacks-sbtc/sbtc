@@ -90,6 +90,7 @@ use test_log::test;
 
 use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
@@ -414,7 +415,7 @@ async fn get_pending_deposit_requests_only_pending() {
     let amounts = SweepAmounts {
         amount: 123456,
         max_fee: 12345,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     };
     let signers = TestSignerSet::new(&mut rng);
     let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[amounts]);
@@ -473,7 +474,7 @@ async fn get_pending_withdrawal_requests_only_pending() {
     let amounts = SweepAmounts {
         amount: 123456,
         max_fee: 12345,
-        is_deposit: false,
+        kind: SweepRequestKind::Withdrawal,
     };
     let signers = TestSignerSet::new(&mut rng);
     let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[amounts]);

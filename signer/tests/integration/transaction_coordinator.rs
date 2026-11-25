@@ -170,6 +170,7 @@ use crate::contracts::SignerStxState;
 use crate::setup::AsBlockRef as _;
 use crate::setup::IntoEmilyTestingConfig as _;
 use crate::setup::SweepAmounts;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
@@ -4418,6 +4419,8 @@ fn create_test_setup(
         keys: dkg_shares.signer_set_public_keys.clone(),
         // We don't use `signer`
         signer: Recipient::new(AddressType::P2tr),
+        keypairs: Vec::new(),
+        signatures_required,
     };
     let (request, recipient) = generate_withdrawal();
     let stacks_block = model::StacksBlock {
@@ -4443,6 +4446,8 @@ fn create_test_setup(
         withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
         signatures_required,
         client: bitcoin_client.clone(),
+        signer_utxo_version: model::KeySetVersion::V1,
+        signer_output_version: model::KeySetVersion::V1,
     }
 }
 
@@ -5692,6 +5697,8 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let signers = TestSignerSet {
         signer,
         keys: vec![signer_kp.public_key().into()],
+        keypairs: vec![signer_kp],
+        signatures_required: 2,
     };
     let aggregate_key = signers.aggregate_key();
 
@@ -5730,7 +5737,7 @@ async fn coordinator_skip_onchain_completed_deposits(deposit_completed: bool) {
     let amounts = [SweepAmounts {
         amount: 700_000,
         max_fee: 500_000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     }];
     let mut setup =
         TestSweepSetup2::new_setup(signers.clone(), bitcoin.get_client(), faucet, &amounts);

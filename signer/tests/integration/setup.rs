@@ -7,8 +7,11 @@ use std::time::Duration;
 use bitcoin::AddressType;
 use bitcoin::Amount;
 use bitcoin::OutPoint;
+use bitcoin::ScriptBuf;
+use bitcoin::XOnlyPublicKey;
 use bitcoincore_rpc::Client;
 use bitcoincore_rpc::RpcApi as _;
+use bitcoincore_rpc::json::ScanTxOutRequest;
 use blockstack_lib::types::chainstate::StacksAddress;
 use clarity::types::chainstate::StacksBlockId;
 use clarity::vm::types::PrincipalData;
@@ -23,6 +26,8 @@ use sbtc::testing::emily::EmilyTables;
 use sbtc::testing::regtest;
 use sbtc::testing::regtest::Faucet;
 use sbtc::testing::regtest::Recipient;
+use secp256k1::Keypair;
+use secp256k1::SECP256K1;
 use signer::DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX;
 use signer::bitcoin::BitcoinInteract as _;
 use signer::bitcoin::rpc::BitcoinCoreClient;
@@ -44,7 +49,6 @@ use signer::context::SbtcLimits;
 use signer::emily_client::EmilyClient;
 use signer::keys::PrivateKey;
 use signer::keys::PublicKey;
-use signer::keys::PublicKeyXOnly;
 use signer::keys::SignerScriptPubKey as _;
 use signer::stacks::api::MockStacksInteract;
 use signer::stacks::wallet::SignerWallet;
@@ -61,6 +65,7 @@ use signer::storage::model::BitcoinWithdrawalOutput;
 use signer::storage::model::DkgSharesStatus;
 use signer::storage::model::EncryptedDkgShares;
 use signer::storage::model::KeyRotationEvent;
+use signer::storage::model::KeySetVersion;
 use signer::storage::model::QualifiedRequestId;
 use signer::storage::postgres::PgStore;
 use signer::testing::context::TestContext;
@@ -71,6 +76,7 @@ use testing_emily_client::apis::configuration::Configuration as TestingEmilyApiC
 
 use crate::utxo_construction::generate_withdrawal;
 use crate::utxo_construction::make_deposit_request;
+use crate::utxo_construction::make_v2_deposit_request;
 use crate::utxo_construction::make_withdrawal;
 
 pub trait AsBlockRef {
@@ -550,30 +556,91 @@ pub async fn set_withdrawal_status<S, B, E>(ctx: &mut MockedStacksContext<S, B, 
     .await;
 }
 
-/// The information about a sweep transaction that has been confirmed.
+/// A signer set, with the keys that sign for v1 and v2 inputs.
 #[derive(Clone)]
 pub struct TestSignerSet {
-    /// The signer object. It's public key represents the group of signers'
-    /// public keys, allowing us to abstract away the fact that there are
-    /// many signers needed to sign a transaction.
+    /// The signer object. Its public key is the v1 aggregate key, so it
+    /// signs for v1 inputs on behalf of all the signers.
     pub signer: Recipient,
-    /// The public keys of the signer set. It is effectively controlled by
-    /// the above signer's private key.
+    /// The public keys of the signer set.
     pub keys: Vec<PublicKey>,
+    /// The keypair for each key in `keys`, in the same order, used to
+    /// sign for v2 inputs. This is empty when the private keys are unknown.
+    pub keypairs: Vec<Keypair>,
+    /// The signature threshold of the signer set. It is the threshold of
+    /// the v2 key set and of [`TestSweepSetup2::signatures_required`].
+    pub signatures_required: u16,
 }
 
 impl TestSignerSet {
+    /// Create a 5-of-7 signer set.
     pub fn new<R>(rng: &mut R) -> Self
     where
         R: rand::Rng,
     {
+        Self::new_with_threshold(rng, 7, 5)
+    }
+
+    /// Create a `signatures_required`-of-`num_signers` signer set. The
+    /// number of signers must be odd, so that their public keys sum to
+    /// the `signer` field's public key.
+    pub fn new_with_threshold<R>(rng: &mut R, num_signers: usize, signatures_required: u16) -> Self
+    where
+        R: rand::Rng,
+    {
         let signer = Recipient::new(AddressType::P2tr);
-        let keys = signer::testing::wallet::create_signers_keys(rng, &signer, 7);
-        Self { signer, keys }
+        let keypairs = signer::testing::wallet::create_signers_keypairs(rng, &signer, num_signers);
+        let keys = keypairs
+            .iter()
+            .map(|keypair| PublicKey::from(keypair.public_key()))
+            .collect();
+        Self {
+            signer,
+            keys,
+            keypairs,
+            signatures_required,
+        }
     }
 
     pub fn signer_keys(&self) -> &[PublicKey] {
         &self.keys
+    }
+
+    /// Return the v2 key set, derived from `keys` the same way the signers
+    /// derive it.
+    pub fn v2_key_set(&self) -> sbtc::SignerKeySet {
+        let public_keys = self.keys.iter().map(secp256k1::PublicKey::from);
+        sbtc::SignerKeySet::derive(public_keys, self.signatures_required).unwrap()
+    }
+
+    /// Return the signing keypairs for the v2 key set, keyed by x-only
+    /// public key.
+    pub fn v2_signing_keypairs(&self) -> BTreeMap<XOnlyPublicKey, Keypair> {
+        self.keypairs
+            .iter()
+            .map(|keypair| {
+                let secret_key = sbtc::derive_signing_secret_key(keypair.secret_key());
+                let signing_keypair = Keypair::from_secret_key(SECP256K1, &secret_key);
+                (signing_keypair.x_only_public_key().0, signing_keypair)
+            })
+            .collect()
+    }
+
+    /// Return the key set of the given version that locks a signers' UTXO.
+    pub fn utxo_key_set(&self, version: KeySetVersion) -> SignerUtxoKeySet {
+        match version {
+            KeySetVersion::V1 => SignerUtxoKeySet::V1(self.signer.keypair.x_only_public_key().0),
+            KeySetVersion::V2 => SignerUtxoKeySet::V2(self.v2_key_set()),
+        }
+    }
+
+    /// Return the scriptPubKey of a signers' UTXO locked by the key set of
+    /// the given version.
+    pub fn script_pubkey(&self, version: KeySetVersion) -> ScriptBuf {
+        match self.utxo_key_set(version) {
+            SignerUtxoKeySet::V1(public_key) => public_key.signers_script_pubkey(),
+            SignerUtxoKeySet::V2(key_set) => key_set.script_pubkey(),
+        }
     }
 
     pub fn aggregate_key(&self) -> PublicKey {
@@ -636,11 +703,39 @@ pub struct BroadcastSweepTxInfo {
     pub txid: bitcoin::Txid,
 }
 
+/// The amounts of a request that a [`TestSweepSetup2`] creates and sweeps.
 #[derive(Debug, Clone, Copy)]
 pub struct SweepAmounts {
+    /// The amount of the request, in sats.
     pub amount: u64,
+    /// The maximum fee that the request pays, in sats.
     pub max_fee: u64,
-    pub is_deposit: bool,
+    /// Whether the request is a withdrawal or a deposit, and the version of
+    /// the key set locking a deposit.
+    pub kind: SweepRequestKind,
+}
+
+/// The kind of request that a [`SweepAmounts`] describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SweepRequestKind {
+    /// A withdrawal request.
+    Withdrawal,
+    /// A deposit locked by the signers' v1 aggregate key.
+    DepositV1,
+    /// A deposit locked by the signers' v2 key set.
+    DepositV2,
+}
+
+impl SweepRequestKind {
+    /// Return the version of the key set locking a deposit, or `None` for
+    /// a withdrawal.
+    pub fn deposit_version(self) -> Option<KeySetVersion> {
+        match self {
+            Self::Withdrawal => None,
+            Self::DepositV1 => Some(KeySetVersion::V1),
+            Self::DepositV2 => Some(KeySetVersion::V2),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -684,9 +779,7 @@ pub struct TestSweepSetup2 {
     pub withdrawals: Vec<WithdrawalTriple>,
     /// The address that initiated with withdrawal request.
     pub withdrawal_sender: PrincipalData,
-    /// The signer object. It's public key represents the group of signers'
-    /// public keys, allowing us to abstract away the fact that there are
-    /// many signers needed to sign a transaction.
+    /// The signer set that signs the sweep transaction.
     pub signers: TestSignerSet,
     /// This value affects whether a request is considered "accepted".
     /// During validation, a signer won't sign a transaction if it is not
@@ -696,6 +789,24 @@ pub struct TestSweepSetup2 {
     pub signatures_required: u16,
     /// The bitcoin client to use when needed
     pub client: BitcoinCoreClient,
+    /// The version of the key set locking the signers' UTXO that the sweep
+    /// transaction spends.
+    pub signer_utxo_version: KeySetVersion,
+    /// The version of the key set locking the signers' UTXO that the sweep
+    /// transaction creates.
+    pub signer_output_version: KeySetVersion,
+}
+
+/// The versions of the key sets locking the signers' UTXOs that the sweep
+/// transaction in a [`TestSweepSetup2`] spends and creates.
+#[derive(Debug, Clone, Copy)]
+pub struct SignerUtxoVersions {
+    /// The version of the key set locking the signers' UTXO that the sweep
+    /// transaction spends.
+    pub signer_utxo: KeySetVersion,
+    /// The version of the key set locking the signers' UTXO that the sweep
+    /// transaction creates.
+    pub signer_output: KeySetVersion,
 }
 
 impl TestSweepSetup2 {
@@ -710,13 +821,34 @@ impl TestSweepSetup2 {
     /// 3. Someone on the stacks network creates a withdrawal request to
     ///    sweep out funds.
     /// 4. Generate a set of "signer keys" that kinda represent the
-    ///    signers. Transactions can be signed using only the private keys
-    ///    of the "signer" from (1).
+    ///    signers. v1 inputs can be signed using only the private keys of
+    ///    the "signer" from (1), while v2 inputs are signed with the signer
+    ///    set's `keypairs`.
+    ///
+    /// The signers' UTXOs are locked by the v1 aggregate key. Use
+    /// [`Self::new_setup_with_key_sets`] to lock them with the v2 key set.
     pub fn new_setup(
         signers: TestSignerSet,
         client: BitcoinCoreClient,
         faucet: &Faucet,
         amounts: &[SweepAmounts],
+    ) -> Self {
+        let versions = SignerUtxoVersions {
+            signer_utxo: KeySetVersion::V1,
+            signer_output: KeySetVersion::V1,
+        };
+        Self::new_setup_with_key_sets(signers, client, faucet, amounts, versions)
+    }
+
+    /// Construct a new TestSweepSetup2 like [`Self::new_setup`], except
+    /// that the signers' UTXOs that the sweep spends and creates are locked
+    /// by key sets of the given versions.
+    pub fn new_setup_with_key_sets(
+        signers: TestSignerSet,
+        client: BitcoinCoreClient,
+        faucet: &Faucet,
+        amounts: &[SweepAmounts],
+        versions: SignerUtxoVersions,
     ) -> Self {
         let signer = &signers.signer;
         let rpc = faucet.rpc;
@@ -724,27 +856,35 @@ impl TestSweepSetup2 {
 
         let depositors: Vec<_> = amounts
             .iter()
-            .filter(|dep| dep.is_deposit)
-            .map(|dep| {
+            .filter_map(|dep| Some((dep, dep.kind.deposit_version()?)))
+            .map(|(dep, version)| {
                 more_asserts::assert_lt!(dep.amount, 50_000_000);
                 let depositor = Recipient::new(AddressType::P2tr);
                 faucet.send_to(50_000_000, &depositor.address);
-                (depositor, *dep)
+                (depositor, *dep, version)
             })
             .collect();
 
         // Start off with some initial UTXOs to work with.
 
-        let donation = faucet.send_to(Amount::ONE_BTC.to_sat(), &signer.address);
+        let signers_script_pubkey = signers.script_pubkey(versions.signer_utxo);
+        let donation = faucet.send_to_script(Amount::ONE_BTC.to_sat(), signers_script_pubkey);
         let donation_block_hash = faucet.generate_blocks(1)[0];
 
         let mut deposits = Vec::new();
 
-        for (depositor, SweepAmounts { amount, max_fee, .. }) in depositors.into_iter() {
+        for (depositor, SweepAmounts { amount, max_fee, .. }, version) in depositors {
             // Now lets make a deposit transaction and submit it
             let utxo = depositor.get_utxos(rpc, None).pop().unwrap();
-            let (deposit_tx, deposit_request, deposit_info) =
-                make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key);
+            let (deposit_tx, deposit_request, deposit_info) = match version {
+                KeySetVersion::V1 => {
+                    make_deposit_request(&depositor, amount, utxo, max_fee, signers_public_key)
+                }
+                KeySetVersion::V2 => {
+                    let key_set = signers.v2_key_set();
+                    make_v2_deposit_request(&depositor, amount, utxo, max_fee, &key_set)
+                }
+            };
 
             rpc.send_raw_transaction(&deposit_tx).unwrap();
             deposits.push((deposit_tx, deposit_request, deposit_info));
@@ -759,7 +899,7 @@ impl TestSweepSetup2 {
         // who can sign for the withdrawal UTXO.
         let mut withdrawals: Vec<_> = amounts
             .iter()
-            .filter(|sweep_amount| !sweep_amount.is_deposit)
+            .filter(|sweep_amount| sweep_amount.kind == SweepRequestKind::Withdrawal)
             .map(|&SweepAmounts { amount, max_fee, .. }| {
                 let (request, recipient) = make_withdrawal(amount, max_fee);
                 WithdrawalTriple { request, recipient, block_ref }
@@ -810,13 +950,24 @@ impl TestSweepSetup2 {
             broadcast_info: None,
             donation,
             donation_block_hash,
+            signatures_required: signers.signatures_required,
             signers,
             stacks_blocks,
             withdrawals,
             withdrawal_sender: PrincipalData::from(StacksAddress::burn_address(false)),
-            signatures_required: 2,
             client,
+            signer_utxo_version: versions.signer_utxo,
+            signer_output_version: versions.signer_output,
         }
+    }
+
+    /// Return the scriptPubKeys of the signers' UTXOs that the sweep
+    /// transaction spends and creates.
+    fn signers_script_pubkeys(&self) -> HashSet<ScriptBuf> {
+        [self.signer_utxo_version, self.signer_output_version]
+            .into_iter()
+            .map(|version| self.signers.script_pubkey(version))
+            .collect()
     }
 
     /// Return the expected deposit request that our internal EmilyClient
@@ -828,8 +979,9 @@ impl TestSweepSetup2 {
                 outpoint: info.outpoint,
                 reclaim_script: info.reclaim_script.clone(),
                 deposit_script: info.deposit_script.clone(),
-                recipient: None,
-                max_fee: None,
+                // v1 deposits ignore these, but v2 deposits need them.
+                recipient: Some(info.recipient.clone()),
+                max_fee: Some(info.max_fee),
             })
             .collect()
     }
@@ -863,8 +1015,14 @@ impl TestSweepSetup2 {
     /// the database.
     ///
     /// This function uses [`BlockObserver::extract_sbtc_transactions`] to
-    /// properly extract and store the donation into the database.
+    /// properly extract and store the donation into the database. It only
+    /// picks up outputs locked by key sets in the database, so for a v1
+    /// donation, call [`Self::store_dkg_shares`] first.
     pub async fn store_donation(&self, db: &PgStore) {
+        if self.signer_utxo_version == KeySetVersion::V2 {
+            self.store_v2_key_set(db).await;
+        }
+
         let context = TestContext::builder()
             .with_storage(db.clone())
             .with_bitcoin_client(self.client.clone())
@@ -897,12 +1055,28 @@ impl TestSweepSetup2 {
     /// deposited funds and sweeps out the withdrawal funds in a proper
     /// sweep transaction, it broadcasts this transaction to the bitcoin
     /// network.
+    ///
+    /// # Notes
+    ///
+    /// This setup supports a single sweep transaction, which spends the
+    /// donation, so this panics if the sweep has already been confirmed.
+    /// Calling it again before then broadcasts a replacement.
     pub fn broadcast_sweep_tx(&mut self) {
+        assert!(
+            self.sweep_tx_info.is_none(),
+            "the sweep transaction has already been confirmed"
+        );
         let rpc = self.client.inner_client();
         // Okay now we try to peg-in the deposit by making a transaction.
         // Let's start by getting the signer's sole UTXO.
-        let aggregated_signer = &self.signers.signer;
-        let signer_utxo = aggregated_signer.get_utxos(rpc, None).pop().unwrap();
+        let script_pubkey = self.signers.script_pubkey(self.signer_utxo_version);
+        let descriptor = format!("raw({})", script_pubkey.to_hex_string());
+        let signer_utxo = rpc
+            .scan_tx_out_set_blocking(&[ScanTxOutRequest::Single(descriptor)])
+            .unwrap()
+            .unspents
+            .pop()
+            .unwrap();
 
         let outpoint = OutPoint::new(signer_utxo.txid, signer_utxo.vout);
         let txids = self.client.get_tx_spending_prevout(&outpoint).unwrap();
@@ -930,20 +1104,19 @@ impl TestSweepSetup2 {
                 .collect(),
             withdrawals,
             signer_state: SignerBtcState {
-                output_key_set: SignerUtxoKeySet::V1(
-                    aggregated_signer.keypair.x_only_public_key().0,
-                ),
+                output_key_set: self.signers.utxo_key_set(self.signer_output_version),
                 utxo: SignerUtxo {
                     outpoint: OutPoint::new(signer_utxo.txid, signer_utxo.vout),
                     amount: signer_utxo.amount.to_sat(),
-                    key_set: SignerUtxoKeySet::V1(aggregated_signer.keypair.x_only_public_key().0),
+                    key_set: self.signers.utxo_key_set(self.signer_utxo_version),
                 },
                 fee_rate: 10.0,
                 last_fees,
                 magic_bytes: *b"T3",
             },
-            accept_threshold: 4,
-            num_signers: 7,
+            // These match what the coordinator uses for the signer set.
+            accept_threshold: self.signatures_required,
+            num_signers: u16::try_from(self.signers.keys.len()).unwrap(),
             sbtc_limits: SbtcLimits::unlimited(),
             max_deposits_per_bitcoin_tx: DEFAULT_MAX_DEPOSITS_PER_BITCOIN_TX,
         };
@@ -956,7 +1129,11 @@ impl TestSweepSetup2 {
             let mut unsigned = transactions.pop().unwrap();
             // Add the signature and/or other required information to the
             // witness data.
-            signer::testing::set_witness_data(&mut unsigned, aggregated_signer.keypair);
+            signer::testing::set_witness_data_for_key_sets(
+                &mut unsigned,
+                &self.signers.signer.keypair,
+                &self.signers.v2_signing_keypairs(),
+            );
             rpc.send_raw_transaction(&unsigned.tx).unwrap();
             // Return the txid and the sweep transaction.
             unsigned.tx.compute_txid()
@@ -1026,7 +1203,7 @@ impl TestSweepSetup2 {
             chain_tip: sweep.block_hash.into(),
             prevout_txid: self.donation.txid.into(),
             prevout_output_index: self.donation.vout,
-            key_set_id: PublicKeyXOnly::from(self.signers.aggregate_key()).into(),
+            key_set_id: self.signers.utxo_key_set(self.signer_utxo_version).id(),
             will_sign: true,
             is_valid_tx: true,
             validation_result: signer::bitcoin::validation::InputValidationResult::Ok,
@@ -1086,6 +1263,11 @@ impl TestSweepSetup2 {
     pub async fn store_sweep_tx(&self, db: &PgStore) {
         let sweep = self.sweep_tx_info.as_ref().expect("no sweep tx info set");
 
+        let versions = [self.signer_utxo_version, self.signer_output_version];
+        if versions.contains(&KeySetVersion::V2) {
+            self.store_v2_key_set(db).await;
+        }
+
         let bitcoin_tx_ref = BitcoinTxRef {
             txid: sweep.tx_info.compute_txid().into(),
             block_hash: sweep.block_hash,
@@ -1099,9 +1281,7 @@ impl TestSweepSetup2 {
         db.write_bitcoin_block(&block).await.unwrap();
         db.write_bitcoin_transaction(&bitcoin_tx_ref).await.unwrap();
 
-        let mut signer_script_pubkeys = HashSet::new();
-        let signers_public_key = self.signers.aggregate_key().signers_script_pubkey();
-        signer_script_pubkeys.insert(signers_public_key);
+        let signer_script_pubkeys = self.signers_script_pubkeys();
 
         for prevout in sweep.tx_info.to_inputs(&signer_script_pubkeys) {
             db.write_tx_prevout(&prevout).await.unwrap();
@@ -1114,6 +1294,16 @@ impl TestSweepSetup2 {
 
     /// Store the deposit request in the database.
     pub async fn store_deposit_request(&self, db: &PgStore) {
+        let has_v2_deposits = self.deposits.iter().any(|(_, request, _)| {
+            matches!(
+                request.signers_public_key,
+                utxo::DepositSigningKey::V2 { .. }
+            )
+        });
+        if has_v2_deposits {
+            self.store_v2_key_set(db).await;
+        }
+
         for (info, _, tx_info) in self.deposits.iter() {
             let deposit = Deposit {
                 tx_info: tx_info.clone(),
@@ -1245,6 +1435,14 @@ impl TestSweepSetup2 {
             started_at_bitcoin_block_height: 0u64.into(),
         };
         db.write_encrypted_dkg_shares(&shares).await.unwrap();
+    }
+
+    /// Store the signer set's v2 key set in the database. This is the v2
+    /// counterpart of [`Self::store_dkg_shares`], but the store functions
+    /// that write v2 data call it, so tests don't need to.
+    async fn store_v2_key_set(&self, db: &PgStore) {
+        let key_set = model::SignerKeySet::from(self.signers.v2_key_set());
+        db.write_signer_key_set(&key_set).await.unwrap();
     }
 
     /// Store a rotate keys transaction in the database. The details will

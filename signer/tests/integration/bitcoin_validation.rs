@@ -28,6 +28,7 @@ use signer::testing::get_rng;
 
 use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup2;
 use crate::setup::backfill_bitcoin_blocks;
@@ -119,7 +120,7 @@ async fn one_tx_per_request_set() {
     let amounts = [SweepAmounts {
         amount: 1_000_000,
         max_fee: 500_000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     }];
 
     let mut setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &amounts);
@@ -228,12 +229,12 @@ async fn one_invalid_deposit_invalidates_tx() {
         SweepAmounts {
             amount: 1_000_000,
             max_fee: low_fee,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
         SweepAmounts {
             amount: 1_000_000,
             max_fee: 500_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
     ];
 
@@ -338,46 +339,46 @@ async fn one_invalid_deposit_invalidates_tx() {
     SweepAmounts {
         amount: 700_000,
         max_fee: 500_000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     },
     SweepAmounts {
         amount: 1_000_000,
         max_fee: 500_000,
-        is_deposit: false,
+        kind: SweepRequestKind::Withdrawal,
     },
 ]; "one-withdrawal-one-deposit")]
 #[test_case(vec![
     SweepAmounts {
         amount: 123_456,
         max_fee: 50_000,
-        is_deposit: false,
+        kind: SweepRequestKind::Withdrawal,
     },
     SweepAmounts {
         amount: 1_000_000,
         max_fee: 500_000,
-        is_deposit: false,
+        kind: SweepRequestKind::Withdrawal,
     },
     SweepAmounts {
         amount: 456_789,
         max_fee: 900_000,
-        is_deposit: false,
+        kind: SweepRequestKind::Withdrawal,
     },
 ]; "three-withdrawals")]
 #[test_case(vec![
     SweepAmounts {
         amount: 123_456,
         max_fee: 50_000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     },
     SweepAmounts {
         amount: 1_000_000,
         max_fee: 500_000,
-        is_deposit: false,
+        kind: SweepRequestKind::Withdrawal,
     },
     SweepAmounts {
         amount: 456_789,
         max_fee: 900_000,
-        is_deposit: false,
+        kind: SweepRequestKind::Withdrawal,
     },
 ]; "two-withdrawals-one-deposit")]
 #[tokio::test]
@@ -475,7 +476,10 @@ async fn withdrawals_and_deposits_can_pass_validation(amounts: Vec<SweepAmounts>
     assert_eq!(validation_data.len(), 1);
 
     let output_rows = validation_data[0].to_withdrawal_rows();
-    let num_withdrawals = amounts.iter().filter(|am| !am.is_deposit).count();
+    let num_withdrawals = amounts
+        .iter()
+        .filter(|am| am.kind == SweepRequestKind::Withdrawal)
+        .count();
     assert_eq!(output_rows.len(), num_withdrawals);
     let iter = output_rows.iter().zip(setup.withdrawals.iter()).enumerate();
 
@@ -514,7 +518,7 @@ async fn swept_withdrawals_fail_validation() {
     let amounts = [SweepAmounts {
         amount: 700_000,
         max_fee: 500_000,
-        is_deposit: false,
+        kind: SweepRequestKind::Withdrawal,
     }];
 
     // When making assertions below, we need to make sure that we're
@@ -641,12 +645,12 @@ async fn cannot_sign_deposit_is_ok() {
         SweepAmounts {
             amount: 700_000,
             max_fee: 500_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
         SweepAmounts {
             amount: 1_000_000,
             max_fee: 500_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
     ];
 
@@ -819,12 +823,12 @@ async fn sighashes_match_from_sbtc_requests_object() {
         SweepAmounts {
             amount: 700_000,
             max_fee: 500_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
         SweepAmounts {
             amount: 1_000_000,
             max_fee: 500_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
     ];
 
@@ -965,22 +969,22 @@ async fn outcome_is_independent_of_input_order() {
         SweepAmounts {
             amount: 1_500_000,
             max_fee: 500_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
         SweepAmounts {
             amount: 700_000,
             max_fee: 500_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
         SweepAmounts {
             amount: 1_000_000,
             max_fee: 500_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
         SweepAmounts {
             amount: 2_000_000,
             max_fee: 500_000,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         },
     ];
 
