@@ -739,8 +739,7 @@ where
             StacksTx::SmartContract(smart_contract) => {
                 smart_contract.validate(ctx, &req_ctx).await?
             }
-            // Not signable until STX transfer validation exists.
-            StacksTx::StxTransfer(_) => return Err(Error::InvalidSigningOperation),
+            StacksTx::StxTransfer(transfer) => transfer.validate(ctx, request.tx_fee).await?,
         };
 
         tracing::info!("stacks validation finished successfully");
