@@ -284,12 +284,18 @@ impl StxTransferV1 {
             return Err(error(StxTransferErrorMsg::NotInOriginSignerSet));
         }
 
-        let rotations = ctx.get_storage().get_key_rotation_events().await?;
-        let is_known_signer_set = rotations.iter().any(|rotation| {
-            rotation.signatures_required == self.origin_signatures_required
-                && rotation.signer_set.iter().copied().collect::<BTreeSet<_>>()
-                    == self.origin_signer_set
+        let in_config = config.stx_recovery_accounts.iter().any(|account| {
+            account.signatures_required == self.origin_signatures_required
+                && account.public_keys == self.origin_signer_set
         });
+        let is_known_signer_set = in_config || {
+            let rotations = ctx.get_storage().get_key_rotation_events().await?;
+            rotations.iter().any(|rotation| {
+                rotation.signatures_required == self.origin_signatures_required
+                    && rotation.signer_set.iter().copied().collect::<BTreeSet<_>>()
+                        == self.origin_signer_set
+            })
+        };
         if !is_known_signer_set {
             return Err(error(StxTransferErrorMsg::UnknownOriginSignerSet));
         }
@@ -2099,13 +2105,38 @@ mod tests {
 
     /// A transfer of 1,000 microSTX that this signer may sign, and the
     /// context for it.
-    async fn stx_transfer_setup(balance: u128, locked: u128) -> (impl Context, StxTransferV1) {
+    async fn stx_transfer_setup(
+        balance: u128,
+        locked: u128,
+        origin_in_config: bool,
+    ) -> (impl Context, StxTransferV1) {
         let mut rng = get_rng();
-        let ctx = TestContext::builder()
+        let defaults = TestContext::builder()
             .with_in_memory_storage()
             .with_mocked_clients()
             .build();
-        let network = ctx.config().signer.network;
+        let network = defaults.config().signer.network;
+
+        let mut origin_signer_set = random_keys(2);
+        origin_signer_set.insert(defaults.config().signer.public_key());
+        let account = crate::config::StxRecoveryAccount {
+            address: SignerWallet::new(&origin_signer_set, 2, network, 0)
+                .unwrap()
+                .address()
+                .clone(),
+            public_keys: origin_signer_set.clone(),
+            signatures_required: 2,
+        };
+
+        let ctx = TestContext::builder()
+            .with_in_memory_storage()
+            .with_mocked_clients()
+            .modify_settings(|settings| {
+                if origin_in_config {
+                    settings.signer.stx_recovery_accounts.push(account);
+                }
+            })
+            .build();
 
         ctx.state().update_registry_signer_set_info(SignerSetInfo {
             aggregate_key: fake::Faker.fake_with_rng(&mut rng),
@@ -2114,17 +2145,17 @@ mod tests {
         });
         let recipient = SignerWallet::load(&ctx).await.unwrap().address().clone();
 
-        let mut origin_signer_set = random_keys(2);
-        origin_signer_set.insert(ctx.config().signer.public_key());
-        let rotation = crate::storage::model::KeyRotationEvent {
-            signer_set: origin_signer_set.iter().copied().collect(),
-            signatures_required: 2,
-            ..fake::Faker.fake_with_rng(&mut rng)
-        };
-        ctx.get_storage_mut()
-            .write_rotate_keys_transaction(&rotation)
-            .await
-            .unwrap();
+        if !origin_in_config {
+            let rotation = crate::storage::model::KeyRotationEvent {
+                signer_set: origin_signer_set.iter().copied().collect(),
+                signatures_required: 2,
+                ..fake::Faker.fake_with_rng(&mut rng)
+            };
+            ctx.get_storage_mut()
+                .write_rotate_keys_transaction(&rotation)
+                .await
+                .unwrap();
+        }
 
         ctx.with_stacks_client(|client| {
             client.expect_get_account().returning(move |_| {
@@ -2171,7 +2202,7 @@ mod tests {
         locked: u128,
         expected: Option<StxTransferErrorMsg>,
     ) {
-        let (ctx, mut transfer) = stx_transfer_setup(balance, locked).await;
+        let (ctx, mut transfer) = stx_transfer_setup(balance, locked, false).await;
         mutate(&mut transfer, ctx.config().signer.network);
 
         let result = transfer.validate(&ctx, 100).await;
@@ -2182,5 +2213,11 @@ mod tests {
                 error => panic!("unexpected error: {error}"),
             },
         }
+    }
+
+    #[tokio::test]
+    async fn stx_transfer_validation_accepts_a_configured_origin() {
+        let (ctx, transfer) = stx_transfer_setup(1_100, 0, true).await;
+        transfer.validate(&ctx, 100).await.unwrap();
     }
 }

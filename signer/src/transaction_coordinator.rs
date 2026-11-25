@@ -1296,10 +1296,22 @@ where
             }
         }
 
+        let config = &self.context.config().signer;
+        let configured = config
+            .stx_recovery_accounts
+            .iter()
+            .map(|account| (account.public_keys.clone(), account.signatures_required));
         let rotations = self.context.get_storage().get_key_rotation_events().await?;
+        let stored = rotations.into_iter().map(|rotation| {
+            (
+                rotation.signer_set.into_iter().collect(),
+                rotation.signatures_required,
+            )
+        });
+
         let state = self.context.state();
         let candidates = stx_recovery_candidates(
-            rotations,
+            configured.chain(stored),
             wallet.address(),
             self.context.config().signer.network,
             |key| state.current_signer_set().is_signer(key),
@@ -2784,19 +2796,19 @@ fn stx_recovery_amount(account: &AccountInfo) -> Option<u64> {
 /// One zero-amount transfer per old signer principal whose threshold of
 /// keys is reachable.
 fn stx_recovery_candidates(
-    rotations: Vec<model::KeyRotationEvent>,
+    signer_sets: impl IntoIterator<Item = (BTreeSet<PublicKey>, u16)>,
     recipient: &StacksAddress,
     network: NetworkKind,
     is_reachable: impl Fn(&PublicKey) -> bool,
 ) -> Vec<StxTransferV1> {
     let mut seen = HashSet::new();
-    rotations
+    signer_sets
         .into_iter()
-        .filter_map(|rotation| {
+        .filter_map(|(signer_set, signatures_required)| {
             let mut transfer = StxTransferV1 {
                 origin: recipient.clone(),
-                origin_signer_set: rotation.signer_set.into_iter().collect(),
-                origin_signatures_required: rotation.signatures_required,
+                origin_signer_set: signer_set,
+                origin_signatures_required: signatures_required,
                 recipient: recipient.clone(),
                 amount: 0,
             };
@@ -3638,10 +3650,11 @@ mod tests {
                 .take(count)
                 .collect()
         };
-        let rotation = |signer_set: Vec<PublicKey>, signatures_required| model::KeyRotationEvent {
-            signer_set,
-            signatures_required,
-            ..Faker.fake_with_rng(&mut get_rng())
+        let signer_set = |keys: Vec<PublicKey>, signatures_required: u16| {
+            (
+                keys.into_iter().collect::<BTreeSet<_>>(),
+                signatures_required,
+            )
         };
 
         let current = keys(3);
@@ -3655,18 +3668,19 @@ mod tests {
             .copied()
             .collect();
 
-        let rotations = vec![
-            rotation(current.clone(), 2),
-            rotation(reachable_old.clone(), 2),
-            // The same principal again, as after a reorg.
-            rotation(reachable_old.clone(), 2),
-            rotation(unreachable_old.clone(), 2),
+        let signer_sets = vec![
+            signer_set(current.clone(), 2),
+            signer_set(reachable_old.clone(), 2),
+            // The same principal again, e.g. from config and a rotation.
+            signer_set(reachable_old.clone(), 2),
+            signer_set(unreachable_old.clone(), 2),
             // Not a valid multi-sig wallet.
-            rotation(keys(2), 3),
+            signer_set(keys(2), 3),
         ];
-        let candidates = stx_recovery_candidates(rotations, recipient.address(), network, |key| {
-            reachable.contains(key)
-        });
+        let candidates =
+            stx_recovery_candidates(signer_sets, recipient.address(), network, |key| {
+                reachable.contains(key)
+            });
 
         let origin = SignerWallet::new(&reachable_old, 2, network, 0).unwrap();
         let expected = StxTransferV1 {

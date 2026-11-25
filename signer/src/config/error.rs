@@ -22,6 +22,11 @@ pub enum SignerConfigError {
     #[error("The network set in the config must match the network kind of the deployer address")]
     NetworkDeployerMismatch,
 
+    /// An STX recovery account's address does not match its keys and
+    /// threshold.
+    #[error("STX recovery account {0} does not match its public keys and threshold")]
+    StxRecoveryAddressMismatch(String),
+
     /// Invalid P2P URI
     #[error("Invalid P2P URI: Only schemes 'tcp' and 'quic-v1' are supported; got '{0}'")]
     InvalidP2PScheme(String),
