@@ -145,16 +145,11 @@ pub fn set_witness_data(unsigned: &mut UnsignedTransaction, keypair: secp256k1::
         });
 }
 
-/// Sign every input of the given transaction the way the signers do, and
-/// set the witness data.
+/// Sign every input of the given transaction and set its witness data.
 ///
-/// The v1 signers' input and v1 deposits are signed by `v1_keypair`,
-/// which stands in for the WSTS aggregate key, just like in
-/// [`set_witness_data`]. Each v2 input is signed by the last
-/// threshold-many keys of its key set that have a keypair in
-/// `v2_keypairs`, so the witness has empty elements for the leading keys.
-/// The v2 witnesses are constructed by a [`SignatureCollector`], which
-/// also verifies each signature.
+/// v1 inputs are signed by `v1_keypair`, as in [`set_witness_data`]. v2
+/// inputs are signed through a [`SignatureCollector`] by the last
+/// threshold-many keys of their key set that are in `v2_keypairs`.
 ///
 /// # Notes
 ///

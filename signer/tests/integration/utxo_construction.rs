@@ -168,9 +168,9 @@ where
     (deposit_tx, req, dep)
 }
 
-/// Construct a signed deposit transaction locked by a v2 signer key set,
-/// along with the deposit request that the signers use to sweep it, with
-/// a burn address on stacks as the recipient.
+/// Construct a signed deposit transaction locked by the given v2 key set,
+/// and the deposit request for sweeping it. The recipient is the Stacks
+/// burn address.
 pub fn make_v2_deposit_request<U>(
     depositor: &Recipient,
     amount: u64,
@@ -222,8 +222,8 @@ where
     };
     regtest::p2tr_sign_transaction(&mut deposit_tx, 0, &[utxo], &depositor.keypair);
 
-    // The v2 deposit script commits to a hash of the recipient and max
-    // fee, so we need to supply them in order to validate the deposit.
+    // A v2 deposit script commits to the recipient and max fee, so
+    // validation needs them.
     let create_req = CreateDepositRequest {
         outpoint: OutPoint::new(deposit_tx.compute_txid(), 0),
         deposit_script,

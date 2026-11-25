@@ -21,7 +21,9 @@ use fake::Fake as _;
 use signer::DEPOSIT_DUST_LIMIT;
 
 use crate::setup::SweepAmounts;
-use crate::setup::SweepKeySetVersions;
+
+use crate::setup::SignerUtxoVersions;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
@@ -211,13 +213,11 @@ async fn complete_deposit_validation_happy_path() {
 }
 
 /// Check that the `CompleteDepositV1::validate` function accepts a
-/// complete-deposit contract call for a v2 deposit swept by the signers'
-/// v2 key set.
+/// complete-deposit contract call for a v2 deposit.
 ///
-/// This is the same as `complete_deposit_validation_happy_path`, except
-/// that the signers' UTXO, the deposit, and the sweep's new signers' UTXO
-/// are all locked by an 11-of-15 v2 key set, and the sweep is signed with
-/// the signers' signing keys. There is no DKG or WSTS involved.
+/// This is `complete_deposit_validation_happy_path`, except that the
+/// signers' UTXOs and the deposit are locked by an 11-of-15 v2 key set,
+/// so there is no DKG or WSTS involved.
 #[tokio::test]
 async fn complete_deposit_validation_v2_happy_path() {
     // Normal: this generates the blockchain as well as deposit request
@@ -226,18 +226,17 @@ async fn complete_deposit_validation_v2_happy_path() {
     let mut rng = get_rng();
     let (rpc, faucet) = regtest::initialize_blockchain();
 
-    // Different: the signers have an 11-of-15 v2 key set, which matches
-    // the signer set on mainnet, and everything is locked by it.
+    // Different: everything is locked by an 11-of-15 v2 key set, like
+    // the signer set on mainnet.
     let signers = TestSignerSet::new_with_threshold(&mut rng, 15, 11);
     let amounts = SweepAmounts {
         amount: 1_000_000,
         max_fee: 500_000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV2,
     };
-    let versions = SweepKeySetVersions {
+    let versions = SignerUtxoVersions {
         signer_utxo: KeySetVersion::V2,
         signer_output: KeySetVersion::V2,
-        deposits: vec![KeySetVersion::V2],
     };
     let mut setup = TestSweepSetup2::new_setup_with_key_sets(
         signers,
@@ -261,8 +260,7 @@ async fn complete_deposit_validation_v2_happy_path() {
 
     // Normal: we submit the transaction sweeping the funds. It gets
     // confirmed; this generates a new bitcoin block behind the scene.
-    // Bitcoin core only accepts the sweep if every input is validly
-    // signed, so this also checks the v2 witnesses.
+    // Bitcoin Core only accepts the sweep if the v2 witnesses are valid.
     setup.submit_sweep_tx(faucet);
     backfill_bitcoin_blocks(&db, rpc, &setup.sweep_block_hash().unwrap()).await;
     setup.store_sweep_tx(&db).await;
@@ -278,8 +276,7 @@ async fn complete_deposit_validation_v2_happy_path() {
     setup.store_deposit_request(&db).await;
     setup.store_deposit_decisions(&db).await;
 
-    // Let's make sure that the sweep is what we think it is: it spends a
-    // v2 signers' UTXO and a v2 deposit, and creates a v2 signers' UTXO.
+    // Make sure everything in the sweep is locked by the v2 key set.
     let key_set = setup.signers.v2_key_set();
     let (deposit_info, _, _) = &setup.deposits[0];
     let deposit_key_set = match &deposit_info.signing_info {
@@ -641,7 +638,7 @@ async fn complete_deposit_validation_fee_too_low() {
     let amounts = SweepAmounts {
         amount: 50000,
         max_fee: 80_000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     };
     let mut setup = TestSweepSetup2::new_setup(
         signers,

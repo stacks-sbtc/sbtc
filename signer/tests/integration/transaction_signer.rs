@@ -68,6 +68,7 @@ use wsts::net::NonceRequest;
 
 use crate::containers::BitcoinContainerExt as _;
 use crate::setup::SweepAmounts;
+use crate::setup::SweepRequestKind;
 use crate::setup::TestSignerSet;
 use crate::setup::TestSweepSetup;
 use crate::setup::TestSweepSetup2;
@@ -619,7 +620,7 @@ async fn presign_requests_with_dkg_shares_status(status: DkgSharesStatus, is_ok:
     let amounts = SweepAmounts {
         amount: 100000,
         max_fee: 10000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     };
     let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[amounts]);
 
@@ -724,7 +725,7 @@ pub async fn presign_request_ignore_request_if_already_processed_this_block() {
     let amounts = SweepAmounts {
         amount: 100000,
         max_fee: 10000,
-        is_deposit: true,
+        kind: SweepRequestKind::DepositV1,
     };
     let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &[amounts]);
 
@@ -936,7 +937,7 @@ async fn presign_rows_only_written_for_valid_transactions(request_counts: Vec<Tx
         .map(|max_fee| SweepAmounts {
             amount: 100_000,
             max_fee,
-            is_deposit: true,
+            kind: SweepRequestKind::DepositV1,
         });
     let withdrawals = request_counts
         .iter()
@@ -948,7 +949,7 @@ async fn presign_rows_only_written_for_valid_transactions(request_counts: Vec<Tx
         .map(|max_fee| SweepAmounts {
             amount: 30_000,
             max_fee,
-            is_deposit: false,
+            kind: SweepRequestKind::Withdrawal,
         });
     let sweep_amounts: Vec<SweepAmounts> = deposits.chain(withdrawals).collect();
     let setup = TestSweepSetup2::new_setup(signers, bitcoin.get_client(), faucet, &sweep_amounts);
